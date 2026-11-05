@@ -434,9 +434,10 @@ export function Terminal() {
 
       <div className="term__body" ref={bodyRef}>
         <div className="term__boot">
-          <span>APEX KERNEL v1.1.0 / BUILD 2026.11.05</span>
+          <span>APEX KERNEL v1.2.0 / BUILD 2026.11.05</span>
           <span>LOCAL-FIRST INFERENCE ENGINE</span>
           <span>NO KEY · NO METER · NO MIDDLEMAN</span>
+          <span>AGENT MODE · TIERS · ROLLBACK</span>
         </div>
 
         {entries.map((entry) => (

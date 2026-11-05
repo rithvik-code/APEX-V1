@@ -134,12 +134,13 @@ function usage() {
   console.log(`  ${dim("--help, --version")}`);
   console.log("");
   console.log(`${bold("REPL COMMANDS")}`);
-  console.log(`  ${acid("/help")} ${dim("/model")} ${dim("/prompt")} ${dim("/temp")} ${dim("/models")} ${dim("/config")} ${dim("/clear")} ${dim("/demo")} ${dim("/live")} ${dim("/quit")}`);
+  console.log(`  ${acid("/help")} ${dim("/model")} ${dim("/prompt")} ${dim("/temp")} ${dim("/tier")} ${dim("/models")} ${dim("/config")} ${dim("/clear")} ${dim("/demo")} ${dim("/live")} ${dim("/quit")}`);
   console.log(`  ${acid("/do <task>")}      switch to agent mode for one task`);
   console.log("");
   console.log(`${faint("Free forever: inference runs on your hardware via Ollama.")}`);
   console.log(`${faint("No filters are added by APEX. Your system prompt is passed through as written.")}`);
   console.log(`${faint("Agent mode asks before every write and command unless you pass --yes.")}`);
+  console.log(`${faint("Every write is snapshotted first — apex undo puts it back.")}`);
   console.log("");
 }
 

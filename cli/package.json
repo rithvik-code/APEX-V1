@@ -1,7 +1,7 @@
 {
   "name": "apex-cli",
-  "version": "1.1.0",
-  "description": "APEX — terminal-native AI with an agent mode. Local, unmetered, direct.",
+  "version": "1.2.0",
+  "description": "APEX — terminal-native AI with an agent mode. Local, unmetered, direct, undoable.",
   "type": "module",
   "bin": {
     "apex": "apex.mjs"
