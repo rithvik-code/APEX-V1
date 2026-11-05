@@ -613,7 +613,7 @@ function undoSession(id, { dryRun = false } = {}) {
   return { id, done, root: manifest.root };
 }
 
-function cmdUndo(args) {
+async function cmdUndo(args) {
   const sessions = listSessions();
   if (!sessions.length) {
     console.log(dim("  no rollback points yet — agent mode has not written anything."));
@@ -1483,6 +1483,8 @@ async function readStdin() {
 async function main() {
   let argv = process.argv.slice(2);
   state.autoApprove = process.env.APEX_YES === "1";
+  // Subcommands return before the flag loop below, so honour --yes for them here.
+  if (argv.includes("--yes") || argv.includes("-y")) state.autoApprove = true;
 
   if (argv.includes("--help") || argv.includes("-h")) {
     usage();
