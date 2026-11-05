@@ -1,0 +1,15 @@
+{
+  "name": "apex-cli",
+  "version": "1.1.0",
+  "description": "APEX — terminal-native AI with an agent mode. Local, unmetered, direct.",
+  "type": "module",
+  "bin": {
+    "apex": "apex.mjs"
+  },
+  "files": ["apex.mjs", "README.md"],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": ["cli", "ai", "ollama", "terminal", "local"],
+  "license": "MIT"
+}
