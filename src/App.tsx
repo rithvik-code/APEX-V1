@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApexEngine } from "./three/Engine";
 import { Terminal } from "./components/Terminal";
 import { CoreLab, type CoreVariant } from "./components/CoreLab";
+import { GridDeck } from "./components/GridDeck";
+import { Takeover } from "./components/Takeover";
 import { Preloader } from "./components/Preloader";
 import { Cursor } from "./components/Cursor";
 import { sound } from "./lib/sound";
@@ -25,45 +27,6 @@ const ANCHORS = [
   { id: "bike-mass", index: "B-02", label: "DRY MASS", value: "186 KG" },
   { id: "bike-aero", index: "B-03", label: "AERO SHELL", value: "0.21 CD" },
   { id: "bike-dohc", index: "B-04", label: "DOHC / 16V", value: "IN-LINE FOUR" },
-];
-
-const TILES = [
-  {
-    n: "01",
-    glyph: "⌁",
-    title: "CODE SYNTHESIS",
-    desc: "Whole files, tests, refactors. Ask for the complete thing, not a snippet.",
-  },
-  {
-    n: "02",
-    glyph: "◈",
-    title: "SYSTEM DESIGN",
-    desc: "Architecture, schemas, trade-offs, failure modes. Think in structures.",
-  },
-  {
-    n: "03",
-    glyph: "≡",
-    title: "DEEP CONTEXT",
-    desc: "Long reads across specs, logs and repositories without a token invoice.",
-  },
-  {
-    n: "04",
-    glyph: "◐",
-    title: "PROMPT CONTROL",
-    desc: "Edit the system prompt directly. APEX passes your words through untouched.",
-  },
-  {
-    n: "05",
-    glyph: "⨯",
-    title: "AIR-GAPPED",
-    desc: "Cut the network. The engine still runs. No telemetry, no callbacks, no account.",
-  },
-  {
-    n: "06",
-    glyph: "∞",
-    title: "MACHINE CONTROL",
-    desc: "Hand it a whole task. It reads, writes and runs commands, with every action shown before it lands.",
-  },
 ];
 
 const BLUEPRINT = [
