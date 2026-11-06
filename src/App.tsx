@@ -90,9 +90,17 @@ export default function App() {
   const [audioOn, setAudioOn] = useState(false);
   const [blueprintOpen, setBlueprintOpen] = useState(false);
   const [coreView, setCoreView] = useState<CoreVariant | null>(null);
+  const [takeover, setTakeover] = useState(false);
   const { copied, copy } = useCopy();
 
   const activeChapter = CHAPTERS.find((c) => c.id === active) ?? CHAPTERS[0];
+
+  const openTakeover = useCallback(() => {
+    sound.tick("start");
+    setTakeover(true);
+  }, []);
+
+  const closeTakeover = useCallback(() => setTakeover(false), []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -107,8 +115,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    engineRef.current?.setPaused(coreView !== null);
-  }, [coreView]);
+    engineRef.current?.setPaused(coreView !== null || takeover);
+  }, [coreView, takeover]);
 
   useEffect(() => {
     document.body.classList.toggle("locked", booting);
@@ -178,7 +186,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (coreView) return;
+      if (coreView || takeover) return;
       const tag = (event.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       const index = Number(event.key);
@@ -188,7 +196,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [coreView]);
+  }, [coreView, takeover]);
 
   const finishBoot = () => {
     setBooting(false);
@@ -585,26 +593,7 @@ export default function App() {
             </p>
           </div>
 
-          <div className="grid-list">
-            {TILES.map((tile, index) => (
-              <article
-                className="grid-item"
-                key={tile.n}
-                data-reveal
-                style={{ transitionDelay: `${index * 40}ms` }}
-              >
-                <span className="grid-item__idx">/{tile.n}</span>
-                <span className="grid-item__glyph" aria-hidden="true">
-                  {tile.glyph}
-                </span>
-                <h3>{tile.title}</h3>
-                <p>{tile.desc}</p>
-                <span className="grid-item__foot">
-                  SYS / READY <i />
-                </span>
-              </article>
-            ))}
-          </div>
+          <GridDeck onTakeControl={openTakeover} />
         </section>
 
         <section className="section vast" id="vast">
@@ -811,6 +800,8 @@ export default function App() {
           onClose={() => setCoreView(null)}
         />
       )}
+
+      {takeover && <Takeover onRelease={closeTakeover} />}
     </div>
   );
 }
