@@ -119,6 +119,7 @@ type Props = {
 export function GridDeck({ onTakeControl }: Props) {
   const [selected, setSelected] = useState<number | null>(null);
   const tiles = useRef<Array<HTMLButtonElement | null>>([]);
+  const list = useRef<HTMLDivElement | null>(null);
   const panel = useRef<HTMLDivElement | null>(null);
   const closeBtn = useRef<HTMLButtonElement | null>(null);
   const origin = useRef<DOMRect | null>(null);
@@ -164,6 +165,19 @@ export function GridDeck({ onTakeControl }: Props) {
     if (tile) origin.current = tile.getBoundingClientRect();
     setSelected(index);
     sound.tick("click");
+
+    const grid = list.current;
+    if (grid) {
+      const rect = grid.getBoundingClientRect();
+      if (rect.height <= window.innerHeight * 0.85) {
+        grid.scrollIntoView({ behavior: "smooth", block: "center" });
+      } else {
+        window.scrollTo({
+          top: window.scrollY + rect.top - 74,
+          behavior: "smooth",
+        });
+      }
+    }
   };
 
   useLayoutEffect(() => {
@@ -227,7 +241,7 @@ export function GridDeck({ onTakeControl }: Props) {
         </button>
       </div>
 
-      <div className="grid-list">
+      <div className="grid-list" ref={list}>
         {LANES.map((item, index) => (
           <button
             key={item.n}

@@ -3951,6 +3951,7 @@ body.core-open {
 }
 
 .takeover__state {
+  justify-self: start;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -4555,6 +4556,12 @@ body.core-open {
     grid-row: 1;
   }
 
+  .lane__status {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
   .lane__grid {
     grid-template-columns: 1fr;
     align-content: start;

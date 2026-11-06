@@ -100,6 +100,7 @@ export function Takeover({ onRelease }: Props) {
   const [elapsed, setElapsed] = useState(0);
   const [typed, setTyped] = useState("");
   const releaseRef = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
   const session = useMemo(
     () => `APX-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
     [],
@@ -108,18 +109,24 @@ export function Takeover({ onRelease }: Props) {
   const current = STEPS[Math.min(step, STEPS.length - 1)];
 
   useEffect(() => {
+    returnFocus.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     document.body.classList.add("locked");
     releaseRef.current?.focus({ preventScroll: true });
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
         onRelease();
       }
     };
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
     return () => {
       document.body.classList.remove("locked");
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKey, true);
+      returnFocus.current?.focus({ preventScroll: true });
     };
   }, [onRelease]);
 
