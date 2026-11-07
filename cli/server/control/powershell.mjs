@@ -85,7 +85,13 @@ export async function runPowerShellJson(script, options) {
   const output = await runPowerShell(script, options);
   const line = output.split(/\r?\n/).filter(Boolean).pop();
   if (!line) throw new Error("PowerShell returned no JSON");
-  return JSON.parse(line);
+  try {
+    return JSON.parse(line);
+  } catch {
+    // Windows PowerShell 5.1 can leak raw control characters through
+    // ConvertTo-Json; strip them and retry once.
+    return JSON.parse(line.replace(/[\u0000-\u001f\u007f]/g, " "));
+  }
 }
 
 export function killAllPowerShell() {
