@@ -243,6 +243,7 @@ function handleLiveLine(line) {
   fs.readFile(file, (error, buffer) => {
     if (error) return;
     live.buffer = buffer;
+    live.lastFile = file;
     live.width = width;
     live.height = height;
     live.version += 1;
@@ -357,6 +358,7 @@ export function getLiveFrame() {
   }
   return {
     buffer: live.buffer,
+    file: live.lastFile,
     width: live.width,
     height: live.height,
     version: live.version,

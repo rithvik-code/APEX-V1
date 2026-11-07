@@ -222,6 +222,7 @@ export function readControlConfig() {
       maxSteps: 20,
       autoApprove: false,
       vision: false,
+      ocr: true,
     };
   }
   try {
@@ -234,6 +235,7 @@ export function readControlConfig() {
       maxSteps: 20,
       autoApprove: false,
       vision: false,
+      ocr: true,
     };
   }
 }

@@ -4,10 +4,21 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { listWindows } from "./control/desktop.mjs";
+import {
+  ensureLiveFeed,
+  getLiveFrame,
+  listWindows,
+  liveInfo,
+  ocrScreen,
+  releaseLive,
+  retainLive,
+  setLiveFrameHandler,
+  stopLiveFeed,
+} from "./control/desktop.mjs";
 import { listTabs } from "./control/browser.mjs";
 import { ControlSession } from "./control/session.mjs";
 import { readControlConfig, writeControlConfig } from "./control/files.mjs";
+import { checkAction } from "./control/permissions.mjs";
 import {
   DEFAULT_ENDPOINT,
   DEFAULT_PLANNER,
@@ -18,7 +29,7 @@ import { killAllPowerShell } from "./control/powershell.mjs";
 import { stopCommands } from "./control/terminal.mjs";
 import { stopBrowser } from "./control/browser.mjs";
 
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 const PORT = Number(process.env.APEX_CONTROL_PORT || 4317);
 const HOST = "127.0.0.1";
 const READ_ONLY =
@@ -28,7 +39,26 @@ const ORIGIN_OK = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i;
 let session = null;
 let shuttingDown = false;
 const clients = new Set();
+const screenSubs = new Set();
+const pulls = new Map();
 const healthCache = { at: 0, value: null };
+
+const MODEL_NAME_OK = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$/;
+
+function pushFrame() {
+  const frame = getLiveFrame();
+  if (!frame?.buffer?.length) return;
+  const head = `--apexframe\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.buffer.length}\r\n\r\n`;
+  for (const res of screenSubs) {
+    try {
+      res.write(head);
+      res.write(frame.buffer);
+      res.write("\r\n");
+    } catch {
+      screenSubs.delete(res);
+    }
+  }
+}
 
 function json(res, status, payload) {
   const body = JSON.stringify(payload);
@@ -99,6 +129,68 @@ function requireSession() {
   return session;
 }
 
+function publicPull(entry) {
+  return {
+    model: entry.model,
+    status: entry.status,
+    pct: Math.round(entry.pct * 10) / 10,
+    error: entry.error,
+    done: entry.done,
+  };
+}
+
+function startPull(model) {
+  const entry = { model, status: "starting", pct: 0, error: "", done: false };
+  pulls.set(model, entry);
+  const controller = new AbortController();
+  entry.controller = controller;
+  fetch(`${DEFAULT_ENDPOINT}/api/pull`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal: controller.signal,
+    body: JSON.stringify({ model, stream: true }),
+  })
+    .then(async (res) => {
+      if (!res.ok || !res.body) throw new Error(`Ollama returned ${res.status}`);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let update;
+          try {
+            update = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (update.error) throw new Error(update.error);
+          if (update.total && update.completed) {
+            entry.status = "pulling";
+            entry.pct = Math.min(99.9, (update.completed / update.total) * 100);
+          } else if (update.status) {
+            entry.status = String(update.status).slice(0, 60);
+          }
+        }
+      }
+      entry.done = true;
+      entry.pct = 100;
+      entry.status = entry.error ? "error" : "ready";
+      healthCache.at = 0;
+    })
+    .catch((error) => {
+      entry.done = true;
+      entry.status = "error";
+      entry.error = error?.message || "Pull failed";
+    });
+  return entry;
+}
+
 function activeLike(state) {
   return ["running", "paused", "awaiting"].includes(state?.status);
 }
@@ -137,6 +229,7 @@ async function route(req, res) {
             step: session.step,
           }
         : null,
+      live: liveInfo(),
       defaults: {
         plannerModel: config.plannerModel || DEFAULT_PLANNER,
         visionModel: config.visionModel || DEFAULT_VISION,
@@ -165,6 +258,35 @@ async function route(req, res) {
     res.write(`event: state\ndata: ${JSON.stringify(session?.publicState() ?? null)}\n\n`);
     clients.add(res);
     req.on("close", () => clients.delete(res));
+    return;
+  }
+
+  if (req.method === "GET" && routePath === "/api/control/screen/stream") {
+    res.writeHead(200, {
+      "Content-Type": "multipart/x-mixed-replace; boundary=apexframe",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    res.write("--apexframe\r\n");
+    screenSubs.add(res);
+    retainLive();
+    const frame = getLiveFrame();
+    if (frame?.buffer?.length) {
+      try {
+        res.write(
+          `Content-Type: image/jpeg\r\nContent-Length: ${frame.buffer.length}\r\n\r\n`,
+        );
+        res.write(frame.buffer);
+        res.write("\r\n");
+      } catch {
+        // The client left before the first frame.
+      }
+    }
+    req.on("close", () => {
+      screenSubs.delete(res);
+      releaseLive();
+    });
     return;
   }
 
@@ -223,6 +345,7 @@ async function route(req, res) {
       ...(body.maxSteps ? { maxSteps: Math.max(1, Math.min(60, Number(body.maxSteps))) } : {}),
       ...(typeof body.autoApprove === "boolean" ? { autoApprove: body.autoApprove } : {}),
       ...(typeof body.vision === "boolean" ? { vision: body.vision } : {}),
+      ...(typeof body.ocr === "boolean" ? { ocr: body.ocr } : {}),
     };
     if (Array.isArray(body.fileRoots)) {
       next.fileRoots = body.fileRoots
@@ -273,6 +396,7 @@ async function route(req, res) {
             : Boolean(config.autoApprove),
         vision:
           typeof body.vision === "boolean" ? body.vision : Boolean(config.vision),
+        ocr: typeof body.ocr === "boolean" ? body.ocr : config.ocr !== false,
         plannerModel: body.plannerModel || config.plannerModel || DEFAULT_PLANNER,
         visionModel: body.visionModel || config.visionModel || DEFAULT_VISION,
         endpoint: config.endpoint || DEFAULT_ENDPOINT,
@@ -336,6 +460,59 @@ async function route(req, res) {
     return;
   }
 
+  if (req.method === "POST" && routePath === "/api/control/steer") {
+    const body = await readBody(req);
+    json(res, 200, requireSession().steer(String(body.text ?? "")));
+    return;
+  }
+
+  if (req.method === "POST" && routePath === "/api/control/ocr") {
+    const active = requireSession();
+    const gate = checkAction("ocr_screen", active.permissions, { autoApprove: true });
+    if (!gate.allowed) {
+      json(res, 403, { error: gate.reason });
+      return;
+    }
+    let framePath;
+    let scale = 1;
+    const frame = getLiveFrame();
+    if (frame?.file && frame.ageMs < 3000 && active.screen?.w) {
+      framePath = frame.file;
+      scale = frame.width / active.screen.w;
+    }
+    const signal = activeLike(active.publicState()) ? active.abort.signal : undefined;
+    const result = await ocrScreen({ screen: active.screen, framePath, scale, signal });
+    active.log(
+      "ocr",
+      "MANUAL OCR",
+      `${result.lines.length} text regions · ${result.engine}`,
+      "low",
+    );
+    json(res, 200, result);
+    return;
+  }
+
+  if (req.method === "GET" && routePath === "/api/control/models/pull") {
+    json(res, 200, { pulls: [...pulls.values()].map(publicPull) });
+    return;
+  }
+
+  if (req.method === "POST" && routePath === "/api/control/models/pull") {
+    const body = await readBody(req);
+    const model = String(body.model ?? "").trim();
+    if (!MODEL_NAME_OK.test(model)) {
+      json(res, 400, { error: "Invalid model name" });
+      return;
+    }
+    const existing = pulls.get(model);
+    if (existing && !existing.done) {
+      json(res, 200, { pull: publicPull(existing) });
+      return;
+    }
+    json(res, 202, { pull: publicPull(startPull(model)) });
+    return;
+  }
+
   if (req.method === "GET" && routePath === "/api/control/tabs") {
     json(res, 200, { tabs: await requireSession().refreshBrowserTabs() });
     return;
@@ -357,6 +534,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
+  setLiveFrameHandler(pushFrame);
   console.log("");
   console.log("  APEX // TAKE CONTROL");
   console.log(`  daemon  http://${HOST}:${PORT}`);
@@ -411,6 +589,7 @@ function shutdown() {
   killAllPowerShell();
   stopCommands();
   stopBrowser();
+  stopLiveFeed();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 1500).unref();
 }

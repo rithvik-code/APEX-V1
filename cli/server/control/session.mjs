@@ -386,7 +386,7 @@ export class ControlSession {
         }
       }
       this.step += 1;
-      await sleep(this.autoApprove ? 350 : 550).catch(() => null);
+      await sleep(this.autoApprove ? 150 : 220).catch(() => null);
     }
     this.status = "stopped";
     this.error = this.error || "Step budget exhausted";
@@ -420,6 +420,35 @@ export class ControlSession {
       shot = await capture({ quality: 62, maxWidth: 1440, signal: this.abort.signal });
       this.latestShot = shot;
       this.shotVersion = Date.now();
+    }
+
+    let ocrLines = [];
+    let ocrText = "";
+    if (this.ocr && screenPermission && !this.ocrBroken) {
+      try {
+        let framePath;
+        let scale = 1;
+        const frame = getLiveFrame();
+        if (frame?.file && frame.ageMs < 3000 && this.screen?.w) {
+          framePath = frame.file;
+          scale = frame.width / this.screen.w;
+        }
+        const ocr = await ocrScreen({
+          screen: this.screen,
+          framePath,
+          scale,
+          signal: this.abort.signal,
+        });
+        ocrLines = ocr.lines;
+        ocrText = ocr.lines
+          .slice(0, 60)
+          .map((line) => `- "${line.text}" @ ${line.x},${line.y}`)
+          .join("\n");
+      } catch (error) {
+        if (error?.name === "AbortError") throw error;
+        this.ocrBroken = true;
+        this.log("ocr", "OCR UNAVAILABLE", error.message, "low");
+      }
     }
 
     if (this.permissions.browser) {
@@ -479,6 +508,11 @@ export class ControlSession {
       lines.push("Accessibility observation is not authorized. Use the screenshot and keyboard shortcuts.");
     }
     if (vision) lines.push(`VISION READ: ${vision}`);
+    if (ocrText) {
+      lines.push(
+        `OCR TEXT LAYER (untrusted; each line carries its screen coordinates):\n${ocrText}`,
+      );
+    }
     if (this.permissions.browser) {
       if (this.browserTabs.length) {
         lines.push(
@@ -505,6 +539,8 @@ export class ControlSession {
       elements: tree?.elements ?? [],
       text: lines.join("\n"),
       vision,
+      ocr: ocrLines,
+      ocrText,
       capturedAt: new Date().toISOString(),
     };
   }
@@ -577,6 +613,24 @@ export class ControlSession {
         return {
           display: `${shot.width}x${shot.height} · ${Math.round(shot.bytes / 1024)} KB`,
           forModel: `Captured ${shot.width}x${shot.height} screenshot. Use the observation for UI details.`,
+        };
+      }
+      case "ocr_screen": {
+        let framePath;
+        let scale = 1;
+        const frame = getLiveFrame();
+        if (frame?.file && frame.ageMs < 3000 && this.screen?.w) {
+          framePath = frame.file;
+          scale = frame.width / this.screen.w;
+        }
+        const ocr = await ocrScreen({ screen: this.screen, framePath, scale, signal });
+        const grounded = ocr.lines
+          .slice(0, 60)
+          .map((line) => `- "${line.text}" @ ${line.x},${line.y} ${line.w}x${line.h}`)
+          .join("\n");
+        return {
+          display: `${ocr.lines.length} text regions · ${ocr.engine}`,
+          forModel: `OCR (${ocr.engine}). Click with the coordinates below.\n${clip(grounded || "(no text found)", 4000)}`,
         };
       }
       case "list_windows": {
@@ -652,6 +706,20 @@ export class ControlSession {
       case "press_keys": {
         const result = await pressKeys(args.keys, signal);
         return { display: result.keys, forModel: `Pressed ${result.keys}.` };
+      }
+      case "clipboard_get": {
+        const result = await clipboardGet(signal);
+        return {
+          display: `${result.text.length} chars`,
+          forModel: clip(result.text || "(clipboard is empty)", 3000),
+        };
+      }
+      case "clipboard_set": {
+        const result = await clipboardSet(args.text, signal);
+        return {
+          display: `${result.chars} chars staged`,
+          forModel: `Clipboard now holds ${result.chars} characters. Press ctrl+v to paste it.`,
+        };
       }
       case "browser_tabs": {
         const tabs = await listTabs();
@@ -815,7 +883,7 @@ export class ControlSession {
     if (!gate.allowed) throw new Error(gate.reason);
     if (
       this.status === "running" &&
-      !["screenshot", "browser_tabs", "list_windows"].includes(name)
+      !["screenshot", "ocr_screen", "browser_tabs", "list_windows"].includes(name)
     ) {
       throw new Error("Pause APEX before taking manual control");
     }
@@ -906,6 +974,19 @@ export class ControlSession {
       throw new Error("Approval id does not match");
     }
     this.approval.resolve(Boolean(allow));
+    return this.publicState();
+  }
+
+  steer(text) {
+    const value = String(text || "").trim();
+    if (!value) throw new Error("Steering text is required");
+    if (value.length > 2000) throw new Error("Steering text is limited to 2000 characters");
+    if (["complete", "stopped", "error"].includes(this.status)) {
+      throw new Error("This mission has already ended");
+    }
+    this.directives.push({ text: value, at: Date.now() });
+    if (this.directives.length > 8) this.directives.shift();
+    this.log("user", "USER STEERING", value, "low");
     return this.publicState();
   }
 
