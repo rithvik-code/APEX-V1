@@ -161,6 +161,10 @@ export function Takeover({ onRelease }: Props) {
   useEffect(() => {
     const command = done ? "task complete · control held" : current.cmd;
     setTyped("");
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setTyped(command);
+      return;
+    }
     let index = 0;
     const id = window.setInterval(() => {
       index += 1;

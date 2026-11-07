@@ -730,7 +730,7 @@ a {
 
 .section-head__meta {
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 8px;
   letter-spacing: 0.16em;
   color: var(--dim);
 }
@@ -1857,14 +1857,15 @@ em {
   gap: 16px;
   border-top: 1px solid var(--line);
   padding: 7px 13px;
-  font-size: 6.5px;
+  font-size: 7.5px;
+  font-variant-numeric: tabular-nums;
   letter-spacing: 0.1em;
-  color: var(--dim);
+  color: var(--muted);
 }
 
 .term__status b {
   font-weight: 400;
-  color: var(--muted);
+  color: var(--paper-soft);
 }
 
 .term__status-right {
@@ -2115,9 +2116,10 @@ em {
 .grid-item p {
   margin: 0;
   max-width: 33ch;
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.65;
   color: var(--muted);
+  text-wrap: pretty;
 }
 
 .grid-item__foot {
@@ -2128,7 +2130,7 @@ em {
   padding-top: 9px;
   border-top: 1px solid var(--line-soft);
   font-family: var(--mono);
-  font-size: 6.5px;
+  font-size: 7.5px;
   letter-spacing: 0.13em;
   color: var(--dim);
 }
@@ -2147,7 +2149,7 @@ em {
 }
 
 .grid-item__select {
-  color: var(--dim);
+  color: var(--muted);
   transition:
     color 0.25s,
     transform 0.3s var(--ease);
@@ -2230,9 +2232,10 @@ em {
 .control-bar p {
   margin: 0;
   max-width: 64ch;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.6;
   color: var(--muted);
+  text-wrap: pretty;
 }
 
 .control-bar p b {
@@ -2506,7 +2509,7 @@ em {
 
 .lane__specs span {
   font-family: var(--mono);
-  font-size: 6.5px;
+  font-size: 7px;
   letter-spacing: 0.13em;
   color: var(--dim);
 }
@@ -2528,7 +2531,7 @@ em {
   border: 1px solid var(--line);
   background: rgba(0, 0, 0, 0.4);
   font-family: var(--mono);
-  font-size: 8.5px;
+  font-size: 9px;
 }
 
 .lane__cmd span {
@@ -2968,7 +2971,8 @@ em {
   padding-top: 14px;
   border-top: 1px solid var(--line);
   font-family: var(--mono);
-  font-size: 6.5px;
+  font-size: 7.5px;
+  font-variant-numeric: tabular-nums;
   letter-spacing: 0.1em;
   color: var(--dim);
 }
@@ -3447,6 +3451,42 @@ body.core-open {
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+.corelab--loading {
+  z-index: 260;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  animation: none;
+}
+
+.corelab--loading span {
+  padding-left: 22px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  color: var(--acid);
+}
+
+.corelab--loading span::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: -22px;
+  margin-right: 12px;
+  border: 1px solid var(--acid);
+  border-radius: 50%;
+  border-top-color: transparent;
+  vertical-align: -1px;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
@@ -4737,7 +4777,8 @@ body.core-open {
   .control-bar__scan,
   .control-bar__pulse::after,
   .lane__scan,
-  .lane__status i {
+  .lane__status i,
+  .corelab--loading span::before {
     animation: none;
   }
 

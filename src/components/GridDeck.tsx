@@ -134,6 +134,13 @@ export function GridDeck({ onTakeControl }: Props) {
       return;
     }
     closing.current = true;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) {
+      closing.current = false;
+      setSelected(null);
+      tiles.current[index]?.focus({ preventScroll: true });
+      return;
+    }
     const to = el.getBoundingClientRect();
     const anim = el.animate(
       [
@@ -169,12 +176,15 @@ export function GridDeck({ onTakeControl }: Props) {
     const grid = list.current;
     if (grid) {
       const rect = grid.getBoundingClientRect();
+      const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth";
       if (rect.height <= window.innerHeight * 0.85) {
-        grid.scrollIntoView({ behavior: "smooth", block: "center" });
+        grid.scrollIntoView({ behavior, block: "center" });
       } else {
         window.scrollTo({
           top: window.scrollY + rect.top - 74,
-          behavior: "smooth",
+          behavior,
         });
       }
     }
@@ -184,6 +194,7 @@ export function GridDeck({ onTakeControl }: Props) {
     const el = panel.current;
     const from = origin.current;
     if (selected === null || !el || !from) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const to = el.getBoundingClientRect();
     const anim = el.animate(
       [
