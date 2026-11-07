@@ -205,8 +205,18 @@ export async function ensureBrowser() {
   throw new Error("Browser started but CDP did not become available");
 }
 
-export async function listTabs() {
-  const { origin } = await ensureBrowser();
+export async function listTabs({ ensure = true } = {}) {
+  if (!ensure) {
+    const config = browserConfig();
+    const origin = config.attach
+      ? config.attach.replace(/\/+$/, "")
+      : browserOrigin || `http://127.0.0.1:${config.port}`;
+    if (!(await probe(origin))) return [];
+    browserOrigin = origin;
+  } else {
+    await ensureBrowser();
+  }
+  const origin = browserOrigin;
   const tabs = await httpJson(origin, "/json/list");
   if (!Array.isArray(tabs)) return [];
   return tabs
