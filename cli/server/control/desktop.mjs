@@ -493,6 +493,31 @@ if (-not $p.HasExited) { $p.Kill() }
   );
 }
 
+export async function focusedValue(signal) {
+  return runPowerShellJson(
+    `${PRELUDE}
+$f = [System.Windows.Automation.AutomationElement]::FocusedElement
+$value = ''
+$pattern = $null
+if ($f) {
+  try {
+    if ($f.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$pattern)) {
+      $value = $pattern.Current.Value
+    } else {
+      $pattern = $null
+      if ($f.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$pattern)) {
+        $value = $pattern.DocumentRange.GetText(4000)
+      }
+    }
+  } catch {}
+}
+$name = if ($f) { $f.Current.Name } else { '' }
+$control = if ($f) { $f.Current.ControlType.ProgrammaticName -replace 'ControlType\\.', '' } else { '' }
+@{ control = $control; name = $name; value = $value } | ConvertTo-Json -Compress`,
+    { timeoutMs: 15000, signal },
+  );
+}
+
 export function describeObservation(observation) {
   if (!observation) return "No observation.";
   const lines = [];
