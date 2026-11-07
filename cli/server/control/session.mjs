@@ -4,14 +4,18 @@ import path from "node:path";
 import {
   capture,
   click,
+  clipboardGet,
+  clipboardSet,
   describeObservation,
   drag,
   focusWindow,
   foreground,
+  getLiveFrame,
   launchApp,
   listWindows,
   moveMouse,
   observe,
+  ocrScreen,
   pressKeys,
   screenInfo,
   scroll,
@@ -93,6 +97,7 @@ export class ControlSession {
     permissions,
     autoApprove = false,
     vision = false,
+    ocr = true,
     plannerModel = DEFAULT_PLANNER,
     visionModel = DEFAULT_VISION,
     endpoint = DEFAULT_ENDPOINT,
@@ -106,6 +111,7 @@ export class ControlSession {
     this.permissions = normalizePermissions(permissions);
     this.autoApprove = Boolean(autoApprove);
     this.vision = Boolean(vision);
+    this.ocr = Boolean(ocr);
     this.plannerModel = plannerModel;
     this.visionModel = visionModel;
     this.endpoint = endpoint;
@@ -133,6 +139,8 @@ export class ControlSession {
     this.consecutiveErrors = 0;
     this.lastVisionStep = -99;
     this.lastActionName = "";
+    this.directives = [];
+    this.ocrBroken = false;
     this.fileEngine = new FileEngine({ roots: fileRoots, sessionId: this.id });
     this.fileRoots = this.fileEngine.roots;
     this.onEvent = onEvent;
@@ -206,6 +214,8 @@ export class ControlSession {
       permissions: this.permissions,
       autoApprove: this.autoApprove,
       vision: this.vision,
+      ocr: this.ocr,
+      steering: this.directives.slice(-5),
       plannerModel: this.plannerModel,
       visionModel: this.visionModel,
       currentAction: this.currentAction
@@ -283,6 +293,8 @@ export class ControlSession {
         goal: this.goal,
         observation: observation.text,
         vision: observation.vision,
+        ocrText: observation.ocrText,
+        directives: this.directives,
         history: this.history,
         permissions: this.permissions,
         fileRoots: this.fileRoots,

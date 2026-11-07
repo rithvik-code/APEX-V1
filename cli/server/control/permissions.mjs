@@ -11,6 +11,7 @@ export const CAPABILITIES = [
 
 export const ACTIONS = {
   screenshot: { capability: "screen", risk: "low" },
+  ocr_screen: { capability: "screen", risk: "low" },
   list_windows: { capability: "accessibility", risk: "low" },
   focus_window: { capability: "apps", risk: "medium" },
   launch_app: { capability: "apps", risk: "medium" },
@@ -20,6 +21,8 @@ export const ACTIONS = {
   scroll: { capability: "mouse", risk: "low" },
   type_text: { capability: "keyboard", risk: "high" },
   press_keys: { capability: "keyboard", risk: "high" },
+  clipboard_get: { capability: "keyboard", risk: "medium" },
+  clipboard_set: { capability: "keyboard", risk: "medium" },
   browser_tabs: { capability: "browser", risk: "low" },
   browser_open: { capability: "browser", risk: "medium" },
   browser_activate: { capability: "browser", risk: "low" },
@@ -40,7 +43,18 @@ export const ACTIONS = {
 
 const ACTION_DOCS = {
   screenshot: "screenshot {} — capture the screen",
+  ocr_screen: "ocr_screen {} — read all visible screen text with Windows OCR; each line carries its screen coordinates",
   list_windows: "list_windows {} — list desktop windows",
+  focus_window: "focus_window {pid} — bring an application forward",
+  launch_app: "launch_app {app, args?, cwd?} — start an application",
+  move_mouse: "move_mouse {x,y} — move the pointer",
+  click: "click {x,y,button?,count?} — click at screen coordinates",
+  drag: "drag {fromX,fromY,toX,toY} — drag with the left button",
+  scroll: "scroll {x,y,amount} — scroll at a point; negative scrolls down",
+  type_text: "type_text {text} — type into the focused control",
+  press_keys: 'press_keys {keys} — e.g. "ctrl+s", "enter", "alt+tab"',
+  clipboard_get: "clipboard_get {} — read the clipboard text",
+  clipboard_set: "clipboard_set {text} — stage text on the clipboard, then paste it with ctrl+v for fast reliable input",
   focus_window: "focus_window {pid} — bring an application forward",
   launch_app: "launch_app {app, args?, cwd?} — start an application",
   move_mouse: "move_mouse {x,y} — move the pointer",

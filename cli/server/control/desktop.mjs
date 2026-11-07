@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { psB64, runPowerShell, runPowerShellJson } from "./powershell.mjs";
 
 const NATIVE = String.raw`
@@ -201,6 +202,342 @@ $bmp.Dispose()
     }
   }
   return output;
+}
+
+/* -------------------------------------------------------------------------- */
+/* LIVE FEED — one persistent PowerShell process streaming frames to disk      */
+/* -------------------------------------------------------------------------- */
+
+const LIVE_DIR = path.join(os.tmpdir(), "apex-live");
+const LIVE_MAX_W = 1280;
+
+const live = {
+  proc: null,
+  starting: false,
+  users: 0,
+  idleTimer: null,
+  restartTimer: null,
+  files: [],
+  buffer: null,
+  width: 0,
+  height: 0,
+  version: 0,
+  updatedAt: 0,
+  times: [],
+  lastError: "",
+  onFrame: null,
+};
+
+function handleLiveLine(line) {
+  const parts = line.trim().split(/\s+/);
+  if (parts[0] === "E") {
+    live.lastError = parts.slice(1).join(" ").slice(0, 200);
+    return;
+  }
+  if (parts[0] !== "F") return;
+  const width = Number(parts[1]);
+  const height = Number(parts[2]);
+  const index = Number(parts[3]);
+  const file = live.files[index];
+  if (!file || !width || !height) return;
+  fs.readFile(file, (error, buffer) => {
+    if (error) return;
+    live.buffer = buffer;
+    live.width = width;
+    live.height = height;
+    live.version += 1;
+    live.updatedAt = Date.now();
+    live.times.push(live.updatedAt);
+    while (live.times.length > 24) live.times.shift();
+    try {
+      live.onFrame?.(getLiveFrame());
+    } catch {
+      // A broken frame consumer must not kill the feed.
+    }
+  });
+}
+
+export function ensureLiveFeed() {
+  if (live.proc || live.starting) return;
+  live.starting = true;
+  try {
+    fs.mkdirSync(LIVE_DIR, { recursive: true });
+    live.files = [path.join(LIVE_DIR, "a.jpg"), path.join(LIVE_DIR, "b.jpg")];
+    const script = `$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$out0 = ${decode(live.files[0].replace(/\\/g, "/"))}
+$out1 = ${decode(live.files[1].replace(/\\/g, "/"))}
+$codec = [Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
+$maxW = ${LIVE_MAX_W}
+$flip = 0
+while ($true) {
+  try {
+    $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $bmp = New-Object Drawing.Bitmap($bounds.Width, $bounds.Height)
+    $gfx = [Drawing.Graphics]::FromImage($bmp)
+    $gfx.CopyFromScreen($bounds.X, $bounds.Y, 0, 0, $bmp.Size)
+    $gfx.Dispose()
+    if ($bmp.Width -gt $maxW) {
+      $scale = $maxW / $bmp.Width
+      $nw = [int]($bmp.Width * $scale)
+      $nh = [int]($bmp.Height * $scale)
+      $small = New-Object Drawing.Bitmap($nw, $nh)
+      $sg = [Drawing.Graphics]::FromImage($small)
+      $sg.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+      $sg.DrawImage($bmp, 0, 0, $nw, $nh)
+      $sg.Dispose()
+      $bmp.Dispose()
+      $bmp = $small
+    }
+    $params = New-Object Drawing.Imaging.EncoderParameters(1)
+    $params.Param[0] = New-Object Drawing.Imaging.EncoderParameter([Drawing.Imaging.Encoder]::Quality, [long]55)
+    $framePath = if ($flip -eq 0) { $out0 } else { $out1 }
+    $bmp.Save($framePath, $codec, $params)
+    $params.Dispose()
+    $w = $bmp.Width
+    $h = $bmp.Height
+    $bmp.Dispose()
+    [Console]::Out.WriteLine("F $w $h $flip")
+    [Console]::Out.Flush()
+    $flip = 1 - $flip
+  } catch {
+    $msg = ($_.Exception.Message -replace "[\\r\\n]+", " ")
+    [Console]::Out.WriteLine("E $msg")
+    [Console]::Out.Flush()
+    Start-Sleep -Milliseconds 800
+  }
+  Start-Sleep -Milliseconds 60
+}`;
+    const encoded = Buffer.from(script, "utf16le").toString("base64");
+    const child = spawn(
+      "powershell.exe",
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-EncodedCommand",
+        encoded,
+      ],
+      { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    live.proc = child;
+    let lineBuffer = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      lineBuffer += chunk;
+      const lines = lineBuffer.split(/\r?\n/);
+      lineBuffer = lines.pop() || "";
+      for (const line of lines) handleLiveLine(line);
+    });
+    child.stderr.on("data", () => {});
+    child.on("close", () => {
+      if (live.proc === child) live.proc = null;
+      live.starting = false;
+      if (live.users > 0 && !live.restartTimer) {
+        live.restartTimer = setTimeout(() => {
+          live.restartTimer = null;
+          ensureLiveFeed();
+        }, 2000);
+      }
+    });
+  } finally {
+    live.starting = false;
+  }
+}
+
+export function getLiveFrame() {
+  if (!live.buffer) return null;
+  let fps = 0;
+  if (live.times.length >= 2) {
+    const span = (live.times[live.times.length - 1] - live.times[0]) / 1000;
+    if (span > 0) fps = (live.times.length - 1) / span;
+  }
+  return {
+    buffer: live.buffer,
+    width: live.width,
+    height: live.height,
+    version: live.version,
+    ts: live.updatedAt,
+    fps: Math.round(fps * 10) / 10,
+    ageMs: Date.now() - live.updatedAt,
+  };
+}
+
+export function retainLive() {
+  live.users += 1;
+  if (live.idleTimer) {
+    clearTimeout(live.idleTimer);
+    live.idleTimer = null;
+  }
+  ensureLiveFeed();
+}
+
+export function releaseLive() {
+  live.users = Math.max(0, live.users - 1);
+  if (live.users === 0 && !live.idleTimer) {
+    live.idleTimer = setTimeout(() => {
+      live.idleTimer = null;
+      stopLiveFeed();
+    }, 12_000);
+  }
+}
+
+export function stopLiveFeed() {
+  if (live.restartTimer) {
+    clearTimeout(live.restartTimer);
+    live.restartTimer = null;
+  }
+  if (live.proc) {
+    try {
+      live.proc.kill();
+    } catch {
+      // Already gone.
+    }
+    live.proc = null;
+  }
+  live.buffer = null;
+  live.times = [];
+}
+
+export function setLiveFrameHandler(handler) {
+  live.onFrame = typeof handler === "function" ? handler : null;
+}
+
+export function liveInfo() {
+  const frame = getLiveFrame();
+  return {
+    active: Boolean(live.proc),
+    users: live.users,
+    fps: frame?.fps ?? 0,
+    ageMs: frame?.ageMs ?? null,
+    lastError: live.lastError,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* OCR — Windows.Media.Ocr over the live frame or a fresh full-res capture     */
+/* -------------------------------------------------------------------------- */
+
+export async function ocrScreen({ screen, framePath, scale = 1, signal } = {}) {
+  let useFrame = "";
+  let originX = 0;
+  let originY = 0;
+  let scaleValue = 1;
+  if (framePath && fs.existsSync(framePath)) {
+    useFrame = framePath.replace(/\\/g, "/");
+    scaleValue = Number(scale) || 1;
+    if (screen) {
+      originX = Number(screen.x) || 0;
+      originY = Number(screen.y) || 0;
+    }
+  }
+  const script = `$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$null = [Windows.Media.Ocr.OcrEngine,Windows.Foundation,ContentType=WindowsRuntime]
+$null = [Windows.Graphics.Imaging.BitmapDecoder,Windows.Foundation,ContentType=WindowsRuntime]
+$null = [Windows.Storage.Streams.InMemoryRandomAccessStream,Windows.Foundation,ContentType=WindowsRuntime]
+$null = [Windows.Storage.Streams.DataWriter,Windows.Foundation,ContentType=WindowsRuntime]
+$null = [Windows.Globalization.Language,Windows.Foundation,ContentType=WindowsRuntime]
+$asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation\`1' })[0]
+function Await($op, $type) {
+  $t = $asTaskGeneric.MakeGenericMethod($type).Invoke($null, @($op))
+  $t.Wait(-1) | Out-Null
+  $t.Result
+}
+$ox = ${originX}
+$oy = ${originY}
+$scale = ${scaleValue}
+$bytes = $null
+$fromFile = ${useFrame ? "$true" : "$false"}
+if ($fromFile) {
+  $bytes = [IO.File]::ReadAllBytes(${decode(useFrame)})
+} else {
+  Add-Type -AssemblyName System.Windows.Forms
+  Add-Type -AssemblyName System.Drawing
+  $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+  $bmp = New-Object Drawing.Bitmap($bounds.Width, $bounds.Height)
+  $gfx = [Drawing.Graphics]::FromImage($bmp)
+  $gfx.CopyFromScreen($bounds.X, $bounds.Y, 0, 0, $bmp.Size)
+  $gfx.Dispose()
+  $codec = [Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
+  $params = New-Object Drawing.Imaging.EncoderParameters(1)
+  $params.Param[0] = New-Object Drawing.Imaging.EncoderParameter([Drawing.Imaging.Encoder]::Quality, [long]85)
+  $ms = New-Object System.IO.MemoryStream
+  $bmp.Save($ms, $codec, $params)
+  $params.Dispose()
+  $bytes = $ms.ToArray()
+  $ms.Dispose()
+  $bmp.Dispose()
+  $ox = $bounds.X
+  $oy = $bounds.Y
+  $scale = 1
+}
+$ras = New-Object Windows.Storage.Streams.InMemoryRandomAccessStream
+$writer = New-Object Windows.Storage.Streams.DataWriter($ras.GetOutputStreamAt(0))
+$writer.WriteBytes($bytes)
+Await ($writer.StoreAsync()) ([UInt32]) | Out-Null
+Await ($writer.FlushAsync()) ([Boolean]) | Out-Null
+$decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($ras)) ([Windows.Graphics.Imaging.BitmapDecoder])
+$bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+$engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+if (-not $engine) {
+  $lang = New-Object Windows.Globalization.Language('en-US')
+  $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($lang)
+}
+if (-not $engine) { throw 'No Windows OCR language is installed' }
+$result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+$lines = @()
+foreach ($line in $result.Lines) {
+  $r = $line.BoundingRect
+  $t = $line.Text
+  if ($t.Length -gt 240) { $t = $t.Substring(0, 240) }
+  $lines += [pscustomobject]@{
+    text = $t
+    x = [int]($ox + $r.X / $scale)
+    y = [int]($oy + $r.Y / $scale)
+    w = [int]($r.Width / $scale)
+    h = [int]($r.Height / $scale)
+  }
+}
+$full = (@($result.Lines | ForEach-Object { $_.Text }) -join [char]10)
+if ($full.Length -gt 8000) { $full = $full.Substring(0, 8000) }
+@{ engine = $engine.RecognizedLanguage.ToString(); lines = @($lines | Select-Object -First 80); text = $full } | ConvertTo-Json -Compress -Depth 3`;
+  const parsed = await runPowerShellJson(script, { timeoutMs: 30_000, signal });
+  return {
+    engine: String(parsed.engine ?? ""),
+    text: String(parsed.text ?? ""),
+    lines: Array.isArray(parsed.lines) ? parsed.lines : [],
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* CLIPBOARD                                                                   */
+/* -------------------------------------------------------------------------- */
+
+export async function clipboardGet(signal) {
+  const parsed = await runPowerShellJson(
+    `$ErrorActionPreference = 'Stop'
+$text = Get-Clipboard -Raw
+if ($null -eq $text) { $text = '' }
+if ($text.Length -gt 20000) { $text = $text.Substring(0, 20000) }
+@{ text = $text } | ConvertTo-Json -Compress`,
+    { timeoutMs: 12_000, signal },
+  );
+  return { text: String(parsed.text ?? "") };
+}
+
+export async function clipboardSet(text, signal) {
+  await runPowerShell(
+    `$ErrorActionPreference = 'Stop'
+$value = ${decode(String(text ?? ""))}
+Set-Clipboard -Value $value
+'ok'`,
+    { timeoutMs: 12_000, signal },
+  );
+  return { chars: String(text ?? "").length };
 }
 
 const WINDOW_SCRIPT = `
