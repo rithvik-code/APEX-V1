@@ -494,7 +494,7 @@ $result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult]
 $lines = @()
 foreach ($line in $result.Lines) {
   $r = $line.BoundingRect
-  $t = $line.Text
+  $t = ($line.Text -replace "[\\x00-\\x1F\\x7F]", " ")
   if ($t.Length -gt 240) { $t = $t.Substring(0, 240) }
   $lines += [pscustomobject]@{
     text = $t
@@ -505,8 +505,12 @@ foreach ($line in $result.Lines) {
   }
 }
 $full = (@($result.Lines | ForEach-Object { $_.Text }) -join [char]10)
+$full = ($full -replace "[\\x00-\\x1F\\x7F]", " ")
+if (-not $full) { $full = '' }
 if ($full.Length -gt 8000) { $full = $full.Substring(0, 8000) }
-@{ engine = $engine.RecognizedLanguage.ToString(); lines = @($lines | Select-Object -First 80); text = $full } | ConvertTo-Json -Compress -Depth 3`;
+$engineName = 'ocr'
+try { if ($engine.RecognizedLanguage) { $engineName = $engine.RecognizedLanguage.ToString() } } catch {}
+@{ engine = $engineName; lines = @($lines | Select-Object -First 80); text = $full } | ConvertTo-Json -Compress -Depth 3`;
   const parsed = await runPowerShellJson(script, { timeoutMs: 30_000, signal });
   return {
     engine: String(parsed.engine ?? ""),
