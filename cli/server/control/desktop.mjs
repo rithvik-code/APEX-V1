@@ -924,7 +924,7 @@ export function describeObservation(observation) {
   }
   if (observation.elements?.length) {
     lines.push("Actionable UI elements in the active window:");
-    for (const el of observation.elements.slice(0, 70)) {
+    for (const el of observation.elements.slice(0, 50)) {
       lines.push(
         `- ${el.control} "${el.name}" ${el.enabled ? "" : "(disabled) "}${el.focus ? "(focus) " : ""}at ${el.x},${el.y} ${el.w}x${el.h}`,
       );

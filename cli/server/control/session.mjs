@@ -441,7 +441,7 @@ export class ControlSession {
         });
         ocrLines = ocr.lines;
         ocrText = ocr.lines
-          .slice(0, 60)
+          .slice(0, 36)
           .map((line) => `- "${line.text}" @ ${line.x},${line.y}`)
           .join("\n");
       } catch (error) {
