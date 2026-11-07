@@ -316,9 +316,20 @@ try {
       w = [int]$r.Width
       h = [int]$r.Height
     }
+    try {
+      $pattern = $null
+      if ($f.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$pattern)) {
+        $focusedValue = $pattern.Current.Value
+      } else {
+        $pattern = $null
+        if ($f.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$pattern)) {
+          $focusedValue = $pattern.DocumentRange.GetText(1200)
+        }
+      }
+    } catch {}
   }
 } catch {}
-@{ active = $active; windows = @($list); elements = @($elements); focused = $focused } | ConvertTo-Json -Compress -Depth 5`,
+@{ active = $active; windows = @($list); elements = @($elements); focused = $focused; focusedValue = $focusedValue } | ConvertTo-Json -Compress -Depth 5`,
     { timeoutMs: 40000, signal },
   );
   return output;
@@ -445,11 +456,37 @@ export async function launchApp({ app, args = [], cwd = "" }, signal) {
   return runPowerShellJson(
     `${PRELUDE}
 $app = ${decode(String(app))}
-$argList = @(ConvertFrom-Json ${decode(argsJson)})
+$argJson = ${decode(argsJson)}
+$argList = @()
+if ($argJson -and $argJson -ne '[]') { $argList = @(ConvertFrom-Json $argJson) }
 $cwd = ${decode(String(cwd || ""))}
-$p = if ($cwd) { Start-Process -FilePath $app -ArgumentList $argList -WorkingDirectory $cwd -PassThru } else { Start-Process -FilePath $app -ArgumentList $argList -PassThru }
-Start-Sleep -Milliseconds 250
-@{ pid = $p.Id; process = $p.ProcessName; title = $p.MainWindowTitle } | ConvertTo-Json -Compress`,
+$params = @{ FilePath = $app; PassThru = $true }
+if ($argList.Count -gt 0) { $params.ArgumentList = $argList }
+if ($cwd) { $params.WorkingDirectory = $cwd }
+$p = Start-Process @params
+$stubPid = $p.Id
+Start-Sleep -Milliseconds 1400
+$procName = $p.ProcessName
+$realPid = $stubPid
+$realTitle = $p.MainWindowTitle
+$fg = [ApexNative]::GetForegroundWindow()
+$root = [System.Windows.Automation.AutomationElement]::RootElement
+$cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Window)
+$wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $cond)
+foreach ($w in $wins) {
+  try {
+    $proc = Get-Process -Id $w.Current.ProcessId -ErrorAction SilentlyContinue
+    if ($proc -and $proc.ProcessName -eq $procName -and $w.Current.Name) {
+      $isActive = ([IntPtr]$w.Current.NativeWindowHandle -eq $fg)
+      if ($realPid -eq $stubPid -or $isActive) {
+        $realPid = $w.Current.ProcessId
+        $realTitle = $w.Current.Name
+      }
+      if ($isActive) { break }
+    }
+  } catch {}
+}
+@{ pid = $realPid; stubPid = $stubPid; process = $procName; title = $realTitle } | ConvertTo-Json -Compress`,
     { timeoutMs: 20000, signal },
   );
 }
@@ -530,6 +567,9 @@ export function describeObservation(observation) {
     lines.push(
       `Focused: ${observation.focused.control} "${observation.focused.name}" at ${observation.focused.x},${observation.focused.y} ${observation.focused.w}x${observation.focused.h}`,
     );
+  }
+  if (observation.focusedValue) {
+    lines.push(`Focused value: "${String(observation.focusedValue).slice(0, 1200)}"`);
   }
   if (observation.windows?.length) {
     lines.push("Windows:");
