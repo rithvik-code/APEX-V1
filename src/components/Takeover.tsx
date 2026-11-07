@@ -80,7 +80,7 @@ const CODE = [
   "}",
 ];
 
-const STEP_MS = 1250;
+const STEP_MS = 1400;
 
 function clock(total: number): string {
   const m = Math.floor(total / 60)
@@ -126,7 +126,13 @@ export function Takeover({ onRelease }: Props) {
     return () => {
       document.body.classList.remove("locked");
       window.removeEventListener("keydown", onKey, true);
-      returnFocus.current?.focus({ preventScroll: true });
+      const target =
+        returnFocus.current && returnFocus.current !== document.body
+          ? returnFocus.current
+          : document.querySelector<HTMLButtonElement>(
+              ".lane__cta, .control-bar__btn",
+            );
+      target?.focus({ preventScroll: true });
     };
   }, [onRelease]);
 
@@ -164,9 +170,7 @@ export function Takeover({ onRelease }: Props) {
     return () => window.clearInterval(id);
   }, [current.cmd, done]);
 
-  const progress = done
-    ? 1
-    : (step + 1) / STEPS.length;
+  const progress = done ? 1 : step / STEPS.length;
 
   const handleRelease = () => {
     sound.tick("click");
