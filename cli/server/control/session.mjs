@@ -305,6 +305,17 @@ export class ControlSession {
         return;
       }
 
+      const signature = `${decision.action}:${JSON.stringify(decision.args)}`;
+      const repeats = this.history.filter(
+        (item) => !item.error && `${item.action}:${JSON.stringify(item.args)}` === signature,
+      ).length;
+      if (repeats >= 2) {
+        this.fail(
+          `Planner kept repeating ${decision.action} with identical arguments. Last result: ${clip(this.lastResult, 900)}`,
+        );
+        return;
+      }
+
       const gate = checkAction(decision.action, this.permissions, {
         autoApprove: this.autoApprove,
       });

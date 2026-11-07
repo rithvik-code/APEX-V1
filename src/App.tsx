@@ -6,6 +6,7 @@ import { GridDeck } from "./components/GridDeck";
 import { Takeover } from "./components/Takeover";
 import { Preloader } from "./components/Preloader";
 import { Cursor } from "./components/Cursor";
+import { useControl } from "./hooks/useControl";
 import { sound } from "./lib/sound";
 
 const CoreLab = lazy(() =>
@@ -96,6 +97,7 @@ export default function App() {
   const [blueprintOpen, setBlueprintOpen] = useState(false);
   const [coreView, setCoreView] = useState<CoreVariant | null>(null);
   const [takeover, setTakeover] = useState(false);
+  const control = useControl();
   const { copied, copy } = useCopy();
 
   const activeChapter = CHAPTERS.find((c) => c.id === active) ?? CHAPTERS[0];
@@ -624,7 +626,7 @@ export default function App() {
             </p>
           </div>
 
-          <GridDeck onTakeControl={openTakeover} />
+          <GridDeck onTakeControl={openTakeover} control={control} />
         </section>
 
         <section className="section vast" id="vast">
@@ -849,7 +851,7 @@ export default function App() {
         </Suspense>
       )}
 
-      {takeover && <Takeover onRelease={closeTakeover} />}
+      {takeover && <Takeover onRelease={closeTakeover} control={control} />}
     </div>
   );
 }

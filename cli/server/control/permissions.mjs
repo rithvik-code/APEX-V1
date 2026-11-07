@@ -38,33 +38,50 @@ export const ACTIONS = {
   done: { capability: null, risk: "none" },
 };
 
+const ACTION_DOCS = {
+  screenshot: "screenshot {} — capture the screen",
+  list_windows: "list_windows {} — list desktop windows",
+  focus_window: "focus_window {pid} — bring an application forward",
+  launch_app: "launch_app {app, args?, cwd?} — start an application",
+  move_mouse: "move_mouse {x,y} — move the pointer",
+  click: "click {x,y,button?,count?} — click at screen coordinates",
+  drag: "drag {fromX,fromY,toX,toY} — drag with the left button",
+  scroll: "scroll {x,y,amount} — scroll at a point; negative scrolls down",
+  type_text: "type_text {text} — type into the focused control",
+  press_keys: 'press_keys {keys} — e.g. "ctrl+s", "enter", "alt+tab"',
+  browser_tabs: "browser_tabs {} — list open browser tabs",
+  browser_open: "browser_open {url} — open a tab",
+  browser_activate: "browser_activate {id} — focus a tab",
+  browser_close: "browser_close {id} — close a tab",
+  browser_navigate: "browser_navigate {id,url} — navigate a tab",
+  browser_click: "browser_click {id,selector?|x?,y?} — click in a tab",
+  browser_type: "browser_type {id,text,selector?} — type into a tab",
+  browser_press: "browser_press {id,keys} — enter/tab/escape in a tab",
+  browser_eval: "browser_eval {id,expression} — run page JavaScript (high risk)",
+  file_list: "file_list {path} — list a directory",
+  file_read: "file_read {path} — read a UTF-8 file",
+  file_write: "file_write {path,content,append?} — create or overwrite a file",
+  file_replace: "file_replace {path,old,new,all?} — edit a file",
+  file_mkdir: "file_mkdir {path} — create a directory",
+  run_command: "run_command {command,cwd?} — run a terminal command",
+  done: "done {summary} — finish; summary states what was verified",
+};
+
 export const ACTION_HELP = `Available actions (one per turn):
-screenshot {} — capture the screen
-list_windows {} — list desktop windows
-focus_window {pid} — bring an application forward
-launch_app {app, args?, cwd?} — start an application
-move_mouse {x,y} — move the pointer
-click {x,y,button?,count?} — click at screen coordinates
-drag {fromX,fromY,toX,toY} — drag with the left button
-scroll {x,y,amount} — scroll at a point; negative scrolls down
-type_text {text} — type into the focused control
-press_keys {keys} — e.g. "ctrl+s", "enter", "alt+tab"
-browser_tabs {} — list open browser tabs
-browser_open {url} — open a tab
-browser_activate {id} — focus a tab
-browser_close {id} — close a tab
-browser_navigate {id,url} — navigate a tab
-browser_click {id,selector?|x?,y?} — click in a tab
-browser_type {id,text,selector?} — type into a tab
-browser_press {id,keys} — enter/tab/escape in a tab
-browser_eval {id,expression} — run page JavaScript (high risk)
-file_list {path} — list a directory
-file_read {path} — read a UTF-8 file
-file_write {path,content,append?} — create or overwrite a file
-file_replace {path,old,new,all?} — edit a file
-file_mkdir {path} — create a directory
-run_command {command,cwd?} — run a terminal command
-done {summary} — finish; summary states what was verified`;
+${Object.values(ACTION_DOCS).join("\n")}`;
+
+export function actionHelp(permissions = {}) {
+  const lines = Object.entries(ACTION_DOCS)
+    .filter(([name]) => {
+      const meta = ACTIONS[name];
+      return !meta.capability || Boolean(permissions[meta.capability]);
+    })
+    .map(([, line]) => line);
+  if (!lines.some((line) => line.startsWith("done "))) {
+    lines.push(ACTION_DOCS.done);
+  }
+  return `Available actions (one per turn):\n${lines.join("\n")}`;
+}
 
 export function normalizePermissions(input = {}) {
   const permissions = {};

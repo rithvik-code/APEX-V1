@@ -210,7 +210,7 @@ export function readControlConfig() {
   if (!fs.existsSync(file)) {
     return {
       fileRoots: defaultRoots(),
-      plannerModel: "qwen2.5:3b",
+      plannerModel: "qwen3:4b",
       visionModel: "gemma3:4b",
       maxSteps: 20,
       autoApprove: false,
@@ -222,7 +222,7 @@ export function readControlConfig() {
   } catch {
     return {
       fileRoots: defaultRoots(),
-      plannerModel: "qwen2.5:3b",
+      plannerModel: "qwen3:4b",
       visionModel: "gemma3:4b",
       maxSteps: 20,
       autoApprove: false,

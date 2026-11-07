@@ -1,373 +1,902 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
+import {
+  ALL_ARMED,
+  CAPABILITIES,
+  isActiveStatus,
+  isTerminalStatus,
+  mediaUrl,
+  type CapabilityKey,
+  type ControlStatus,
+  type Permissions,
+  type ScreenBounds,
+} from "../lib/control";
+import type { ControlApi } from "../hooks/useControl";
 import { sound } from "../lib/sound";
 
-type Target = "files" | "editor" | "terminal" | "tests";
+const GOAL_KEY = "apex.control.goal";
 
-type Step = {
-  label: string;
-  detail: string;
-  cmd: string;
-  target: Target;
-  cursor: [number, number];
+const STATUS_LABEL: Record<ControlStatus, string> = {
+  running: "EXECUTING",
+  paused: "CONTROL HELD",
+  awaiting: "APPROVAL REQUIRED",
+  complete: "MISSION COMPLETE",
+  stopped: "STOPPED",
+  error: "FAULT",
 };
 
-const STEPS: Step[] = [
-  {
-    label: "HANDSHAKE",
-    detail: "shadow snapshot armed · session linked",
-    cmd: 'apex do --tier machine "fix the failing tests"',
-    target: "terminal",
-    cursor: [27, 72],
-  },
-  {
-    label: "SCAN REPO",
-    detail: "142 files · 8 changed",
-    cmd: "list_dir ./",
-    target: "files",
-    cursor: [20, 34],
-  },
-  {
-    label: "READ CONTEXT",
-    detail: "src/lib/retry.ts · 2.4 KB",
-    cmd: "read_file src/lib/retry.ts",
-    target: "editor",
-    cursor: [58, 42],
-  },
-  {
-    label: "PATCH",
-    detail: "3 lines changed · undo armed",
-    cmd: "replace_in_file src/lib/retry.ts",
-    target: "editor",
-    cursor: [66, 54],
-  },
-  {
-    label: "VERIFY",
-    detail: "18 passed · 0 failed",
-    cmd: "run_command npm test",
-    target: "terminal",
-    cursor: [34, 76],
-  },
-  {
-    label: "COMPLETE",
-    detail: "apex undo <session> · ready",
-    cmd: "task complete",
-    target: "tests",
-    cursor: [76, 66],
-  },
+const STATUS_TONE: Record<ControlStatus, string> = {
+  running: "is-live",
+  paused: "is-held",
+  awaiting: "is-wait",
+  complete: "is-done",
+  stopped: "is-danger",
+  error: "is-danger",
+};
+
+const TOOLS: Array<{ name: string; label: string; args?: Record<string, unknown> }> = [
+  { name: "screenshot", label: "CAPTURE" },
+  { name: "list_windows", label: "WINDOWS" },
+  { name: "browser_tabs", label: "TABS" },
 ];
 
-const FILES: Array<[string, string]> = [
-  ["src/lib/retry.ts", "2.4K"],
-  ["src/lib/ai.ts", "6.1K"],
-  ["src/components/Terminal.tsx", "18K"],
-  ["tests/retry.test.ts", "1.2K"],
-  ["package.json", "0.7K"],
-  ["server.log", "94K"],
-];
-
-const CODE = [
-  "export async function retry<T>(",
-  "  task: () => Promise<T>,",
-  "  attempts = 3,",
-  "): Promise<T> {",
-  "  for (let i = 0; i < attempts; i++) {",
-  "    try { return await task(); }",
-  "    catch (e) {",
-  "      if (i === attempts - 1) throw e;",
-  "    }",
-  "  }",
-  "  throw new Error(\"unreachable\");",
-  "}",
-];
-
-const STEP_MS = 1400;
-
-function clock(total: number): string {
-  const m = Math.floor(total / 60)
+function clock(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(total / 60)
     .toString()
-    .padStart(2, "0");
-  const s = (total % 60).toString().padStart(2, "0");
-  return `${m}:${s}`;
+    .padStart(2, "0")}:${(total % 60).toString().padStart(2, "0")}`;
+}
+
+function logTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "--:--:--";
+  return date.toLocaleTimeString([], { hour12: false });
+}
+
+function mapPoint(
+  event: ReactMouseEvent<HTMLImageElement>,
+  img: HTMLImageElement,
+  screen: ScreenBounds,
+): { x: number; y: number } | null {
+  const rect = img.getBoundingClientRect();
+  const naturalW = img.naturalWidth || screen.w;
+  const naturalH = img.naturalHeight || screen.h;
+  const scale = Math.min(rect.width / naturalW, rect.height / naturalH);
+  if (!scale) return null;
+  const width = naturalW * scale;
+  const height = naturalH * scale;
+  const left = rect.left + (rect.width - width) / 2;
+  const top = rect.top + (rect.height - height) / 2;
+  const nx = (event.clientX - left) / width;
+  const ny = (event.clientY - top) / height;
+  if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return null;
+  return {
+    x: Math.round(screen.x + nx * screen.w),
+    y: Math.round(screen.y + ny * screen.h),
+  };
 }
 
 type Props = {
+  control: ControlApi;
   onRelease: () => void;
 };
 
-export function Takeover({ onRelease }: Props) {
-  const [step, setStep] = useState(0);
-  const [done, setDone] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  const [typed, setTyped] = useState("");
-  const releaseRef = useRef<HTMLButtonElement>(null);
-  const returnFocus = useRef<HTMLElement | null>(null);
-  const session = useMemo(
-    () => `APX-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
-    [],
-  );
+export function Takeover({ control, onRelease }: Props) {
+  const { state, health, online, busy, error } = control;
+  const status = state?.status;
+  const statusLabel = status ? STATUS_LABEL[status] : "STANDBY";
+  const tone = status ? STATUS_TONE[status] : "is-live";
+  const active = isActiveStatus(status);
+  const [draftGoal, setDraftGoal] = useState("");
+  const [armed, setArmed] = useState<Permissions>({ ...ALL_ARMED });
+  const [autoApprove, setAutoApprove] = useState(false);
+  const [vision, setVision] = useState(false);
+  const [plannerModel, setPlannerModel] = useState("qwen3:4b");
+  const [visionModel, setVisionModel] = useState("gemma3:4b");
+  const [maxSteps, setMaxSteps] = useState(20);
+  const [minimized, setMinimized] = useState(false);
+  const [clickMode, setClickMode] = useState(false);
+  const [cursorAt, setCursorAt] = useState<{ x: number; y: number } | null>(null);
+  const [notice, setNotice] = useState("");
+  const [now, setNow] = useState(Date.now());
 
-  const current = STEPS[Math.min(step, STEPS.length - 1)];
+  const permissionMap: Permissions =
+    active && state ? state.permissions : armed;
+
+  const releaseRef = useRef<HTMLButtonElement>(null);
+  const goalRef = useRef<HTMLTextAreaElement>(null);
+  const approveRef = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const logRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const stateRef = useRef(state);
+  const settingsSeeded = useRef(false);
+  const yieldTimer = useRef<number | null>(null);
+
+  stateRef.current = state;
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(GOAL_KEY);
+      if (saved) setDraftGoal(saved);
+    } catch {
+      // Storage can be unavailable in private contexts.
+    }
+  }, []);
+
+  useEffect(() => {
+    const lastGoal = state?.goal;
+    if (!lastGoal) return;
+    setDraftGoal((current) => (current.trim() ? current : lastGoal));
+  }, [state?.id, state?.goal]);
+
+  useEffect(() => {
+    if (!health || settingsSeeded.current) return;
+    settingsSeeded.current = true;
+    setPlannerModel(health.defaults.plannerModel);
+    setVisionModel(health.defaults.visionModel);
+    setMaxSteps(health.defaults.maxSteps);
+    setAutoApprove(Boolean(health.defaults.autoApprove));
+    setVision(Boolean(health.defaults.vision));
+  }, [health]);
 
   useEffect(() => {
     returnFocus.current =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
-    document.body.classList.add("locked");
-    releaseRef.current?.focus({ preventScroll: true });
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        onRelease();
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
     return () => {
-      document.body.classList.remove("locked");
-      window.removeEventListener("keydown", onKey, true);
       const target =
         returnFocus.current && returnFocus.current !== document.body
           ? returnFocus.current
           : document.querySelector<HTMLButtonElement>(
-              ".lane__cta, .control-bar__btn",
+              ".control-bar__btn, .lane__cta",
             );
       target?.focus({ preventScroll: true });
     };
-  }, [onRelease]);
-
-  useEffect(() => {
-    const id = window.setInterval(() => setElapsed((value) => value + 1), 1000);
-    return () => window.clearInterval(id);
   }, []);
 
   useEffect(() => {
-    if (done) return;
-    const id = window.setTimeout(
-      () => {
-        if (step >= STEPS.length - 1) {
-          setDone(true);
-          sound.tick("start");
-        } else {
-          setStep((value) => value + 1);
-          sound.tick("key");
-        }
-      },
-      step === 0 ? 1500 : STEP_MS,
-    );
-    return () => window.clearTimeout(id);
-  }, [step, done]);
-
-  useEffect(() => {
-    const command = done ? "task complete · control held" : current.cmd;
-    setTyped("");
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setTyped(command);
+    if (minimized) {
+      document.body.classList.remove("locked");
       return;
     }
-    let index = 0;
-    const id = window.setInterval(() => {
-      index += 1;
-      setTyped(command.slice(0, index));
-      if (index >= command.length) window.clearInterval(id);
-    }, 18);
+    document.body.classList.add("locked");
+    releaseRef.current?.focus({ preventScroll: true });
+    return () => document.body.classList.remove("locked");
+  }, [minimized]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (isActiveStatus(stateRef.current?.status)) {
+        sound.tick("click");
+        void control.stop("Emergency stop from console");
+        setMinimized(false);
+      } else {
+        onRelease();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [control, onRelease]);
+
+  useEffect(() => {
+    if (!active) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, [current.cmd, done]);
+  }, [active]);
 
-  const progress = done ? 1 : step / STEPS.length;
+  useEffect(() => {
+    if (!minimized) return;
+    if (status === "awaiting" || isTerminalStatus(status)) {
+      setMinimized(false);
+      sound.tick("start");
+    }
+  }, [status, minimized]);
 
-  const handleRelease = () => {
+  useEffect(() => {
+    if (status === "awaiting") approveRef.current?.focus({ preventScroll: true });
+  }, [status]);
+
+  useEffect(() => {
+    if (minimized) return;
+    const el = logRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [state?.logs.length, minimized]);
+
+  useEffect(() => {
+    return () => {
+      if (yieldTimer.current) window.clearTimeout(yieldTimer.current);
+    };
+  }, []);
+
+  const flash = useCallback((message: string) => {
+    setNotice(message);
+    window.setTimeout(() => setNotice((current) => (current === message ? "" : current)), 5000);
+  }, []);
+
+  const engage = async () => {
+    if (!online) {
+      flash("The local control daemon is offline. Start it with: npm run apexd");
+      return;
+    }
+    const goal = draftGoal.trim();
+    if (!goal) {
+      flash("Describe the mission first.");
+      goalRef.current?.focus();
+      return;
+    }
+    if (!CAPABILITIES.some((cap) => armed[cap.key])) {
+      flash("Arm at least one capability.");
+      return;
+    }
+    sound.tick("start");
+    try {
+      localStorage.setItem(GOAL_KEY, goal);
+    } catch {
+      // Non-fatal.
+    }
+    const next = await control.start({
+      goal,
+      permissions: armed,
+      autoApprove,
+      vision,
+      plannerModel,
+      visionModel,
+      maxSteps,
+    });
+    if (next) {
+      flash("Control handed over. Every action is logged; STOP or ESC takes it back.");
+      if (yieldTimer.current) window.clearTimeout(yieldTimer.current);
+      yieldTimer.current = window.setTimeout(() => setMinimized(true), 1400);
+    }
+  };
+
+  const release = async () => {
     sound.tick("click");
+    if (isActiveStatus(stateRef.current?.status)) {
+      await control.stop("Control released from console");
+    }
     onRelease();
   };
 
+  const yieldScreen = () => {
+    sound.tick("hover");
+    setMinimized(true);
+  };
+
+  const toggleCapability = (key: CapabilityKey) => {
+    if (active) return;
+    setArmed((current) => ({ ...current, [key]: !current[key] }));
+    sound.tick("click");
+  };
+
+  const setAll = (value: boolean) => {
+    if (active) return;
+    setArmed(
+      CAPABILITIES.reduce(
+        (acc, cap) => ({ ...acc, [cap.key]: value }),
+        {} as Permissions,
+      ),
+    );
+    sound.tick("click");
+  };
+
+  const runTool = async (name: string, args?: Record<string, unknown>) => {
+    if (!state) {
+      flash("Engage a mission before issuing manual actions.");
+      return;
+    }
+    sound.tick("click");
+    const next = await control.manual(name, args ?? {});
+    if (next) flash(`${name.toUpperCase()} · ${next.lastResult.slice(0, 120)}`);
+  };
+
+  const toggleClickMode = async () => {
+    if (!state) return;
+    if (state.status === "running") {
+      await control.pause();
+    }
+    if (state.status === "awaiting") {
+      flash("Resolve the pending approval before taking the pointer.");
+      return;
+    }
+    setClickMode((value) => !value);
+    sound.tick("click");
+  };
+
+  const onScreenClick = async (event: ReactMouseEvent<HTMLImageElement>) => {
+    if (!clickMode || !state) return;
+    if (state.status !== "paused") {
+      flash("Pause APEX before manual clicks.");
+      return;
+    }
+    if (!state.permissions.mouse) {
+      flash("Mouse capability is disarmed for this session.");
+      return;
+    }
+    const screen = state.observation?.screen;
+    const img = imgRef.current;
+    if (!screen || !img) return;
+    const point = mapPoint(event, img, screen);
+    if (!point) return;
+    sound.tick("click");
+    const next = await control.manual("click", point);
+    if (next) flash(`CLICK ${point.x},${point.y}`);
+  };
+
+  const onScreenMove = (event: ReactMouseEvent<HTMLImageElement>) => {
+    const screen = state?.observation?.screen;
+    const img = imgRef.current;
+    if (!screen || !img) return;
+    setCursorAt(mapPoint(event, img, screen));
+  };
+
+  const undoWrites = async () => {
+    sound.tick("click");
+    const result = await control.undo();
+    if (result) {
+      flash(`ROLLBACK · ${result.restored} restored · ${result.removed} removed`);
+    }
+  };
+
+  const elapsed = state
+    ? active
+      ? now - state.startedAt
+      : state.elapsedMs
+    : 0;
+  const progress = state
+    ? status === "complete"
+      ? 1
+      : Math.min(1, state.step / Math.max(1, state.maxSteps))
+    : 0;
+  const armedCount = CAPABILITIES.filter((cap) => permissionMap[cap.key]).length;
+  const models = health?.ollama.models ?? [];
+  const plannerChoices = models.filter((model) => model.tools);
+  const visionChoices = models.filter((model) => model.vision);
+  const shot = mediaUrl(state?.shotUrl);
+  const pending = state?.pendingApproval;
+  const lastLog = state?.logs[state.logs.length - 1];
+
+  if (minimized) {
+    return (
+      <div className="ctl-hud" role="dialog" aria-label="APEX control HUD">
+        <span className={`ctl-hud__live ${tone}`}>
+          <i /> APEX // {statusLabel}
+        </span>
+        <b>{state?.id ?? "NO SESSION"}</b>
+        <span className="ctl-hud__meta">
+          STEP {state ? Math.min(state.step + 1, state.maxSteps) : 0} /{" "}
+          {state?.maxSteps ?? 0} · {clock(elapsed)}
+        </span>
+        {status === "running" && (
+          <button type="button" onClick={() => control.pause()}>
+            HOLD
+          </button>
+        )}
+        {status === "paused" && (
+          <button type="button" onClick={() => control.resume()}>
+            RESUME
+          </button>
+        )}
+        {status === "awaiting" && (
+          <button
+            type="button"
+            className="is-acid"
+            onClick={() => setMinimized(false)}
+          >
+            REVIEW
+          </button>
+        )}
+        <button type="button" onClick={() => setMinimized(false)}>
+          RESTORE
+        </button>
+        {active && (
+          <button
+            type="button"
+            className="is-danger"
+            onClick={() => control.stop("Emergency stop from HUD")}
+          >
+            STOP
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
-      className="takeover"
+      className="takeover ctl"
       role="dialog"
       aria-modal="true"
-      aria-label="APEX autonomous control"
+      aria-label="APEX take control console"
     >
       <span className="takeover__grid" aria-hidden="true" />
       <span className="takeover__scan" aria-hidden="true" />
       <span className="takeover__glow" aria-hidden="true" />
 
-      <header className="takeover__bar">
+      <header className="takeover__bar ctl-bar">
         <span className="takeover__live">
-          <i /> APEX // AUTONOMOUS CONTROL
+          <i /> APEX // TAKE CONTROL
         </span>
         <span className="takeover__meta">
-          SESSION {session} · TIER MACHINE · UNDO ARMED
+          {state ? `SESSION ${state.id}` : "NO SESSION"} ·{" "}
+          {autoApprove ? "AUTO-APPROVE" : "APPROVAL PER ACTION"} ·{" "}
+          {online ? `DAEMON v${health?.version ?? "—"}` : "DAEMON OFFLINE"}
         </span>
-        <span className={`takeover__state${done ? " is-done" : ""}`}>
-          <i /> {done ? "CONTROL HELD" : "EXECUTING"}
+        <span className={`takeover__state ${tone}`} aria-live="polite">
+          <i /> {statusLabel}
         </span>
-        <button
-          ref={releaseRef}
-          type="button"
-          className="takeover__release"
-          onClick={handleRelease}
-        >
-          RELEASE CONTROL <span>[ESC]</span>
-        </button>
+        <div className="ctl-bar__btns">
+          {active && (
+            <button
+              type="button"
+              className="ctl-bar__yield"
+              onClick={yieldScreen}
+              title="Hide this console so APEX can see the desktop"
+            >
+              YIELD SCREEN
+            </button>
+          )}
+          <button
+            ref={releaseRef}
+            type="button"
+            className="takeover__release"
+            onClick={() => void release()}
+          >
+            {active ? "STOP + RELEASE" : "CLOSE"} <span>[ESC]</span>
+          </button>
+        </div>
       </header>
 
-      <div className="takeover__body">
-        <div className="takeover__stage" aria-hidden="true">
-          <span className="takeover__stage-tag">USER SCREEN / LOCAL</span>
-
-          <div
-            className={`takeover__win takeover__win--files${
-              current.target === "files" ? " is-target" : ""
-            }`}
-          >
-            <div className="takeover__win-head">
-              <span>FILES / PROJECT</span>
-              <i>{step > 1 ? "SCANNED" : "READING"}</i>
-            </div>
-            <div className="takeover__files">
-              {FILES.map(([name, size], index) => (
-                <p
-                  key={name}
-                  className={step > 1 && index < 4 ? "is-hit" : ""}
-                >
-                  <span>{index < 4 ? "■" : "▪"}</span>
-                  {name}
-                  <em>{size}</em>
-                </p>
-              ))}
-            </div>
-          </div>
-
-          <div
-            className={`takeover__win takeover__win--editor${
-              current.target === "editor" ? " is-target" : ""
-            }`}
-          >
-            <div className="takeover__win-head">
-              <span>EDITOR / RETRY.TS</span>
-              <i>{step >= 3 ? "PATCHED" : "OPEN"}</i>
-            </div>
-            <div className="takeover__code">
-              {CODE.map((line, index) => (
-                <p
-                  key={line}
-                  className={
-                    step >= 3 && index >= 4 && index <= 7 ? "is-hit" : ""
-                  }
-                >
-                  <span>{String(index + 1).padStart(2, "0")}</span>
-                  {line}
-                </p>
-              ))}
-            </div>
-          </div>
-
-          <div
-            className={`takeover__win takeover__win--terminal${
-              current.target === "terminal" ? " is-target" : ""
-            }`}
-          >
-            <div className="takeover__win-head">
-              <span>TERMINAL / APEX</span>
-              <i>LIVE</i>
-            </div>
-            <div className="takeover__lines">
-              {STEPS.slice(Math.max(0, step - 2), step + 1).map((item) => (
-                <p key={item.cmd}>
-                  <span>›</span>
-                  {item.cmd}
-                </p>
-              ))}
-              {done && <p className="is-hit">■ 18 passed · 0 failed</p>}
-            </div>
-          </div>
-
-          <div
-            className={`takeover__win takeover__win--tests${
-              current.target === "tests" ? " is-target" : ""
-            }`}
-          >
-            <div className="takeover__win-head">
-              <span>TESTS</span>
-              <i>{step >= 4 ? "PASS" : "QUEUED"}</i>
-            </div>
-            <div className="takeover__tests">
-              <b>{step >= 4 ? "18" : "—"}</b>
-              <span>/ 18 PASSED</span>
-              <div>
-                {Array.from({ length: 9 }).map((_, index) => (
-                  <i
-                    key={index}
-                    className={step >= 4 ? "is-hit" : ""}
-                    style={{ transitionDelay: `${index * 70}ms` }}
-                  />
-                ))}
+      <div className="ctl-body">
+        <section className="ctl-main">
+          <div className={`ctl-screen${clickMode ? " is-manual" : ""}`}>
+            {shot ? (
+              <img
+                ref={imgRef}
+                src={shot}
+                alt="Live desktop capture from the APEX control daemon"
+                draggable={false}
+                onClick={onScreenClick}
+                onMouseMove={onScreenMove}
+                onMouseLeave={() => setCursorAt(null)}
+                onError={() => flash("Screen feed dropped; waiting for the next frame.")}
+              />
+            ) : (
+              <div className="ctl-screen__empty">
+                {!online ? (
+                  <>
+                    <span>DAEMON OFFLINE</span>
+                    <b>Link the local control daemon to see this machine.</b>
+                    <code>npm run apexd</code>
+                    <p>
+                      Loopback only · 127.0.0.1:4317 · nothing leaves the machine.
+                    </p>
+                    <button
+                      type="button"
+                      className="ctl-btn ctl-btn--ghost"
+                      onClick={() => void control.refresh()}
+                    >
+                      {busy === "link" ? "LINKING…" : "RETRY LINK"}
+                    </button>
+                  </>
+                ) : state ? (
+                  <>
+                    <span>FIRST OBSERVATION IN FLIGHT</span>
+                    <b>APEX is reading the desktop feed.</b>
+                    <p>The frame lands here as soon as the engine captures it.</p>
+                  </>
+                ) : (
+                  <>
+                    <span>NO SESSION</span>
+                    <b>Arm capabilities, write a mission, hand over control.</b>
+                    <p>
+                      The screen feed, plan, actions and verdict stream here in
+                      real time. ESC always takes the machine back.
+                    </p>
+                  </>
+                )}
               </div>
+            )}
+
+            <span className="ctl-screen__scan" aria-hidden="true" />
+            <span className="ctl-screen__frame" aria-hidden="true" />
+
+            <div className="ctl-screen__top">
+              <span className="ctl-screen__tag">
+                <i /> LIVE /{" "}
+                {state?.observation?.active?.title?.slice(0, 42) ?? "LOCAL DESKTOP"}
+              </span>
+              <span className="ctl-screen__bounds">
+                {state?.observation?.screen
+                  ? `${state.observation.screen.w}×${state.observation.screen.h}`
+                  : "—"}
+              </span>
             </div>
+
+            <div className="ctl-screen__bottom">
+              <span>
+                {cursorAt
+                  ? `CURSOR ${cursorAt.x}, ${cursorAt.y}`
+                  : clickMode
+                    ? "CLICK MODE ARMED · CLICK THE FEED"
+                    : "APEX VISION / LOCAL"}
+              </span>
+              <span>{state?.observation?.capturedAt ? `FRAME ${logTime(state.observation.capturedAt)}` : "STANDBY"}</span>
+            </div>
+
+            {clickMode && <span className="ctl-screen__crosshair" aria-hidden="true" />}
           </div>
 
-          <span
-            className="takeover__cursor"
-            style={{
-              left: `${current.cursor[0]}%`,
-              top: `${current.cursor[1]}%`,
-            }}
-          >
-            <span key={step} className="takeover__click" />
-          </span>
-        </div>
-
-        <aside className="takeover__rail">
-          <div className="takeover__rail-head">
-            <span>AGENT PLAN</span>
-            <span>
-              {String(Math.min(step + 1, STEPS.length)).padStart(2, "0")} /{" "}
-              {String(STEPS.length).padStart(2, "0")}
+          <div className="ctl-tools">
+            <span className="ctl-tools__label">MANUAL</span>
+            <button
+              type="button"
+              className={`ctl-tools__click${clickMode ? " is-on" : ""}`}
+              onClick={() => void toggleClickMode()}
+              disabled={!state || status === "awaiting"}
+            >
+              {clickMode ? "CLICK-THROUGH ON" : "TAKE THE POINTER"}
+            </button>
+            {TOOLS.map((tool) => (
+              <button
+                key={tool.name}
+                type="button"
+                onClick={() => void runTool(tool.name, tool.args)}
+                disabled={!state}
+              >
+                {tool.label}
+              </button>
+            ))}
+            <button type="button" onClick={() => void undoWrites()} disabled={!state}>
+              UNDO WRITES
+            </button>
+            <span className="ctl-tools__note">
+              {state?.observation?.focused?.name
+                ? `FOCUS / ${state.observation.focused.name}`
+                : state?.observation?.focusedValue
+                  ? `FOCUS / ${state.observation.focusedValue.slice(0, 48)}`
+                  : "FOCUS / —"}
             </span>
           </div>
 
-          <ol className="takeover__plan">
-            {STEPS.map((item, index) => {
-              const state = done || index < step
-                ? "is-done"
-                : index === step
-                  ? "is-active"
-                  : "";
-              return (
-                <li key={item.label} className={state}>
-                  <span>{String(index + 1).padStart(2, "0")}</span>
-                  <div>
-                    <b>{item.label}</b>
-                    <em>{item.detail}</em>
-                  </div>
-                  <i>
-                    {done || index < step
-                      ? "DONE"
-                      : index === step
-                        ? "ACT"
-                        : "QUEUED"}
-                  </i>
-                </li>
-              );
-            })}
-          </ol>
-
-          <div className="takeover__log">
-            {STEPS.slice(Math.max(0, step - 2), step + 1).map((item) => (
-              <p key={item.label}>
-                <span>{item.target.toUpperCase()}</span>
-                {item.cmd}
-              </p>
-            ))}
+          <div className="ctl-log">
+            <div className="ctl-log__head">
+              <span>EXECUTION LOG</span>
+              <span>
+                {state ? `${state.logs.length} EVENTS · SEQ ${lastLog?.seq ?? 0}` : "NO EVENTS"}
+              </span>
+            </div>
+            <div className="ctl-log__body" ref={logRef} role="log" aria-live="polite">
+              {state?.logs.length ? (
+                state.logs.map((entry) => (
+                  <p
+                    key={entry.seq}
+                    className={`ctl-log__line is-${entry.risk} type-${entry.type}`}
+                  >
+                    <span>{String(entry.seq).padStart(3, "0")}</span>
+                    <span>{logTime(entry.ts)}</span>
+                    <em>{entry.type}</em>
+                    <b>{entry.title}</b>
+                    <span className="ctl-log__detail">{entry.detail}</span>
+                  </p>
+                ))
+              ) : (
+                <p className="ctl-log__empty">
+                  {online
+                    ? "› log is empty — engage a mission to open the loop"
+                    : "› daemon offline — run `npm run apexd` in a terminal"}
+                </p>
+              )}
+            </div>
           </div>
+        </section>
+
+        <aside className="ctl-rail">
+          <div className="ctl-block">
+            <div className="ctl-block__head">
+              <span>MISSION</span>
+              <span>{state?.id ?? "NEW CONTROL SESSION"}</span>
+            </div>
+            <textarea
+              ref={goalRef}
+              className="ctl-goal"
+              value={active && state ? state.goal : draftGoal}
+              onChange={(event) => setDraftGoal(event.target.value)}
+              placeholder="e.g. open the repo, fix the failing test, run the suite and report the diff"
+              rows={4}
+              maxLength={4000}
+              disabled={active}
+              aria-label="Mission goal"
+            />
+            <div className="ctl-goal__meta">
+              <span>{active ? "LOCKED WHILE APEX DRIVES" : "NATURAL LANGUAGE · 4000 MAX"}</span>
+              <span>{(active && state ? state.goal : draftGoal).length} / 4000</span>
+            </div>
+          </div>
+
+          <div className="ctl-block">
+            <div className="ctl-block__head">
+              <span>CAPABILITIES</span>
+              <button
+                type="button"
+                className="ctl-link"
+                onClick={() => setAll(armedCount < CAPABILITIES.length)}
+                disabled={active}
+              >
+                {armedCount < CAPABILITIES.length ? "ARM ALL" : "DISARM ALL"}
+              </button>
+            </div>
+            <div className="ctl-caps">
+              {CAPABILITIES.map((cap) => {
+                const on = Boolean(permissionMap[cap.key]);
+                return (
+                  <button
+                    key={cap.key}
+                    type="button"
+                    className={`ctl-cap${on ? " is-on" : ""}`}
+                    onClick={() => toggleCapability(cap.key)}
+                    disabled={active}
+                    title={cap.detail}
+                  >
+                    <span>{cap.label}</span>
+                    <i>{on ? "ARMED" : "OFF"}</i>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="ctl-fine">
+              {armedCount} / {CAPABILITIES.length} armed · every action is written
+              to the audit log · file writes are snapshotted before they land.
+            </p>
+          </div>
+
+          <div className="ctl-block">
+            <div className="ctl-block__head">
+              <span>ENGINE</span>
+              <span>{online ? "OLLAMA LINKED" : "LOCAL ONLY"}</span>
+            </div>
+            <label className="ctl-field">
+              <span>PLANNER</span>
+              <select
+                value={plannerModel}
+                disabled={active}
+                onChange={(event) => setPlannerModel(event.target.value)}
+              >
+                {plannerChoices.length ? (
+                  plannerChoices.map((model) => (
+                    <option key={model.name} value={model.name}>
+                      {model.name}
+                    </option>
+                  ))
+                ) : (
+                  <option value={plannerModel}>{plannerModel}</option>
+                )}
+              </select>
+            </label>
+            <label className="ctl-field">
+              <span>VISION</span>
+              <select
+                value={visionModel}
+                disabled={active || !vision}
+                onChange={(event) => setVisionModel(event.target.value)}
+              >
+                {(visionChoices.length
+                  ? visionChoices.map((model) => model.name)
+                  : [visionModel]
+                ).map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="ctl-field ctl-field--num">
+              <span>STEP BUDGET</span>
+              <input
+                type="number"
+                min={1}
+                max={60}
+                value={maxSteps}
+                disabled={active}
+                onChange={(event) =>
+                  setMaxSteps(
+                    Math.max(1, Math.min(60, Number(event.target.value) || 1)),
+                  )
+                }
+              />
+            </label>
+            <button
+              type="button"
+              className={`ctl-switch${vision ? " is-on" : ""}`}
+              onClick={() => setVision((value) => !value)}
+              disabled={active}
+            >
+              <i /> VISION READ <em>{vision ? "ON" : "OFF"}</em>
+            </button>
+            <button
+              type="button"
+              className={`ctl-switch ctl-switch--danger${autoApprove ? " is-on" : ""}`}
+              onClick={() => setAutoApprove((value) => !value)}
+              disabled={active}
+            >
+              <i /> AUTO-APPROVE RISKY <em>{autoApprove ? "ON" : "OFF"}</em>
+            </button>
+            <p className="ctl-fine">
+              {autoApprove
+                ? "High-risk writes and commands will run without asking. Use only for a trusted, scoped mission."
+                : "High-risk writes and commands pause here for an explicit allow."}
+            </p>
+          </div>
+
+          <div className="ctl-block ctl-block--run">
+            <div className="ctl-block__head">
+              <span>RUN</span>
+              <span>
+                STEP {state ? Math.min(state.step + 1, state.maxSteps) : 0} /{" "}
+                {state?.maxSteps ?? maxSteps}
+              </span>
+            </div>
+
+            {pending && (
+              <div className="ctl-approval" role="alert">
+                <span className="ctl-approval__risk">
+                  APPROVAL REQUIRED · {String(pending.risk).toUpperCase()}
+                </span>
+                <b>{pending.description}</b>
+                <p>{pending.reason}</p>
+                <pre>{JSON.stringify(pending.args, null, 2).slice(0, 900)}</pre>
+                <div className="ctl-approval__btns">
+                  <button
+                    ref={approveRef}
+                    type="button"
+                    className="ctl-btn ctl-btn--acid"
+                    onClick={() => void control.approve(pending.id, true)}
+                  >
+                    {busy === "approve" ? "RELEASING…" : "ALLOW ONCE"}
+                  </button>
+                  <button
+                    type="button"
+                    className="ctl-btn ctl-btn--danger"
+                    onClick={() => void control.approve(pending.id, false)}
+                  >
+                    DENY + STOP
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {state?.currentAction && (
+              <div className="ctl-now">
+                <span>
+                  {state.currentAction.action.toUpperCase()} ·{" "}
+                  {state.currentAction.description}
+                </span>
+                {state.currentAction.thought && (
+                  <p>{state.currentAction.thought}</p>
+                )}
+                {state.currentAction.verify && (
+                  <em>VERIFY · {state.currentAction.verify}</em>
+                )}
+              </div>
+            )}
+
+            {active ? (
+              <div className="ctl-run">
+                {status === "running" && (
+                  <button
+                    type="button"
+                    className="ctl-btn ctl-btn--ghost"
+                    onClick={() => void control.pause()}
+                  >
+                    {busy === "pause" ? "HOLDING…" : "HOLD"}
+                  </button>
+                )}
+                {status === "paused" && (
+                  <button
+                    type="button"
+                    className="ctl-btn ctl-btn--acid"
+                    onClick={() => void control.resume()}
+                  >
+                    {busy === "resume" ? "RELEASING…" : "RESUME LOOP"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="ctl-btn ctl-btn--ghost"
+                  onClick={yieldScreen}
+                >
+                  YIELD SCREEN
+                </button>
+                <button
+                  type="button"
+                  className="ctl-btn ctl-btn--danger"
+                  onClick={() => void control.stop("Emergency stop from console")}
+                >
+                  {busy === "stop" ? "STOPPING…" : "EMERGENCY STOP"}
+                </button>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="ctl-btn ctl-btn--primary"
+                  onClick={() => void engage()}
+                  disabled={!online || busy === "start"}
+                >
+                  {busy === "start" ? "ARMING ENGINE…" : "ENGAGE CONTROL"}
+                  <span aria-hidden="true">↗</span>
+                </button>
+                {state && isTerminalStatus(state.status) && (
+                  <p className="ctl-fine">
+                    LAST RUN · {state.doneSummary || state.error || "no summary"}
+                  </p>
+                )}
+              </>
+            )}
+
+            {notice && <p className="ctl-notice">{notice}</p>}
+            {error && <p className="ctl-error">{error}</p>}
+          </div>
+
+          {state && (
+            <div className="ctl-block">
+              <div className="ctl-block__head">
+                <span>READOUT</span>
+                <span>{clock(elapsed)}</span>
+              </div>
+              <div className="ctl-readout">
+                <div>
+                  <span>ACTIVE</span>
+                  <b>{state.observation?.active?.title?.slice(0, 40) ?? "—"}</b>
+                </div>
+                <div>
+                  <span>FOCUS</span>
+                  <b>
+                    {state.observation?.focused?.name?.slice(0, 40) ||
+                      state.observation?.focusedValue.slice(0, 40) ||
+                      "—"}
+                  </b>
+                </div>
+                <div>
+                  <span>TABS</span>
+                  <b>{state.browserTabs.length}</b>
+                </div>
+                <div>
+                  <span>VISION</span>
+                  <b>{state.observation?.vision ? "READ" : state.vision ? "PENDING" : "OFF"}</b>
+                </div>
+              </div>
+              {state.lastVerify && (
+                <p className="ctl-verify">VERIFY · {state.lastVerify}</p>
+              )}
+              {state.doneSummary && (
+                <p className="ctl-summary">{state.doneSummary}</p>
+              )}
+              {state.error && <p className="ctl-error">{state.error}</p>}
+            </div>
+          )}
         </aside>
       </div>
 
       <footer className="takeover__foot">
         <div className="takeover__cmd">
           <span>apex@local:~$</span>
-          <code>{typed}</code>
+          <code>
+            {state?.currentAction?.description ||
+              state?.goal ||
+              draftGoal ||
+              "take control"}
+          </code>
           <i className="takeover__caret" aria-hidden="true" />
         </div>
         <div className="takeover__track" aria-hidden="true">
@@ -376,13 +905,13 @@ export function Takeover({ onRelease }: Props) {
         <div className="takeover__foot-meta">
           <span>ELAPSED {clock(elapsed)}</span>
           <span>
-            STEPS {String(Math.min(step + 1, STEPS.length)).padStart(2, "0")} /{" "}
-            {String(STEPS.length).padStart(2, "0")}
+            STEP {state ? Math.min(state.step + 1, state.maxSteps) : 0} /{" "}
+            {state?.maxSteps ?? maxSteps}
           </span>
           <span>
-            {done
-              ? "TASK COMPLETE · CONTROL HELD"
-              : "LOCAL · NO METER · SHADOW ON"}
+            {online
+              ? "LOCAL LOOPBACK · UNDO ARMED · ESC TAKES IT BACK"
+              : "DAEMON OFFLINE · NOTHING LEAVES THIS MACHINE"}
           </span>
         </div>
       </footer>

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ControlDock } from "./ControlDock";
+import type { ControlApi } from "../hooks/useControl";
 import { sound } from "../lib/sound";
 
 type Lane = {
@@ -114,9 +116,10 @@ const LANES: Lane[] = [
 
 type Props = {
   onTakeControl: () => void;
+  control: ControlApi;
 };
 
-export function GridDeck({ onTakeControl }: Props) {
+export function GridDeck({ onTakeControl, control }: Props) {
   const [selected, setSelected] = useState<number | null>(null);
   const tiles = useRef<Array<HTMLButtonElement | null>>([]);
   const list = useRef<HTMLDivElement | null>(null);
@@ -285,7 +288,7 @@ export function GridDeck({ onTakeControl }: Props) {
 
         {lane && (
           <div
-            className="lane"
+            className={`lane${lane.n === "06" ? " lane--control" : ""}`}
             id="grid-lane-panel"
             ref={panel}
             role="region"
@@ -340,10 +343,15 @@ export function GridDeck({ onTakeControl }: Props) {
                   className="lane__cta"
                   onClick={onTakeControl}
                 >
-                  TAKE CONTROL <span aria-hidden="true">↗</span>
+                  {lane.n === "06" ? "OPEN CONTROL CONSOLE" : "TAKE CONTROL"}{" "}
+                  <span aria-hidden="true">↗</span>
                 </button>
               </div>
             </div>
+
+            {lane.n === "06" && (
+              <ControlDock control={control} onExpand={onTakeControl} />
+            )}
           </div>
         )}
       </div>

@@ -21,7 +21,8 @@ import { stopBrowser } from "./control/browser.mjs";
 const VERSION = "1.3.0";
 const PORT = Number(process.env.APEX_CONTROL_PORT || 4317);
 const HOST = "127.0.0.1";
-const READ_ONLY = process.env.APEX_CONTROL_READONLY === "1";
+const READ_ONLY =
+  process.env.APEX_CONTROL_READONLY === "1" || process.argv.includes("--readonly");
 const ORIGIN_OK = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i;
 
 let session = null;
