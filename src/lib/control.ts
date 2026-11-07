@@ -328,6 +328,7 @@ export function saveControlConfig(
     maxSteps: number;
     autoApprove: boolean;
     vision: boolean;
+    ocr: boolean;
     fileRoots: string[];
   }>,
 ): Promise<Record<string, unknown>> {

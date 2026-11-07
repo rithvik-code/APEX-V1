@@ -8,12 +8,15 @@ import {
   manualAction,
   pauseMission,
   resumeMission,
+  runOcr,
   saveControlConfig,
   startMission,
+  steerMission,
   stopMission,
   undoWrites,
   type ControlHealth,
   type ControlState,
+  type OcrResult,
   type StartMissionInput,
   type UndoResult,
 } from "../lib/control";
@@ -26,7 +29,8 @@ type ActionLabel =
   | "stop"
   | "approve"
   | "manual"
-  | "undo";
+  | "undo"
+  | "steer";
 
 export type ControlApi = {
   health: ControlHealth | null;
@@ -47,6 +51,8 @@ export type ControlApi = {
     name: string,
     args?: Record<string, unknown>,
   ) => Promise<ControlState | null>;
+  steer: (text: string) => Promise<ControlState | null>;
+  ocr: () => Promise<OcrResult | null>;
   undo: () => Promise<UndoResult | null>;
   saveConfig: typeof saveControlConfig;
   active: boolean;
