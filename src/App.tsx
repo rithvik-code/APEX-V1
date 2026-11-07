@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ApexEngine } from "./three/Engine";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import type { ApexEngine } from "./three/Engine";
 import { Terminal } from "./components/Terminal";
-import { CoreLab, type CoreVariant } from "./components/CoreLab";
+import type { CoreVariant } from "./components/CoreLab";
 import { GridDeck } from "./components/GridDeck";
 import { Takeover } from "./components/Takeover";
 import { Preloader } from "./components/Preloader";
 import { Cursor } from "./components/Cursor";
 import { sound } from "./lib/sound";
+
+const CoreLab = lazy(() =>
+  import("./components/CoreLab").then((module) => ({ default: module.CoreLab })),
+);
 
 const CHAPTERS = [
   { id: "top", n: "00", label: "IGNITION" },
@@ -83,6 +87,7 @@ export default function App() {
   const engineRef = useRef<ApexEngine | null>(null);
   const progressBarRef = useRef<HTMLSpanElement>(null);
   const progressTextRef = useRef<HTMLSpanElement>(null);
+  const pausedRef = useRef(false);
 
   const [booting, setBooting] = useState(true);
   const [scrolled, setScrolled] = useState(false);
@@ -102,20 +107,40 @@ export default function App() {
 
   const closeTakeover = useCallback(() => setTakeover(false), []);
 
+  const scrollToId = useCallback((id: string) => {
+    const target = document.getElementById(id);
+    if (!target) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ behavior: reduce ? "auto" : "smooth" });
+  }, []);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     const labels = labelsRef.current;
     if (!canvas || !labels) return;
-    const engine = new ApexEngine(canvas, labels);
-    engineRef.current = engine;
+    let disposed = false;
+    let engine: ApexEngine | null = null;
+
+    // The 3D world is the heaviest asset on the page. Load it as its own
+    // chunk during the preloader so first paint is not blocked by Three.js.
+    void import("./three/Engine").then(({ ApexEngine: Engine }) => {
+      if (disposed) return;
+      engine = new Engine(canvas, labels);
+      engineRef.current = engine;
+      engine.setPaused(pausedRef.current);
+    });
+
     return () => {
-      engine.dispose();
+      disposed = true;
+      engine?.dispose();
       engineRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    engineRef.current?.setPaused(coreView !== null || takeover);
+    const paused = coreView !== null || takeover;
+    pausedRef.current = paused;
+    engineRef.current?.setPaused(paused);
   }, [coreView, takeover]);
 
   useEffect(() => {
@@ -191,12 +216,11 @@ export default function App() {
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       const index = Number(event.key);
       if (!Number.isInteger(index) || index < 0 || index >= CHAPTERS.length) return;
-      const target = document.getElementById(CHAPTERS[index].id);
-      target?.scrollIntoView({ behavior: "smooth" });
+      scrollToId(CHAPTERS[index].id);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [coreView, takeover]);
+  }, [coreView, takeover, scrollToId]);
 
   const finishBoot = () => {
     setBooting(false);
@@ -207,12 +231,11 @@ export default function App() {
     setAudioOn(sound.toggle());
   };
 
-  const jump = (id: string) => {
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
-  };
-
   return (
     <div className={`site${booting ? "" : " is-ready"}`}>
+      <a className="skip-link" href="#main">
+        SKIP TO CONTENT
+      </a>
       {booting && <Preloader onDone={finishBoot} />}
       <Cursor />
 
@@ -257,7 +280,11 @@ export default function App() {
 
         <nav className="topbar__nav" aria-label="Chapters">
           {CHAPTERS.slice(1).map((chapter) => (
-            <a key={chapter.id} href={`#${chapter.id}`}>
+            <a
+              key={chapter.id}
+              href={`#${chapter.id}`}
+              aria-current={active === chapter.id ? "location" : undefined}
+            >
               <span>{chapter.n}</span>
               {chapter.label}
             </a>
@@ -285,7 +312,10 @@ export default function App() {
         <ul>
           {CHAPTERS.map((chapter) => (
             <li key={chapter.id} className={active === chapter.id ? "is-active" : ""}>
-              <a href={`#${chapter.id}`}>
+              <a
+                href={`#${chapter.id}`}
+                aria-current={active === chapter.id ? "location" : undefined}
+              >
                 <span className="rail__idx">{chapter.n}</span>
                 <span className="rail__line" />
                 <span className="rail__name">{chapter.label}</span>
@@ -296,7 +326,7 @@ export default function App() {
         <span className="rail__hint">KEYS 0—{CHAPTERS.length - 1}</span>
       </aside>
 
-      <main>
+      <main id="main">
         <section className="hero" id="top">
           <div className="hero__aside" data-reveal>
             <span className="micro">[ LOCAL-FIRST / NO METER ]</span>
@@ -328,7 +358,7 @@ export default function App() {
               <button
                 type="button"
                 className="btn btn--solid"
-                onClick={() => jump("pitwall")}
+                onClick={() => scrollToId("pitwall")}
               >
                 ENTER THE PIT WALL <span aria-hidden="true">↘</span>
               </button>
@@ -336,6 +366,7 @@ export default function App() {
                 type="button"
                 className="cmdline"
                 onClick={() => copy(INSTALL_CMD, "hero")}
+                aria-label={`Copy install command: ${INSTALL_CMD}`}
               >
                 <span>$</span> {INSTALL_CMD}
                 <b>{copied === "hero" ? "COPIED" : "COPY"}</b>
@@ -360,7 +391,7 @@ export default function App() {
             <button
               type="button"
               className="scrollcue"
-              onClick={() => jump("manifesto")}
+              onClick={() => scrollToId("manifesto")}
             >
               SCROLL TO IGNITE
               <span aria-hidden="true" />
@@ -669,6 +700,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => copy(INSTALL_CMD, "install")}
+                  aria-label="Copy install command"
                 >
                   {copied === "install" ? "COPIED" : "COPY"}
                 </button>
@@ -677,7 +709,11 @@ export default function App() {
                 <code>
                   <span>$</span> apex
                 </code>
-                <button type="button" onClick={() => copy("apex", "run")}>
+                <button
+                  type="button"
+                  onClick={() => copy("apex", "run")}
+                  aria-label="Copy run command"
+                >
                   {copied === "run" ? "COPIED" : "COPY"}
                 </button>
               </div>
@@ -761,7 +797,7 @@ export default function App() {
           <button
             type="button"
             className="footer__back"
-            onClick={() => jump("top")}
+            onClick={() => scrollToId("top")}
           >
             BACK TO IGNITION <span aria-hidden="true">↑</span>
           </button>
@@ -794,11 +830,23 @@ export default function App() {
       </div>
 
       {coreView && (
-        <CoreLab
-          variant={coreView}
-          onChange={setCoreView}
-          onClose={() => setCoreView(null)}
-        />
+        <Suspense
+          fallback={
+            <div
+              className="corelab corelab--loading"
+              role="status"
+              aria-live="polite"
+            >
+              <span>CORE LAB / SPOOLING GEOMETRY…</span>
+            </div>
+          }
+        >
+          <CoreLab
+            variant={coreView}
+            onChange={setCoreView}
+            onClose={() => setCoreView(null)}
+          />
+        </Suspense>
       )}
 
       {takeover && <Takeover onRelease={closeTakeover} />}

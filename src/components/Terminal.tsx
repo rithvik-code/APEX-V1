@@ -424,15 +424,30 @@ export function Terminal() {
           <i />
           {linkLabel}
         </span>
-        <button type="button" className="term__textbtn" onClick={copySession}>
+        <button
+          type="button"
+          className="term__textbtn"
+          onClick={copySession}
+          aria-label="Copy session transcript"
+        >
           {notice || "COPY"}
         </button>
-        <button type="button" className="term__linkbtn" onClick={openSettings}>
+        <button
+          type="button"
+          className="term__linkbtn"
+          onClick={openSettings}
+          aria-expanded={settingsOpen}
+        >
           LINK ↗
         </button>
       </div>
 
-      <div className="term__body" ref={bodyRef}>
+      <div
+        className="term__body"
+        ref={bodyRef}
+        role="region"
+        aria-label="Terminal transcript"
+      >
         <div className="term__boot">
           <span>APEX KERNEL v1.2.0 / BUILD 2026.11.05</span>
           <span>LOCAL-FIRST INFERENCE ENGINE</span>
@@ -480,13 +495,18 @@ export function Terminal() {
       </div>
 
       {settingsOpen && (
-        <div className="term__settings">
+        <div
+          className="term__settings"
+          role="group"
+          aria-label="Link configuration"
+        >
           <div className="term__settings-head">
             <span>LINK CONFIGURATION</span>
             <button
               type="button"
               className="term__textbtn"
               onClick={() => setSettingsOpen(false)}
+              aria-label="Close link configuration"
             >
               CLOSE [ESC]
             </button>
@@ -567,6 +587,7 @@ export function Terminal() {
                     window.setTimeout(() => setNotice(""), 2000);
                   });
                 }}
+                aria-label="Scan for local models"
               >
                 SCAN
               </button>
@@ -595,7 +616,11 @@ export function Terminal() {
         ))}
       </div>
 
-      <form className="term__input" onSubmit={onSubmit}>
+      <form
+        className="term__input"
+        onSubmit={onSubmit}
+        aria-label="Terminal command"
+      >
         <span className="term__prompt">apex@local:~$</span>
         <input
           ref={inputRef}
@@ -612,7 +637,7 @@ export function Terminal() {
         </button>
       </form>
 
-      <div className="term__status">
+      <div className="term__status" role="status" aria-live="polite">
         <span>
           PROVIDER <b>{providerLabel}</b>
         </span>
@@ -626,6 +651,9 @@ export function Terminal() {
           {streaming ? "STREAM ACTIVE" : "READY"} <i />
         </span>
       </div>
+      <span className="sr-only" role="status" aria-live="polite">
+        {notice}
+      </span>
     </div>
   );
 }

@@ -10,6 +10,13 @@ import { createSuperbike } from "./bike";
 
 const ACID = 0xc8ff16;
 
+// Retina-crisp output, but cap the fill cost on low-core machines.
+function renderPixelRatio(): number {
+  const dpr = window.devicePixelRatio || 1;
+  const cores = navigator.hardwareConcurrency;
+  return Math.min(dpr, cores && cores <= 4 ? 1.5 : 2);
+}
+
 type Keyframe = {
   p: number;
   pos: [number, number, number];
@@ -146,7 +153,7 @@ export class ApexEngine {
       antialias: true,
       powerPreference: "high-performance",
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.renderer.setPixelRatio(renderPixelRatio());
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
@@ -221,7 +228,7 @@ export class ApexEngine {
     this.scene.add(bgGlow);
 
     this.composer = new EffectComposer(this.renderer);
-    this.composer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.composer.setPixelRatio(renderPixelRatio());
     this.composer.setSize(window.innerWidth, window.innerHeight);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     const bloom = new UnrealBloomPass(
@@ -493,9 +500,9 @@ export class ApexEngine {
     const h = window.innerHeight;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.renderer.setPixelRatio(renderPixelRatio());
     this.renderer.setSize(w, h);
-    this.composer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.composer.setPixelRatio(renderPixelRatio());
     this.composer.setSize(w, h);
     this.crt.uniforms.uRes.value.set(w, h);
   }
