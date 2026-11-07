@@ -8,12 +8,17 @@ import {
 import {
   ALL_ARMED,
   CAPABILITIES,
+  cancelPull,
+  getPulls,
   isActiveStatus,
   isTerminalStatus,
   mediaUrl,
+  pullModel,
   type CapabilityKey,
   type ControlStatus,
+  type OcrResult,
   type Permissions,
+  type PullState,
   type ScreenBounds,
 } from "../lib/control";
 import type { ControlApi } from "../hooks/useControl";
@@ -41,8 +46,17 @@ const STATUS_TONE: Record<ControlStatus, string> = {
 
 const TOOLS: Array<{ name: string; label: string; args?: Record<string, unknown> }> = [
   { name: "screenshot", label: "CAPTURE" },
+  { name: "ocr_screen", label: "READ SCREEN" },
   { name: "list_windows", label: "WINDOWS" },
   { name: "browser_tabs", label: "TABS" },
+];
+
+const RECOMMENDED: Array<{ name: string; role: string; note: string }> = [
+  { name: "qwen2.5vl:3b", role: "VISION", note: "reads screens like text — strongest free eyes" },
+  { name: "qwen2.5vl:7b", role: "VISION", note: "deeper vision, needs headroom" },
+  { name: "qwen3:8b", role: "PLANNER", note: "sharper multi-step reasoning" },
+  { name: "llama3.1:8b", role: "PLANNER", note: "strong tool calling" },
+  { name: "qwen2.5:3b", role: "FAST", note: "low-latency planner for CPU-only rigs" },
 ];
 
 function clock(ms: number): string {
@@ -96,6 +110,7 @@ export function Takeover({ control, onRelease }: Props) {
   const [armed, setArmed] = useState<Permissions>({ ...ALL_ARMED });
   const [autoApprove, setAutoApprove] = useState(false);
   const [vision, setVision] = useState(false);
+  const [ocr, setOcr] = useState(true);
   const [plannerModel, setPlannerModel] = useState("qwen3:4b");
   const [visionModel, setVisionModel] = useState("gemma3:4b");
   const [maxSteps, setMaxSteps] = useState(20);
@@ -104,6 +119,11 @@ export function Takeover({ control, onRelease }: Props) {
   const [cursorAt, setCursorAt] = useState<{ x: number; y: number } | null>(null);
   const [notice, setNotice] = useState("");
   const [now, setNow] = useState(Date.now());
+  const [steerDraft, setSteerDraft] = useState("");
+  const [ocrResult, setOcrResult] = useState<OcrResult | null>(null);
+  const [pulls, setPulls] = useState<Record<string, PullState>>({});
+  const [feedFailed, setFeedFailed] = useState(false);
+  const pullSnapshot = useRef<Record<string, boolean>>({});
 
   const permissionMap: Permissions =
     active && state ? state.permissions : armed;
@@ -143,7 +163,36 @@ export function Takeover({ control, onRelease }: Props) {
     setMaxSteps(health.defaults.maxSteps);
     setAutoApprove(Boolean(health.defaults.autoApprove));
     setVision(Boolean(health.defaults.vision));
+    setOcr(health.defaults.ocr !== false);
   }, [health]);
+
+  useEffect(() => {
+    if (!online) return;
+    let stop = false;
+    const tick = async () => {
+      try {
+        const { pulls: next } = await getPulls();
+        if (stop) return;
+        setPulls(Object.fromEntries(next.map((pull) => [pull.model, pull])));
+        let completed = false;
+        for (const pull of next) {
+          if (pull.done && pull.status === "ready" && pullSnapshot.current[pull.model] === false) {
+            completed = true;
+          }
+          pullSnapshot.current[pull.model] = pull.done;
+        }
+        if (completed) void control.refresh();
+      } catch {
+        // Daemon hiccup; the next tick retries.
+      }
+    };
+    void tick();
+    const id = window.setInterval(tick, 2500);
+    return () => {
+      stop = true;
+      window.clearInterval(id);
+    };
+  }, [online, control]);
 
   useEffect(() => {
     returnFocus.current =
@@ -249,6 +298,7 @@ export function Takeover({ control, onRelease }: Props) {
       permissions: armed,
       autoApprove,
       vision,
+      ocr,
       plannerModel,
       visionModel,
       maxSteps,
@@ -348,6 +398,49 @@ export function Takeover({ control, onRelease }: Props) {
     }
   };
 
+  const sendSteer = async () => {
+    const text = steerDraft.trim();
+    if (!text || !state) return;
+    const next = await control.steer(text);
+    if (next) {
+      setSteerDraft("");
+      flash("STEERING QUEUED · APEX reads it at the next step");
+    }
+  };
+
+  const readScreen = async () => {
+    if (!state) {
+      flash("Engage a mission first — OCR runs inside a session.");
+      return;
+    }
+    sound.tick("click");
+    const result = await control.ocr();
+    if (result) {
+      setOcrResult(result);
+      flash(`OCR · ${result.lines.length} text regions · ${result.engine}`);
+    }
+  };
+
+  const installModel = async (name: string) => {
+    sound.tick("click");
+    try {
+      const { pull } = await pullModel(name);
+      setPulls((current) => ({ ...current, [name]: pull }));
+      pullSnapshot.current[name] = false;
+      flash(`PULLING ${name} · progress lands in the bay`);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Pull failed");
+    }
+  };
+
+  const cancelModel = async (name: string) => {
+    try {
+      await cancelPull(name);
+    } catch {
+      // The pull may have already finished.
+    }
+  };
+
   const elapsed = state
     ? active
       ? now - state.startedAt
@@ -363,6 +456,8 @@ export function Takeover({ control, onRelease }: Props) {
   const plannerChoices = models.filter((model) => model.tools);
   const visionChoices = models.filter((model) => model.vision);
   const shot = mediaUrl(state?.shotUrl);
+  const feedSrc = online && !feedFailed ? mediaUrl("/api/control/screen/stream") : null;
+  const screenSrc = feedSrc ?? shot;
   const pending = state?.pendingApproval;
   const lastLog = state?.logs[state.logs.length - 1];
 
@@ -460,16 +555,22 @@ export function Takeover({ control, onRelease }: Props) {
       <div className="ctl-body">
         <section className="ctl-main">
           <div className={`ctl-screen${clickMode ? " is-manual" : ""}`}>
-            {shot ? (
+            {screenSrc ? (
               <img
                 ref={imgRef}
-                src={shot}
+                src={screenSrc}
                 alt="Live desktop capture from the APEX control daemon"
                 draggable={false}
                 onClick={onScreenClick}
                 onMouseMove={onScreenMove}
                 onMouseLeave={() => setCursorAt(null)}
-                onError={() => flash("Screen feed dropped; waiting for the next frame.")}
+                onError={() => {
+                  if (feedSrc) {
+                    setFeedFailed(true);
+                  } else {
+                    flash("Screen feed dropped; waiting for the next frame.");
+                  }
+                }}
               />
             ) : (
               <div className="ctl-screen__empty">
@@ -529,7 +630,9 @@ export function Takeover({ control, onRelease }: Props) {
                   ? `CURSOR ${cursorAt.x}, ${cursorAt.y}`
                   : clickMode
                     ? "CLICK MODE ARMED · CLICK THE FEED"
-                    : "APEX VISION / LOCAL"}
+                    : feedSrc
+                      ? `LIVE FEED${health?.live?.fps ? ` · ${health.live.fps} FPS` : ""}`
+                      : "APEX VISION / LOCAL"}
               </span>
               <span>{state?.observation?.capturedAt ? `FRAME ${logTime(state.observation.capturedAt)}` : "STANDBY"}</span>
             </div>
@@ -568,6 +671,53 @@ export function Takeover({ control, onRelease }: Props) {
                   : "FOCUS / —"}
             </span>
           </div>
+
+          {state && (
+            <form
+              className="ctl-steer"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void sendSteer();
+              }}
+            >
+              <span className="ctl-steer__label">STEER</span>
+              <input
+                value={steerDraft}
+                maxLength={2000}
+                onChange={(event) => setSteerDraft(event.target.value)}
+                placeholder={
+                  active
+                    ? "change the plan mid-flight — APEX reads this at the next step"
+                    : "engage a mission, then steer it while it runs"
+                }
+                aria-label="Steer the running mission"
+              />
+              <button type="submit" disabled={!steerDraft.trim() || busy === "steer"}>
+                {busy === "steer" ? "···" : "SEND"}
+              </button>
+              {state.steering?.length ? (
+                <em>{state.steering.length} QUEUED</em>
+              ) : null}
+            </form>
+          )}
+
+          {ocrResult && (
+            <div className="ctl-ocr" role="status">
+              <div className="ctl-ocr__head">
+                <span>
+                  SCREEN TEXT · {ocrResult.lines.length} REGIONS · {ocrResult.engine}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setOcrResult(null)}
+                  aria-label="Dismiss OCR panel"
+                >
+                  ×
+                </button>
+              </div>
+              <pre>{ocrResult.text.slice(0, 900)}</pre>
+            </div>
+          )}
 
           <div className="ctl-log">
             <div className="ctl-log__head">
@@ -670,7 +820,10 @@ export function Takeover({ control, onRelease }: Props) {
               <select
                 value={plannerModel}
                 disabled={active}
-                onChange={(event) => setPlannerModel(event.target.value)}
+                onChange={(event) => {
+                  setPlannerModel(event.target.value);
+                  void control.saveConfig({ plannerModel: event.target.value });
+                }}
               >
                 {plannerChoices.length ? (
                   plannerChoices.map((model) => (
@@ -688,7 +841,10 @@ export function Takeover({ control, onRelease }: Props) {
               <select
                 value={visionModel}
                 disabled={active || !vision}
-                onChange={(event) => setVisionModel(event.target.value)}
+                onChange={(event) => {
+                  setVisionModel(event.target.value);
+                  void control.saveConfig({ visionModel: event.target.value });
+                }}
               >
                 {(visionChoices.length
                   ? visionChoices.map((model) => model.name)
@@ -718,10 +874,24 @@ export function Takeover({ control, onRelease }: Props) {
             <button
               type="button"
               className={`ctl-switch${vision ? " is-on" : ""}`}
-              onClick={() => setVision((value) => !value)}
+              onClick={() => {
+                setVision((value) => !value);
+                void control.saveConfig({ vision: !vision });
+              }}
               disabled={active}
             >
               <i /> VISION READ <em>{vision ? "ON" : "OFF"}</em>
+            </button>
+            <button
+              type="button"
+              className={`ctl-switch${ocr ? " is-on" : ""}`}
+              onClick={() => {
+                setOcr((value) => !value);
+                void control.saveConfig({ ocr: !ocr });
+              }}
+              disabled={active}
+            >
+              <i /> OCR TEXT READ <em>{ocr ? "ON" : "OFF"}</em>
             </button>
             <button
               type="button"
