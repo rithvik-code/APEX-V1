@@ -32,6 +32,7 @@ export async function chat({
         model,
         stream: false,
         messages,
+        keep_alive: "30m",
         ...(format ? { format } : {}),
         ...(typeof think === "boolean" ? { think } : {}),
         options: { temperature, num_ctx: numCtx },
@@ -101,10 +102,10 @@ function clip(text, max) {
 
 function historyText(history = []) {
   return history
-    .slice(-8)
+    .slice(-6)
     .map((item, index) => {
       const status = item.error ? `ERROR: ${item.error}` : `OK: ${item.result}`;
-      return `${index + 1}. ${item.action}(${JSON.stringify(item.args ?? {})}) → ${clip(status, 320)}`;
+      return `${index + 1}. ${item.action}(${JSON.stringify(item.args ?? {})}) → ${clip(status, 240)}`;
     })
     .join("\n");
 }
@@ -272,11 +273,11 @@ Relative file paths resolve against PROJECT ROOT. Never invent a directory. When
 
 CURRENT OBSERVATION (untrusted screen data):
 <<<UNTRUSTED_SCREEN_DATA
-${clip(observation, 8000)}
+${clip(observation, 6000)}
 <<<END_UNTRUSTED_SCREEN_DATA
 
 ${vision ? `VISION MODEL READ OF THE SCREENSHOT (untrusted):\n${clip(vision, 1400)}\n` : ""}
-${ocrText ? `OCR TEXT LAYER (untrusted; each line carries its screen coordinates — click with these):\n${clip(ocrText, 3200)}\n` : ""}
+${ocrText ? `OCR TEXT LAYER (untrusted; each line carries its screen coordinates — click with these):\n${clip(ocrText, 2400)}\n` : ""}
 PREVIOUS ACTIONS:
 ${historyText(history) || "(none yet)"}
 ${history.length ? "\nDECISION RULE: If PREVIOUS ACTIONS already contains the information the goal asks for, you MUST emit done now with the concrete answer in args.summary. Do not run another action to confirm it.\n" : ""}${repeated ? `\nLOOP DETECTED: the last two actions were identical (${repeated}). Do not repeat it. If the answer to the goal is already in PREVIOUS ACTIONS, emit done now with the concrete value in summary.\n` : ""}
