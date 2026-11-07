@@ -21,6 +21,7 @@ import { stopBrowser } from "./control/browser.mjs";
 const VERSION = "1.3.0";
 const PORT = Number(process.env.APEX_CONTROL_PORT || 4317);
 const HOST = "127.0.0.1";
+const READ_ONLY = process.env.APEX_CONTROL_READONLY === "1";
 const ORIGIN_OK = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i;
 
 let session = null;
@@ -249,11 +250,24 @@ async function route(req, res) {
     }
     let created;
     try {
+      const requestedPermissions = READ_ONLY
+        ? {
+            screen: true,
+            accessibility: true,
+            mouse: false,
+            keyboard: false,
+            apps: false,
+            browser: false,
+            files: false,
+            terminal: false,
+          }
+        : body.permissions ?? {};
       created = new ControlSession({
         goal,
-        permissions: body.permissions ?? {},
-        autoApprove:
-          typeof body.autoApprove === "boolean"
+        permissions: requestedPermissions,
+        autoApprove: READ_ONLY
+          ? false
+          : typeof body.autoApprove === "boolean"
             ? body.autoApprove
             : Boolean(config.autoApprove),
         vision:
@@ -261,7 +275,9 @@ async function route(req, res) {
         plannerModel: body.plannerModel || config.plannerModel || DEFAULT_PLANNER,
         visionModel: body.visionModel || config.visionModel || DEFAULT_VISION,
         endpoint: config.endpoint || DEFAULT_ENDPOINT,
-        maxSteps: body.maxSteps || config.maxSteps || 20,
+        maxSteps: READ_ONLY
+          ? Math.min(3, Number(body.maxSteps) || 3)
+          : body.maxSteps || config.maxSteps || 20,
         fileRoots: config.fileRoots,
         onEvent: (state) => {
           if (session?.id === state.id) broadcast(state);
@@ -346,6 +362,7 @@ server.listen(PORT, HOST, () => {
   console.log(`  node    ${process.version} · ${process.platform}`);
   console.log(`  ollama  ${DEFAULT_ENDPOINT}`);
   console.log(`  models  ${DEFAULT_PLANNER} + ${DEFAULT_VISION}`);
+  console.log(`  mode    ${READ_ONLY ? "READ-ONLY (screen + accessibility)" : "AUTHORIZED CAPABILITIES"}`);
   console.log("");
   console.log("  Loopback only. Arm capabilities from the APEX console.");
   console.log("  Ctrl+C stops the daemon and any running control session.");
