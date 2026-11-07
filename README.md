@@ -16,6 +16,7 @@ because the compute is yours.
 | --- | --- | --- |
 | Site | `src/` | Vite + React + Three.js. Procedural supercar, wireframe superbike, light tunnel, HUD, live terminal. |
 | CLI | `cli/` | `apex` — streaming chat plus an agent loop that reads, writes and runs on your machine. |
+| Control | `cli/server/` + `src/components/Takeover.tsx` | TAKE CONTROL — a localhost desktop engine with a live console and a grid-lane dock. |
 
 ## Ignition
 
@@ -162,6 +163,129 @@ That reduces the risk. It does not remove it — no prompt does, and a small mod
 weakest possible reader of that warning. This is why `project` tier is the default and why
 snapshots exist at all.
 
+## TAKE CONTROL — the desktop engine
+
+`apex` reads and edits files. TAKE CONTROL gives it eyes and hands: screen capture,
+the Windows accessibility tree, real mouse and keyboard input, application focus,
+Chrome tabs over the DevTools protocol, and a shell. A planner drives them in a
+loop — observe, plan, act, verify — until the goal is done or something blocks it.
+
+It is a localhost-only daemon plus a console that lives in the site's grid, as a
+panel or in workspace mode. Nothing leaves the machine; inference is still Ollama.
+
+```bash
+npm run apexd                # daemon on 127.0.0.1:4317
+apex control                 # start the same daemon from the CLI
+apex control status          # daemon, models, active mission
+npm run apexd:readonly       # screen + accessibility only, 3 steps
+npm run dev                  # site; TAKE CONTROL dock is in the grid
+```
+
+### A mission
+
+1. **Arm** the capabilities you are willing to grant. All eight are on by default.
+2. Type a goal — for example *"open Notepad, type a note, and close it without saving"*.
+3. **ENGAGE.** The console minimizes into a HUD so the windows it touches stay
+   visible, and restores itself when it needs an approval or a decision.
+4. Every step is streamed as it happens: the thought, the action, its arguments and
+   the result. The next plan is built from the actual result, not the intention.
+5. **High-risk actions** — `type_text`, `press_keys`, `file_write`, `file_replace`,
+   `browser_eval`, `run_command` — pause on a card showing the exact path, text or
+   command. ALLOW ONCE or DENY.
+6. **HOLD** pauses between steps, **RESUME** continues, **STOP** (or ESC) aborts and
+   kills child processes. **UNDO WRITES** restores and removes every file touched.
+7. A mission closes with `done` and a summary of what was verified, or with the exact
+   error that blocked it. An identical action repeated twice is cut off — the session
+   writes a summary from the evidence it already has instead of looping.
+
+### Capabilities
+
+| Capability | What it unlocks |
+| --- | --- |
+| `screen` | Screenshot capture at native resolution, downscaled for the console. |
+| `accessibility` | The Windows UIA tree: window titles, classes, focused control and value. |
+| `mouse` | Native `SendInput` move, click, drag and scroll. |
+| `keyboard` | Typed text and key chords (Ctrl+S, Alt+F4, …). |
+| `apps` | Launch apps, focus windows, enumerate what is open. |
+| `browser` | Chrome tabs over CDP: list, open, activate, close, navigate, click, type, eval. |
+| `files` | List, read, create, replace, mkdir — rooted and snapshotted. |
+| `terminal` | Shell commands with a blocklist, timeout and process kill. |
+
+Arming a capability decides what the planner can even see: disarming it removes its
+actions from the schema, so the model cannot call what it was not granted.
+
+### Engine
+
+```
+cli/server/apexd.mjs          HTTP + SSE daemon, routes, lifecycle
+cli/server/control/
+  session.mjs                 the loop: plan → guard → approve → execute → record
+  planner.mjs                 schema-constrained Ollama planner and summarizer
+  permissions.mjs             capabilities, risk table, action docs
+  desktop.mjs                 screen capture, UIA, SendInput, window control
+  browser.mjs                 Chrome DevTools protocol
+  files.mjs                   rooted file engine, snapshots, undo
+  terminal.mjs                shell execution and kill
+  powershell.mjs              -EncodedCommand bridge
+src/components/Takeover.tsx   live console: HUD, approvals, event stream
+src/components/ControlDock.tsx  the grid-lane dock
+src/hooks/useControl.ts       state, SSE, actions
+src/lib/control.ts            typed client
+src/styles.control.css        console styling
+```
+
+### Models
+
+The planner needs a tool-capable model. Observations are text — active window,
+accessibility summary, browser state — and when a vision model is attached, a
+factual description of the frame is added to the prompt.
+
+| Role | Default | Notes |
+| --- | --- | --- |
+| Planner | `qwen3:4b` | Structured output, thinking disabled for latency. |
+| Fallback | `qwen2.5:3b` | Any model reporting `tools` appears in the picker. |
+| Vision | `gemma3:4b` | Describes screenshots; listed under its own picker. |
+
+Both are chosen in the console and persisted with `POST /api/control/config`.
+
+### Safety
+
+- The daemon binds `127.0.0.1` only and rejects origins outside the allowlist.
+- File operations resolve against a root and refuse the APEX config directory and the
+  root itself.
+- Every write is snapshotted first; new files are recorded so undo can remove them.
+- Destructive shell patterns are blocklisted before the shell sees them.
+- High-risk actions need per-action approval unless AUTO-APPROVE is switched on.
+- ESC, STOP and `POST /api/control/stop` kill the child processes and end the mission.
+- Every mission writes `~/.apex/control/<id>/events.jsonl`; actions also append to
+  `~/.apex/actions.log`.
+- `--readonly` / `APEX_CONTROL_READONLY=1` grants only `screen` and `accessibility`
+  and caps the mission at 3 steps.
+- Content from files, commands and pages is wrapped as untrusted data before it
+  reaches the planner.
+
+### API
+
+Everything is under `http://127.0.0.1:4317`.
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| GET | `/api/health` | Daemon version, Ollama status, model capabilities. |
+| GET | `/api/control/state` | Active mission snapshot. |
+| GET | `/api/control/stream` | SSE: state, log, done. |
+| GET | `/api/control/screenshot` | Latest frame. |
+| GET | `/api/control/windows` | Visible top-level windows. |
+| GET | `/api/control/browser/tabs` | Chrome tabs. |
+| GET/POST | `/api/control/config` | Models, permissions, endpoint. |
+| POST | `/api/control/start` | Begin a mission. |
+| POST | `/api/control/pause` · `/resume` · `/stop` | Control the mission. |
+| POST | `/api/control/approve` | Allow or deny the pending high-risk action. |
+| POST | `/api/control/action` | Run one action manually from the console. |
+| POST | `/api/control/undo` | Restore and remove every file the mission touched. |
+
+Vite proxies `/api` to `4317`, so the console and the daemon are same-origin in
+development.
+
 ## Config
 
 Created on first run at `~/.apex/config.json`:
@@ -222,11 +346,18 @@ src/
   three/car.ts         procedural supercar + cockpit + V12 bay
   three/bike.ts        wireframe superbike + in-line four
   three/engines.ts     V12 biturbo and I4 DOHC 16V cutaways, animated
-  components/          Terminal, CoreLab, Preloader, Cursor
+  components/          Terminal, CoreLab, Preloader, Cursor, GridDeck,
+                       Takeover, ControlDock
+  hooks/useControl.ts  control state, SSE, mission actions
+  lib/control.ts       typed daemon client
   lib/ai.ts            demo / Ollama / OpenAI-compatible streaming
   lib/sound.ts         synthesized ambience
+  styles.control.css   control console styling
 cli/
   apex.mjs             the `apex` command — chat, agent loop, tiers, rollback, audit log
+  server/apexd.mjs     TAKE CONTROL daemon
+  server/control/      session loop, planner, permissions, desktop, browser,
+                       files, terminal, PowerShell bridge
 ```
 
 ## Notes
@@ -239,11 +370,13 @@ cli/
   cost of the 3D world, not a framework problem.
 - Agent mode needs a live model — it does not run against the demo provider — and an
   interactive terminal unless you pass `--yes`.
+- TAKE CONTROL is Windows-first: its input, accessibility and screen paths use Win32
+  through PowerShell. The planner, browser and filesystem engines are portable.
 
 ---
 
 ```
-  APEX · v1.2.0
+  APEX · v1.3.0
   NO KEY. NO METER. NO MIDDLEMAN.
   BUILT FOR THE LIMIT. RUNNING ON YOUR HARDWARE.
 ```

@@ -144,6 +144,13 @@ export class FileEngine {
   write(target, content, { append = false } = {}) {
     const file = this.resolve(target, { write: true });
     const snapshot = this.snapshot(file);
+    if (!snapshot) {
+      fs.mkdirSync(path.dirname(this.manifestPath), { recursive: true });
+      fs.appendFileSync(
+        this.manifestPath,
+        `${JSON.stringify({ ts: new Date().toISOString(), path: file, snapshot: null, created: true })}\n`,
+      );
+    }
     fs.mkdirSync(path.dirname(file), { recursive: true });
     if (append) fs.appendFileSync(file, String(content), "utf8");
     else fs.writeFileSync(file, String(content), "utf8");

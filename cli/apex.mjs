@@ -13,8 +13,9 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
 const CONFIG_DIR = path.join(os.homedir(), ".apex");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
 const SHADOW_DIR = path.join(CONFIG_DIR, "shadow");
@@ -110,6 +111,9 @@ function usage() {
   console.log(`  ${acid("apex")}                          interactive session`);
   console.log(`  ${acid('apex "prompt"')}                 one-shot answer`);
   console.log(`  ${acid('apex do "task"')}                agent mode — read, edit, run`);
+  console.log(`  ${acid("apex control")}                  desktop control daemon`);
+  console.log(`  ${acid("apex control status")}           daemon + live session state`);
+  console.log(`  ${acid("apex control --readonly")}       daemon, screen + accessibility only`);
   console.log(`  ${acid('cat file | apex "explain"')}     pipe context in`);
   console.log(`  ${acid("apex models")}                   list local models`);
   console.log(`  ${acid("apex undo")}                     roll back the last agent run`);
@@ -1481,6 +1485,82 @@ async function readStdin() {
   });
 }
 
+const CONTROL_ENDPOINT = process.env.APEX_CONTROL_URL || "http://127.0.0.1:4317";
+
+async function controlStatus() {
+  try {
+    const healthRes = await fetch(`${CONTROL_ENDPOINT}/api/health`, {
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!healthRes.ok) throw new Error(`HTTP ${healthRes.status}`);
+    const health = await healthRes.json();
+    const stateRes = await fetch(`${CONTROL_ENDPOINT}/api/control/state`, {
+      signal: AbortSignal.timeout(4000),
+    });
+    const payload = stateRes.ok ? await stateRes.json() : {};
+    const session = payload.state ?? payload;
+    console.log("");
+    console.log(
+      `  ${acid("APEX CONTROL")} ${faint(`v${health.version}`)} ${dim("/")} ${white(CONTROL_ENDPOINT)}`,
+    );
+    const models = (health.ollama?.models || []).map((model) => model.name).join(", ");
+    console.log(
+      `  ${dim("ollama")}   ${health.ollama?.ok ? acid("linked") : red("offline")} ${faint(models)}`,
+    );
+    if (session?.id) {
+      console.log(
+        `  ${dim("session")}  ${white(session.id)} ${dim(`${session.status} · step ${session.step}/${session.maxSteps}`)}`,
+      );
+      console.log(`  ${dim("goal")}     ${white(clip(session.goal || "", 110))}`);
+      if (session.pendingApproval) {
+        console.log(
+          `  ${dim("approval")} ${red(`${session.pendingApproval.action} waiting`)} ${dim("— open the console")}`,
+        );
+      }
+    } else {
+      console.log(`  ${dim("session")}  ${faint("none")}`);
+    }
+    if (health.defaults) {
+      console.log(
+        `  ${dim("planner")}  ${white(health.defaults.plannerModel)} ${faint(`· vision ${health.defaults.visionModel}`)}`,
+      );
+    }
+    console.log("");
+  } catch (error) {
+    console.error(red(`  no control daemon at ${CONTROL_ENDPOINT} (${error.message})`));
+    console.error(dim("  start it with: apex control"));
+    process.exitCode = 1;
+  }
+}
+
+function cmdControl(args) {
+  if (args.includes("status")) return controlStatus();
+  const daemon = fileURLToPath(new URL("./server/apexd.mjs", import.meta.url));
+  if (!fs.existsSync(daemon)) {
+    console.error(red(`  control daemon missing at ${daemon}`));
+    process.exitCode = 1;
+    return undefined;
+  }
+  const readonly = args.includes("--readonly");
+  header();
+  console.log(`  ${acid("CONTROL")} ${dim("→")} ${white("desktop engine")} ${faint(readonly ? "/ READ-ONLY" : "/ AUTHORIZED CAPABILITIES")}`);
+  console.log(faint("  observe · plan · act · verify — approvals pause high-risk actions"));
+  console.log(faint("  the browser console is served by the APEX site at /#grid"));
+  console.log("");
+  const child = spawn(
+    process.execPath,
+    [daemon, ...(readonly ? ["--readonly"] : [])],
+    { stdio: "inherit" },
+  );
+  process.on("SIGINT", () => child.kill("SIGINT"));
+  return new Promise((resolve) => {
+    child.on("exit", (code) => {
+      process.exitCode = code ?? 0;
+      resolve();
+    });
+  });
+}
+
 async function main() {
   let argv = process.argv.slice(2);
   state.autoApprove = process.env.APEX_YES === "1";
@@ -1515,6 +1595,11 @@ async function main() {
 
   if (argv[0] === "history") {
     cmdHistory(argv.slice(1));
+    return;
+  }
+
+  if (argv[0] === "control") {
+    await cmdControl(argv.slice(1));
     return;
   }
 

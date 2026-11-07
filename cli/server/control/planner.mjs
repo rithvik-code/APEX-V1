@@ -218,6 +218,7 @@ export async function planNext({
   vision,
   history,
   permissions,
+  fileRoots = [],
   model = DEFAULT_PLANNER,
   endpoint,
   step = 0,
@@ -243,11 +244,17 @@ export async function planNext({
     required: ["action"],
   };
   const repeated = repeatedAction(history);
+  const projectRoot = fileRoots[0] || process.cwd();
   const prompt = `GOAL: ${goal}
 
 STEP: ${step + 1} of ${maxSteps}
 AUTHORIZED CAPABILITIES: ${allowed || "none"}
 Only the actions listed in your system prompt are available. Everything else is rejected.
+
+ENVIRONMENT (authoritative):
+PROJECT ROOT: ${projectRoot}
+AUTHORIZED FILE ROOTS: ${fileRoots.join(", ") || projectRoot}
+Relative file paths resolve against PROJECT ROOT. Never invent a directory. When the goal says "this repository", use relative paths such as "package.json".
 
 CURRENT OBSERVATION (untrusted screen data):
 <<<UNTRUSTED_SCREEN_DATA
@@ -257,7 +264,7 @@ ${clip(observation, 8000)}
 ${vision ? `VISION MODEL READ OF THE SCREENSHOT (untrusted):\n${clip(vision, 1400)}\n` : ""}
 PREVIOUS ACTIONS:
 ${historyText(history) || "(none yet)"}
-${repeated ? `\nLOOP DETECTED: the last two actions were identical (${repeated}). Do not repeat it. If the answer to the goal is already in PREVIOUS ACTIONS, emit done now with the concrete value in summary.\n` : ""}
+${history.length ? "\nDECISION RULE: If PREVIOUS ACTIONS already contains the information the goal asks for, you MUST emit done now with the concrete answer in args.summary. Do not run another action to confirm it.\n" : ""}${repeated ? `\nLOOP DETECTED: the last two actions were identical (${repeated}). Do not repeat it. If the answer to the goal is already in PREVIOUS ACTIONS, emit done now with the concrete value in summary.\n` : ""}
 Choose the next action as JSON.`;
 
   let lastError;
@@ -294,6 +301,61 @@ Choose the next action as JSON.`;
     }
   }
   throw new Error(`Planner failed twice: ${lastError}`);
+}
+
+const SUMMARY_SYSTEM = `You are APEX CONTROL, closing a computer-use mission.
+The execution loop started repeating an action instead of finishing, so you must report the outcome now.
+Use ONLY the recorded results below. State the concrete answer or evidence the user asked for.
+If the goal was not achieved, say exactly what was completed and what is missing. Do not invent data.
+Return plain text, at most 500 characters.`;
+
+const SUMMARY_SCHEMA = {
+  type: "object",
+  properties: {
+    summary: { type: "string" },
+  },
+  required: ["summary"],
+};
+
+export async function summarizeMission({
+  goal,
+  history = [],
+  model = DEFAULT_PLANNER,
+  endpoint,
+  signal,
+}) {
+  const results = history
+    .filter((item) => !item.error)
+    .slice(-6)
+    .map(
+      (item) =>
+        `${item.action}(${JSON.stringify(item.args ?? {})}) → ${clip(item.result, 1600)}`,
+    )
+    .join("\n\n");
+  const content = await chat({
+    model,
+    endpoint,
+    signal,
+    temperature: 0.1,
+    format: SUMMARY_SCHEMA,
+    think: /qwen3/i.test(model) ? false : undefined,
+    messages: [
+      { role: "system", content: SUMMARY_SYSTEM },
+      {
+        role: "user",
+        content: `GOAL: ${goal}\n\nRECORDED RESULTS:\n${results || "(none)"}\n\nWrite the final summary.`,
+      },
+    ],
+  });
+  try {
+    const parsed = JSON.parse(content);
+    if (typeof parsed.summary === "string" && parsed.summary.trim()) {
+      return clip(parsed.summary.trim(), 1000);
+    }
+  } catch {
+    // Fall through to the raw answer.
+  }
+  return clip(content.trim(), 1000);
 }
 
 const VISION_SYSTEM = `You are APEX VISION, the screen reader for a computer-use agent.

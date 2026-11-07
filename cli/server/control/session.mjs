@@ -43,6 +43,7 @@ import {
   DEFAULT_VISION,
   describeScreen,
   planNext,
+  summarizeMission,
 } from "./planner.mjs";
 import { killAllPowerShell } from "./powershell.mjs";
 import { runCommand, stopCommands } from "./terminal.mjs";
@@ -133,6 +134,7 @@ export class ControlSession {
     this.lastVisionStep = -99;
     this.lastActionName = "";
     this.fileEngine = new FileEngine({ roots: fileRoots, sessionId: this.id });
+    this.fileRoots = this.fileEngine.roots;
     this.onEvent = onEvent;
     this.abort = new AbortController();
     this.eventsPath = path.join(CONTROL_DIR, this.id, "events.jsonl");
@@ -283,6 +285,7 @@ export class ControlSession {
         vision: observation.vision,
         history: this.history,
         permissions: this.permissions,
+        fileRoots: this.fileRoots,
         model: this.plannerModel,
         endpoint: this.endpoint,
         step: this.step,
@@ -310,9 +313,29 @@ export class ControlSession {
         (item) => !item.error && `${item.action}:${JSON.stringify(item.args)}` === signature,
       ).length;
       if (repeats >= 2) {
-        this.fail(
-          `Planner kept repeating ${decision.action} with identical arguments. Last result: ${clip(this.lastResult, 900)}`,
+        this.log(
+          "state",
+          "REPEAT GUARD",
+          `${decision.action} repeated; closing with recorded results`,
+          "low",
         );
+        try {
+          const summary = await summarizeMission({
+            goal: this.goal,
+            history: this.history,
+            model: this.plannerModel,
+            endpoint: this.endpoint,
+            signal: this.abort.signal,
+          });
+          if (this.status === "running") {
+            this.complete(summary || this.lastResult || "Task closed after repeated actions");
+          }
+        } catch (error) {
+          if (error?.name === "AbortError" || this.status !== "running") return;
+          this.fail(
+            `Planner kept repeating ${decision.action} with identical arguments. Last result: ${clip(this.lastResult, 900)}`,
+          );
+        }
         return;
       }
 

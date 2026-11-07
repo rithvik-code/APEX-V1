@@ -1,12 +1,12 @@
 {
   "name": "apex-cli",
-  "version": "1.2.0",
-  "description": "APEX — terminal-native AI with an agent mode. Local, unmetered, direct, undoable.",
+  "version": "1.3.0",
+  "description": "APEX — terminal-native AI with agent mode and a local desktop-control engine. Local, unmetered, direct, undoable.",
   "type": "module",
   "bin": {
     "apex": "apex.mjs"
   },
-  "files": ["apex.mjs", "README.md"],
+  "files": ["apex.mjs", "server", "README.md"],
   "engines": {
     "node": ">=18"
   },
