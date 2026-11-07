@@ -35,8 +35,10 @@ type Props = {
 export function ControlDock({ control, onExpand }: Props) {
   const { state, health, online, busy, error } = control;
   const [draft, setDraft] = useState("");
+  const [steerDraft, setSteerDraft] = useState("");
   const [armed, setArmed] = useState<Permissions>({ ...ALL_ARMED });
   const [notice, setNotice] = useState("");
+  const [feedFailed, setFeedFailed] = useState(false);
   const [now, setNow] = useState(Date.now());
   const inputRef = useRef<HTMLInputElement>(null);
   const active = isActiveStatus(state?.status);
@@ -44,6 +46,10 @@ export function ControlDock({ control, onExpand }: Props) {
   const armedCount = CAPABILITIES.filter(
     (cap) => permissions[cap.key as CapabilityKey],
   ).length;
+  const live = Boolean(online) && !feedFailed;
+  const feedSrc = live
+    ? mediaUrl("/api/control/screen/stream")
+    : (state?.shotUrl ? mediaUrl(state.shotUrl) : null);
 
   useEffect(() => {
     if (!active) return;
@@ -55,6 +61,14 @@ export function ControlDock({ control, onExpand }: Props) {
     if (active) return;
     setArmed((current) => ({ ...current, [key]: !current[key] }));
     sound.tick("click");
+  };
+
+  const sendSteer = async () => {
+    const text = steerDraft.trim();
+    if (!text || !active) return;
+    setSteerDraft("");
+    await control.steer(text);
+    setNotice("Steering delivered to APEX.");
   };
 
   const engage = async () => {
@@ -76,6 +90,7 @@ export function ControlDock({ control, onExpand }: Props) {
       permissions: armed,
       autoApprove: false,
       vision: Boolean(defaults?.vision),
+      ocr: defaults?.ocr !== false,
       plannerModel: defaults?.plannerModel ?? "qwen3:4b",
       visionModel: defaults?.visionModel ?? "gemma3:4b",
       maxSteps: defaults?.maxSteps ?? 20,
@@ -109,14 +124,24 @@ export function ControlDock({ control, onExpand }: Props) {
 
       <div className="ctl-dock__body">
         <div className="ctl-dock__feed">
-          {state?.shotUrl ? (
-            <img src={mediaUrl(state.shotUrl) ?? ""} alt="APEX live desktop feed" />
+          {feedSrc ? (
+            <img
+              src={feedSrc}
+              alt="APEX live desktop feed"
+              onError={() => {
+                if (live) setFeedFailed(true);
+              }}
+            />
           ) : (
             <span>{online ? "NO FRAME YET" : "DAEMON OFFLINE"}</span>
           )}
           <i className="ctl-dock__scan" aria-hidden="true" />
           <b>
-            {state ? `STEP ${Math.min(state.step + 1, state.maxSteps)} / ${state.maxSteps}` : "IDLE"}
+            {live && !state?.currentAction
+              ? "LIVE"
+              : state
+                ? `STEP ${Math.min(state.step + 1, state.maxSteps)} / ${state.maxSteps}`
+                : "IDLE"}
           </b>
           <em>{clock(elapsed)}</em>
         </div>
@@ -132,6 +157,30 @@ export function ControlDock({ control, onExpand }: Props) {
                     state.lastResult ||
                     "Awaiting the next observation…"}
               </span>
+              <form
+                className="ctl-dock__steer"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void sendSteer();
+                }}
+              >
+                <input
+                  type="text"
+                  value={steerDraft}
+                  maxLength={2000}
+                  placeholder="Steer APEX mid-mission…"
+                  onChange={(event) => setSteerDraft(event.target.value)}
+                  aria-label="Steer the running mission"
+                />
+                <button type="submit" disabled={!steerDraft.trim()}>
+                  SEND
+                </button>
+              </form>
+              {state.steering.length > 0 && (
+                <span className="ctl-dock__steered">
+                  {state.steering.length} DIRECTIVE{state.steering.length === 1 ? "" : "S"} QUEUED
+                </span>
+              )}
             </div>
           ) : (
             <div className="ctl-dock__mission">

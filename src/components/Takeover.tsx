@@ -654,7 +654,9 @@ export function Takeover({ control, onRelease }: Props) {
               <button
                 key={tool.name}
                 type="button"
-                onClick={() => void runTool(tool.name, tool.args)}
+                onClick={() =>
+                  void (tool.name === "ocr_screen" ? readScreen() : runTool(tool.name, tool.args))
+                }
                 disabled={!state}
               >
                 {tool.label}
@@ -905,6 +907,57 @@ export function Takeover({ control, onRelease }: Props) {
               {autoApprove
                 ? "High-risk writes and commands will run without asking. Use only for a trusted, scoped mission."
                 : "High-risk writes and commands pause here for an explicit allow."}
+            </p>
+          </div>
+
+          <div className="ctl-block">
+            <div className="ctl-block__head">
+              <span>MODEL BAY</span>
+              <span>{online ? "FREE · OLLAMA REGISTRY" : "OFFLINE"}</span>
+            </div>
+            <div className="ctl-models">
+              {RECOMMENDED.map((rec) => {
+                const pull = pulls[rec.name];
+                const installed = models.some((model) => model.name === rec.name);
+                const pulling = pull && !pull.done;
+                return (
+                  <div key={rec.name} className="ctl-model">
+                    <div className="ctl-model__info">
+                      <b>{rec.name}</b>
+                      <span>{rec.note}</span>
+                    </div>
+                    <i className={`ctl-model__role is-${rec.role.toLowerCase()}`}>
+                      {rec.role}
+                    </i>
+                    {pulling ? (
+                      <button
+                        type="button"
+                        className="ctl-model__btn is-live"
+                        onClick={() => void cancelModel(rec.name)}
+                        title={`${pull.status} · click to cancel`}
+                      >
+                        {Math.round(pull.pct)}%
+                      </button>
+                    ) : installed ? (
+                      <span className="ctl-model__ok">READY</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="ctl-model__btn"
+                        onClick={() => void installModel(rec.name)}
+                        disabled={!online}
+                      >
+                        PULL
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <p className="ctl-fine">
+              One click downloads from the Ollama registry straight to your disk.
+              qwen2.5vl reads pixels like text; qwen3:8b plans harder. Everything
+              stays local.
             </p>
           </div>
 
