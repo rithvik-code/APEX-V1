@@ -500,6 +500,20 @@ async function route(req, res) {
   if (req.method === "POST" && routePath === "/api/control/models/pull") {
     const body = await readBody(req);
     const model = String(body.model ?? "").trim();
+    if (body.cancel) {
+      const entry = pulls.get(model);
+      if (entry && !entry.done) {
+        try {
+          entry.controller?.abort();
+        } catch {
+          // Already finished.
+        }
+        entry.status = "cancelled";
+        entry.done = true;
+      }
+      json(res, 200, { pull: entry ? publicPull(entry) : null });
+      return;
+    }
     if (!MODEL_NAME_OK.test(model)) {
       json(res, 400, { error: "Invalid model name" });
       return;

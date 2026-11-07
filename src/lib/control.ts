@@ -85,6 +85,8 @@ export type ControlState = {
   permissions: Permissions;
   autoApprove: boolean;
   vision: boolean;
+  ocr: boolean;
+  steering: Array<{ text: string; at: number }>;
   plannerModel: string;
   visionModel: string;
   currentAction: ControlAction | null;
@@ -97,6 +99,30 @@ export type ControlState = {
   browserRunning: boolean;
   logs: ControlLogEntry[];
   capabilities: Array<{ key: CapabilityKey; label: string; granted: boolean }>;
+};
+
+export type OcrLine = { text: string; x: number; y: number; w: number; h: number };
+
+export type OcrResult = {
+  text: string;
+  engine: string;
+  lines: OcrLine[];
+};
+
+export type PullState = {
+  model: string;
+  status: string;
+  pct: number;
+  error: string;
+  done: boolean;
+};
+
+export type LiveInfo = {
+  active: boolean;
+  users: number;
+  fps: number;
+  ageMs: number | null;
+  lastError: string;
 };
 
 export type ModelInfo = {
@@ -122,6 +148,7 @@ export type ControlHealth = {
     error?: string;
   };
   active: { id: string; status: ControlStatus; step: number } | null;
+  live?: LiveInfo;
   defaults: {
     plannerModel: string;
     visionModel: string;
@@ -129,6 +156,7 @@ export type ControlHealth = {
     fileRoots: string[];
     autoApprove: boolean;
     vision: boolean;
+    ocr?: boolean;
   };
 };
 
@@ -137,6 +165,7 @@ export type StartMissionInput = {
   permissions: Permissions;
   autoApprove: boolean;
   vision: boolean;
+  ocr: boolean;
   plannerModel: string;
   visionModel: string;
   maxSteps: number;
@@ -261,6 +290,29 @@ export function manualAction(
   args: Record<string, unknown> = {},
 ): Promise<ControlState> {
   return post<ControlState>("/api/control/action", { name, args });
+}
+
+export function steerMission(text: string): Promise<ControlState> {
+  return post<ControlState>("/api/control/steer", { text });
+}
+
+export function runOcr(): Promise<OcrResult> {
+  return post<OcrResult>("/api/control/ocr", {});
+}
+
+export function pullModel(model: string): Promise<{ pull: PullState }> {
+  return post<{ pull: PullState }>("/api/control/models/pull", { model });
+}
+
+export function cancelPull(model: string): Promise<{ pull: PullState | null }> {
+  return post<{ pull: PullState | null }>("/api/control/models/pull", {
+    model,
+    cancel: true,
+  });
+}
+
+export function getPulls(): Promise<{ pulls: PullState[] }> {
+  return request<{ pulls: PullState[] }>("/api/control/models/pull");
 }
 
 export type UndoResult = { restored: number; removed: number };
