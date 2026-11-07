@@ -128,7 +128,13 @@ async function route(req, res) {
       arch: process.arch,
       node: process.version,
       ollama,
-      active: session?.publicState() ?? null,
+      active: session
+        ? {
+            id: session.id,
+            status: session.status,
+            step: session.step,
+          }
+        : null,
       defaults: {
         plannerModel: config.plannerModel || DEFAULT_PLANNER,
         visionModel: config.visionModel || DEFAULT_VISION,
@@ -354,6 +360,16 @@ server.on("error", (error) => {
   }
   process.exitCode = 1;
 });
+
+setInterval(() => {
+  for (const client of clients) {
+    try {
+      client.write(": ping\n\n");
+    } catch {
+      clients.delete(client);
+    }
+  }
+}, 15000).unref();
 
 function shutdown() {
   if (shuttingDown) return;
