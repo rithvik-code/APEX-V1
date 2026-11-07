@@ -227,6 +227,27 @@ export function useControl(): ControlApi {
     [run],
   );
 
+  const steer = useCallback(
+    (text: string) => run("steer", () => steerMission(text)),
+    [run],
+  );
+
+  const ocr = useCallback(async (): Promise<OcrResult | null> => {
+    setBusy("manual");
+    setError(null);
+    try {
+      const result = await runOcr();
+      const next = await getState().catch(() => null);
+      if (mounted.current && next) apply(next);
+      return result;
+    } catch (err) {
+      if (mounted.current) setError(messageOf(err));
+      return null;
+    } finally {
+      if (mounted.current) setBusy(null);
+    }
+  }, [apply]);
+
   const undo = useCallback(async (): Promise<UndoResult | null> => {
     setBusy("undo");
     setError(null);
@@ -259,6 +280,8 @@ export function useControl(): ControlApi {
     stop,
     approve,
     manual,
+    steer,
+    ocr,
     undo,
     saveConfig: saveControlConfig,
     active: isActiveStatus(state?.status),
