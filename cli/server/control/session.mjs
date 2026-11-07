@@ -4,7 +4,6 @@ import path from "node:path";
 import {
   capture,
   click,
-  closeProcess,
   describeObservation,
   drag,
   focusWindow,
@@ -28,7 +27,6 @@ import {
   navigate as browserNavigate,
   newTab,
   press as browserPress,
-  screenshot as browserScreenshot,
   type as browserType,
 } from "./browser.mjs";
 import { FileEngine } from "./files.mjs";
@@ -394,7 +392,7 @@ export class ControlSession {
       (this.step === 0 ||
         this.lastActionName === "screenshot" ||
         this.step - this.lastVisionStep >= 3 ||
-        !tree?.elements?.length);
+        (!tree?.elements?.length && this.step - this.lastVisionStep >= 2));
     if (needVision) {
       try {
         const image = fs.readFileSync(shot.path).toString("base64");
@@ -448,11 +446,7 @@ export class ControlSession {
       }
     }
     if (this.lastActionName) {
-      lines.push(
-        `Last action: ${this.lastActionName} — ${clip(this.lastResult, 600)}${
-          this.lastResult.startsWith("ERROR") ? "" : ""
-        }`,
-      );
+      lines.push(`Last action: ${this.lastActionName} — ${clip(this.lastResult, 600)}`);
     }
 
     return {
@@ -771,6 +765,12 @@ export class ControlSession {
     }
     const gate = checkAction(name, this.permissions, { autoApprove: true });
     if (!gate.allowed) throw new Error(gate.reason);
+    if (
+      this.status === "running" &&
+      !["screenshot", "browser_tabs", "list_windows"].includes(name)
+    ) {
+      throw new Error("Pause APEX before taking manual control");
+    }
     const signal =
       this.status === "running" || this.status === "paused"
         ? this.abort.signal
