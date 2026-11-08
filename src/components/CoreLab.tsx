@@ -50,28 +50,28 @@ const SPECS: Record<
 // the camera weaves through the engine bay without ever sitting inside metal.
 const PATHS: Record<CoreVariant, Array<[number, number, number]>> = {
   v12: [
-    [2.45, 1.7, 2.65],
-    [1.78, 1.25, 1.9],
-    [1.55, 0.85, 1.32],
-    [1.72, 0.95, 0.63],
-    [1.03, 1.5, 0.4],
-    [0.0, 1.8, 0.0],
-    [-1.03, 1.5, 0.4],
-    [-1.72, 0.95, 0.63],
-    [-1.78, 1.25, 1.9],
-    [-2.45, 1.7, 2.65],
+    [3.2, 1.7, 3.45],
+    [2.31, 1.25, 2.47],
+    [2.02, 0.85, 1.72],
+    [2.24, 0.95, 0.82],
+    [1.5, 1.9, 0.6],
+    [0.0, 2.15, 0.0],
+    [-1.5, 1.9, 0.6],
+    [-2.24, 0.95, 0.82],
+    [-2.31, 1.25, 2.47],
+    [-3.2, 1.7, 3.45],
   ],
   i4: [
-    [2.18, 1.6, 2.42],
-    [1.55, 1.15, 1.72],
-    [1.38, 0.7, 1.15],
-    [1.5, 0.8, 0.46],
-    [0.92, 1.3, 0.23],
-    [0.0, 1.55, 0.0],
-    [-0.92, 1.3, 0.23],
-    [-1.5, 0.8, 0.46],
-    [-1.55, 1.15, 1.72],
-    [-2.18, 1.6, 2.42],
+    [2.85, 1.6, 3.15],
+    [2.02, 1.15, 2.24],
+    [1.79, 0.7, 1.5],
+    [1.95, 0.8, 0.6],
+    [1.45, 1.75, 0.36],
+    [0.0, 2.0, 0.0],
+    [-1.45, 1.75, 0.36],
+    [-1.95, 0.8, 0.6],
+    [-2.02, 1.15, 2.24],
+    [-2.85, 1.6, 3.15],
   ],
 };
 
@@ -248,7 +248,7 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
     let raf = 0;
     let disposed = false;
     let shownRpm = 3200;
-    let u = 0.02;
+    let u = 0.9;
 
     // Embers drifting up through the cutaway.
     const emberCount = reduced ? 70 : 260;
@@ -267,13 +267,25 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
       "position",
       new THREE.BufferAttribute(emberPositions, 3),
     );
+    const emberCanvas = document.createElement("canvas");
+    emberCanvas.width = 64;
+    emberCanvas.height = 64;
+    const emberCtx = emberCanvas.getContext("2d")!;
+    const emberGrad = emberCtx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    emberGrad.addColorStop(0, "rgba(255,255,255,1)");
+    emberGrad.addColorStop(0.3, "rgba(200,255,22,0.6)");
+    emberGrad.addColorStop(1, "rgba(200,255,22,0)");
+    emberCtx.fillStyle = emberGrad;
+    emberCtx.fillRect(0, 0, 64, 64);
+    const emberTexture = new THREE.CanvasTexture(emberCanvas);
     const embers = new THREE.Points(
       emberGeometry,
       new THREE.PointsMaterial({
-        color: 0xc8ff16,
-        size: 0.014,
+        map: emberTexture,
+        color: 0xffffff,
+        size: 0.02,
         transparent: true,
-        opacity: 0.42,
+        opacity: 0.55,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         sizeAttenuation: true,
@@ -581,6 +593,7 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
         }
       });
       scene.environment?.dispose();
+      emberTexture.dispose();
       composer.dispose();
       renderer.dispose();
       renderer.forceContextLoss();
