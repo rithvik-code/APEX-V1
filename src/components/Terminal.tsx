@@ -11,7 +11,7 @@ import {
   type ChatMessage,
   type Provider,
 } from "../lib/ai";
-import { retrieveGrounding, type Grounding } from "../lib/web";
+import { retrieveGrounding, warmGrounding, type Grounding } from "../lib/web";
 import { sound } from "../lib/sound";
 
 type Entry = {
@@ -200,6 +200,14 @@ export function Terminal() {
     return () => abortRef.current?.abort();
   }, []);
 
+  useEffect(() => {
+    if (!loadWeb()) return;
+    const id = window.setTimeout(() => {
+      void warmGrounding();
+    }, 1500);
+    return () => window.clearTimeout(id);
+  }, []);
+
   const persist = (next: AiSettings) => {
     setSettings(next);
     saveSettings(next);
@@ -310,6 +318,12 @@ export function Terminal() {
         }
         persist({ ...settings, model: arg, provider: "ollama" });
         addEntry("meta", `MODEL → ${arg}`);
+        if (/qwen3|deepseek-r1/i.test(arg)) {
+          addEntry(
+            "meta",
+            "NOTE: REASONING MODELS MAY STREAM THEIR THOUGHT TRACE INTO THIS TRANSCRIPT. qwen2.5:7b IS THE RECOMMENDED CHAT MODEL.",
+          );
+        }
         break;
       case "/prompt":
         if (!arg) {
@@ -376,6 +390,7 @@ export function Terminal() {
     abortRef.current = controller;
 
     let grounding: Grounding | null = null;
+    let failed = false;
     if (web) {
       setEntries((prev) => [
         ...prev,
@@ -391,6 +406,13 @@ export function Terminal() {
 
       if (!mounted.current) return;
       if (controller.signal.aborted) {
+        setEntries((prev) =>
+          prev.map((entry) =>
+            entry.id === metaId
+              ? { ...entry, content: "WEB // RETRIEVAL ABORTED." }
+              : entry,
+          ),
+        );
         setStreaming(false);
         abortRef.current = null;
         return;
@@ -438,6 +460,7 @@ export function Terminal() {
       });
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
+        failed = true;
         const message =
           error instanceof Error ? error.message : "Unknown link failure.";
         setEntries((prev) => [
@@ -454,7 +477,7 @@ export function Terminal() {
       }
     } finally {
       const cited = grounding;
-      if (cited && mounted.current && !controller.signal.aborted) {
+      if (cited && !failed && mounted.current && !controller.signal.aborted) {
         setEntries((prev) =>
           prev.map((entry) =>
             entry.id === assistantId && entry.content.trim()

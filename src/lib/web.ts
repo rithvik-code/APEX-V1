@@ -77,10 +77,21 @@ type F1Results = {
   };
 };
 
+type F1Data = {
+  detail: string;
+  winner: string | null;
+  leader: string | null;
+  season: string;
+  round: string;
+};
+
+const F1_TTL = 10 * 60 * 1000;
+let f1Cache: { at: number; data: F1Data } | null = null;
+
 function fetchJson<T>(
   url: string,
   signal: AbortSignal,
-  budget = 5200,
+  budget = 8000,
 ): Promise<T | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), budget);
@@ -141,7 +152,7 @@ function keywords(query: string): string[] {
 }
 
 const GENERIC_PAGE =
-  /^(question|answer|disambiguation|list of .*|index of .*|outline of .*)$/i;
+  /^(question|answer|disambiguation|index of .*|outline of .*)$/i;
 
 function relevance(page: WikiPage, query: string, rank: number): number {
   const title = (page.title ?? "").toLowerCase();
@@ -197,13 +208,7 @@ function driverName(driver: F1Driver | undefined): string {
 
 async function f1Block(
   signal: AbortSignal,
-): Promise<{
-  detail: string;
-  winner: string | null;
-  leader: string | null;
-  season: string;
-  round: string;
-} | null> {
+): Promise<F1Data | null> {
   const [standings, lastRace] = await Promise.all([
     fetchJson<F1Standings>(`${F1_BASE}/driverStandings.json`, signal),
     fetchJson<F1Results>(`${F1_BASE}/last/results.json`, signal),
@@ -223,9 +228,12 @@ async function f1Block(
       `${season} DRIVERS' STANDINGS — AFTER ROUND ${round}`,
       ...list.slice(0, 5).map((entry) => {
         const team = entry.Constructors?.[0]?.name ?? "";
+        const wins = entry.wins ?? "?";
         return `  ${String(entry.position ?? "?").padStart(2)}. ${driverName(entry)}${
           team ? ` (${team})` : ""
-        } — ${entry.points ?? "?"} pts · ${entry.wins ?? "?"} wins`;
+        } — ${entry.points ?? "?"} pts · ${wins} ${
+          wins === "1" ? "win" : "wins"
+        }`;
       }),
     );
   }
@@ -254,6 +262,26 @@ async function f1Block(
     season,
     round,
   };
+}
+
+async function getF1(signal: AbortSignal): Promise<F1Data | null> {
+  if (f1Cache && Date.now() - f1Cache.at < F1_TTL) return f1Cache.data;
+  const data = await f1Block(signal);
+  if (data) f1Cache = { at: Date.now(), data };
+  return data;
+}
+
+// Called once after the page settles so the flagship F1 question answers
+// instantly, and so a later network blip still has standings to fall back on.
+export async function warmGrounding(): Promise<void> {
+  if (f1Cache && Date.now() - f1Cache.at < F1_TTL) return;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    await getF1(controller.signal);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function wikiSources(
@@ -366,7 +394,7 @@ export async function retrieveGrounding(
     : [base];
 
   const [f1, wiki] = await Promise.all([
-    race ? f1Block(signal) : Promise.resolve(null),
+    race ? getF1(signal) : Promise.resolve(null),
     wikiSources(terms, clean, signal, race ? 1 : 3),
   ]);
 
@@ -381,24 +409,26 @@ export async function retrieveGrounding(
       detail: f1.detail,
     });
 
-    // The standings leader is almost always who the user is asking about
-    // ("the champion", "Kimi"), so pull their own page instead of hoping a
-    // generic search happens to rank it first.
-    if (f1.leader) {
-      const page = f1.leader.replace(/\s+/g, "_");
-      const leader = await pageSummary(page, signal);
+    // The standings leader is usually who "the champion" refers to; for
+    // "who won the last race" pull the race winner's page instead.
+    const subject = /\b(last\s+race|won|winner|race\s+result)\b/i.test(clean)
+      ? f1.winner
+      : f1.leader;
+    if (subject) {
+      const page = subject.replace(/\s+/g, "_");
+      const person = await pageSummary(page, signal);
       if (signal.aborted) return null;
-      if (leader?.extract) {
+      if (person?.extract) {
         sources.push({
           kind: "wiki",
-          title: leader.title ?? f1.leader,
+          title: person.title ?? subject,
           url:
-            leader.content_urls?.desktop?.page ??
+            person.content_urls?.desktop?.page ??
             `https://en.wikipedia.org/wiki/${encodeURIComponent(page)}`,
           detail: trim(
             [
-              stripHtml(leader.description ?? ""),
-              stripHtml(leader.extract),
+              stripHtml(person.description ?? ""),
+              stripHtml(person.extract),
             ]
               .filter(Boolean)
               .join("\n"),

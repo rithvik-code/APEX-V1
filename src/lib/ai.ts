@@ -417,15 +417,13 @@ async function streamDemo({
 
 ${grounding.summary}
 
-${grounding.sourceLine}
-
 WEB GROUNDING IS ON — THAT ANSWER CAME FROM LIVE SOURCES, NOT THE CANNED DEMO.`
     : demoAnswerFor(last?.content ?? "");
-  const chunks = text.match(/.{1,3}/gs) ?? [text];
+  const chunks = text.match(/.{1,8}/gs) ?? [text];
 
   for (const chunk of chunks) {
     if (signal.aborted) return;
     onToken(chunk);
-    await new Promise((resolve) => setTimeout(resolve, 8 + Math.random() * 16));
+    await new Promise((resolve) => setTimeout(resolve, 4 + Math.random() * 6));
   }
 }
