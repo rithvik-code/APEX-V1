@@ -29,12 +29,16 @@ npm run preview      # serve the built site
 
 The 3D world, preloader, cursor, HUD, chapter rail and audio toggle are all real.
 Audio is off until you turn it on; the drone and ticks are synthesized with WebAudio,
-so there are no audio files to download.
+so there are no audio files to download. In the hero scene, **drag** to orbit the
+camera around the car, scroll to fly the route, and **double-click** to reset.
 
 Two engine cutaways are built into the scene. **X-RAY THE V12 BITURBO** (in
 MACHINE) and **X-RAY THE IN-LINE FOUR** (in VAST) open the CORE LAB: a full-screen
-cutaway render with animated pistons, rods, cams, valves, timing gear and turbos,
-plus a camera route that deliberately flies through the assembly. The car carries
+cutaway render with animated pistons, rods, cams, valves, timing gear and turbos.
+The camera flies a cinematic orbit that dives over the cam cover and along the
+headers, and you can take it over at any time — **drag to orbit**, **wheel or
+pinch to zoom**, **double-click or RESET VIEW** to snap back, **HOLD** to freeze.
+The camera resumes its route a few seconds after you stop. The car carries
 a 6.5 L 60° V12 with twin turbos under a glass power dome; the bike carries a
 998 cc in-line four with DOHC and 16 valves. Both are procedural geometry — no
 models are downloaded.

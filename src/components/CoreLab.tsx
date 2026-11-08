@@ -50,28 +50,28 @@ const SPECS: Record<
 // the camera weaves through the engine bay without ever sitting inside metal.
 const PATHS: Record<CoreVariant, Array<[number, number, number]>> = {
   v12: [
-    [2.15, 1.7, 2.3],
-    [1.55, 1.25, 1.65],
-    [1.35, 0.85, 1.15],
-    [1.5, 0.95, 0.55],
-    [0.9, 1.5, 0.35],
+    [2.45, 1.7, 2.65],
+    [1.78, 1.25, 1.9],
+    [1.55, 0.85, 1.32],
+    [1.72, 0.95, 0.63],
+    [1.03, 1.5, 0.4],
     [0.0, 1.8, 0.0],
-    [-0.9, 1.5, 0.35],
-    [-1.5, 0.95, 0.55],
-    [-1.55, 1.25, 1.65],
-    [-2.15, 1.7, 2.3],
+    [-1.03, 1.5, 0.4],
+    [-1.72, 0.95, 0.63],
+    [-1.78, 1.25, 1.9],
+    [-2.45, 1.7, 2.65],
   ],
   i4: [
-    [1.9, 1.6, 2.1],
-    [1.35, 1.15, 1.5],
-    [1.2, 0.7, 1.0],
-    [1.3, 0.8, 0.4],
-    [0.8, 1.3, 0.2],
+    [2.18, 1.6, 2.42],
+    [1.55, 1.15, 1.72],
+    [1.38, 0.7, 1.15],
+    [1.5, 0.8, 0.46],
+    [0.92, 1.3, 0.23],
     [0.0, 1.55, 0.0],
-    [-0.8, 1.3, 0.2],
-    [-1.3, 0.8, 0.4],
-    [-1.35, 1.15, 1.5],
-    [-1.9, 1.6, 2.1],
+    [-0.92, 1.3, 0.23],
+    [-1.5, 0.8, 0.46],
+    [-1.55, 1.15, 1.72],
+    [-2.18, 1.6, 2.42],
   ],
 };
 
@@ -129,7 +129,7 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
     scene.background = new THREE.Color(0x050607);
     scene.fog = new THREE.FogExp2(0x050607, 0.035);
 
-    const camera = new THREE.PerspectiveCamera(52, width / height, 0.015, 60);
+    const camera = new THREE.PerspectiveCamera(54, width / height, 0.015, 60);
     camera.position.set(...PATHS[variant][0]);
     const headlight = new THREE.PointLight(0xa8d8ff, 0.85, 2.6, 2);
     headlight.position.set(0, 0.06, 0.04);
@@ -417,29 +417,6 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
     );
     composer.addPass(bloom);
     composer.addPass(new OutputPass());
-    (window as unknown as Record<string, unknown>).__core = {
-      scene,
-      renderer,
-      assembly,
-      rim,
-      stageRing,
-      sweep,
-      grid,
-      floor,
-      bloom,
-      camera,
-      xray,
-      setRoute: (value: number) => {
-        u = value;
-      },
-      freeze: (value: number) => {
-        pausedRef.current = true;
-        u = value;
-      },
-      thaw: () => {
-        pausedRef.current = false;
-      },
-    };
 
     const offset = new THREE.Vector3();
     const focus = new THREE.Vector3();
@@ -715,7 +692,7 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
           <h3>{spec.title}</h3>
           <p>{spec.subtitle}</p>
           <span className="corelab__caption-note">
-            CAMERA ROUTE INTERSECTS THE ASSEMBLY — DRAG THE VIEW, IT RESUMES WHEN IDLE
+            AUTO ORBIT — DRAG TO FLY IT YOURSELF, IT RESUMES WHEN IDLE
           </span>
         </div>
 
