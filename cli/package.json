@@ -1,6 +1,6 @@
 {
   "name": "apex-cli",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "APEX — terminal-native AI with agent mode and a local desktop-control engine. Local, unmetered, direct, undoable.",
   "type": "module",
   "bin": {

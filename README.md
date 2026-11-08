@@ -198,14 +198,42 @@ npm run dev                  # site; TAKE CONTROL dock is in the grid
    error that blocked it. An identical action repeated twice is cut off — the session
    writes a summary from the evidence it already has instead of looping.
 
+### Realtime control
+
+TAKE CONTROL is not a screenshot-per-step loop. The daemon keeps one persistent capture
+process alive and streams it as MJPEG (`/api/control/screen/stream`) at roughly 5 FPS;
+the console and the grid dock both render that stream and show the measured FPS. The
+feed starts when a viewer attaches and stops itself after twelve seconds with none, so
+it never runs while nobody is watching.
+
+While a mission runs the console shows a **STEER** bar (and the dock a compact one).
+Text sent there is queued as a user directive and injected into the very next planner
+prompt, labelled as live user input that outranks the goal when the two conflict. You
+can redirect a mission mid-flight — change the target, forbid an action, ask it to
+finish now — without stopping it.
+
+**Windows OCR** turns the visible screen into a text layer with coordinates. When the
+capability is armed, every observation carries OCR lines, and the `ocr_screen` action
+returns them on demand. That lets the planner read pixel-only applications — games,
+canvas apps, dialogs with no UIA text — and click what it actually reads. It reuses the
+live frame when it is fresh, so it costs one OCR pass, not another capture.
+
+### Model bay
+
+The console installs what it recommends with one click, straight from the Ollama
+registry: `POST /api/control/models/pull` streams progress, and a running download shows
+a live percentage that cancels on click. The bay lists vision models (pixels read as
+text), planner models (harder multi-step reasoning) and fast models for CPU-only rigs.
+Nothing is downloaded until you ask; everything runs locally.
+
 ### Capabilities
 
 | Capability | What it unlocks |
 | --- | --- |
-| `screen` | Screenshot capture at native resolution, downscaled for the console. |
+| `screen` | Live MJPEG feed at ~5 FPS, native-resolution capture, and Windows OCR with clickable coordinates. |
 | `accessibility` | The Windows UIA tree: window titles, classes, focused control and value. |
 | `mouse` | Native `SendInput` move, click, drag and scroll. |
-| `keyboard` | Typed text and key chords (Ctrl+S, Alt+F4, …). |
+| `keyboard` | Typed text and key chords (Ctrl+S, Alt+F4, …), plus clipboard read/stage. |
 | `apps` | Launch apps, focus windows, enumerate what is open. |
 | `browser` | Chrome tabs over CDP: list, open, activate, close, navigate, click, type, eval. |
 | `files` | List, read, create, replace, mkdir — rooted and snapshotted. |
@@ -246,7 +274,12 @@ factual description of the frame is added to the prompt.
 | Fallback | `qwen2.5:3b` | Any model reporting `tools` appears in the picker. |
 | Vision | `gemma3:4b` | Describes screenshots; listed under its own picker. |
 
-Both are chosen in the console and persisted with `POST /api/control/config`.
+The MODEL BAY in the console recommends and installs free alternatives —
+`qwen2.5vl:3b` votes as the strongest free eyes ("reads screens like text"), `qwen3:8b`
+and `llama3.1:8b` plan harder on rigs with headroom, and `qwen2.5:3b` stays as the
+low-latency CPU fallback. Chats keep the model warm for thirty minutes so steps do not
+pay a reload between observations. Both defaults are chosen in the console and
+persisted with `POST /api/control/config`.
 
 ### Safety
 
@@ -273,11 +306,15 @@ Everything is under `http://127.0.0.1:4317`.
 | GET | `/api/health` | Daemon version, Ollama status, model capabilities. |
 | GET | `/api/control/state` | Active mission snapshot. |
 | GET | `/api/control/stream` | SSE: state, log, done. |
+| GET | `/api/control/screen/stream` | Live MJPEG screen feed. |
 | GET | `/api/control/screenshot` | Latest frame. |
 | GET | `/api/control/windows` | Visible top-level windows. |
 | GET | `/api/control/browser/tabs` | Chrome tabs. |
 | GET/POST | `/api/control/config` | Models, permissions, endpoint. |
 | POST | `/api/control/start` | Begin a mission. |
+| POST | `/api/control/steer` | Queue a live user directive for the next plan. |
+| POST | `/api/control/ocr` | Run Windows OCR and return lines with coordinates. |
+| GET/POST | `/api/control/models/pull` | List installs; start or cancel a model download. |
 | POST | `/api/control/pause` · `/resume` · `/stop` | Control the mission. |
 | POST | `/api/control/approve` | Allow or deny the pending high-risk action. |
 | POST | `/api/control/action` | Run one action manually from the console. |
@@ -376,7 +413,7 @@ cli/
 ---
 
 ```
-  APEX · v1.3.0
+  APEX · v1.4.0
   NO KEY. NO METER. NO MIDDLEMAN.
   BUILT FOR THE LIMIT. RUNNING ON YOUR HARDWARE.
 ```

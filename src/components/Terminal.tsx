@@ -449,7 +449,7 @@ export function Terminal() {
         aria-label="Terminal transcript"
       >
         <div className="term__boot">
-          <span>APEX KERNEL v1.3.0 / BUILD 2026.11.07</span>
+          <span>APEX KERNEL v1.4.0 / BUILD 2026.11.08</span>
           <span>LOCAL-FIRST INFERENCE ENGINE</span>
           <span>NO KEY · NO METER · NO MIDDLEMAN</span>
           <span>AGENT MODE · TIERS · ROLLBACK</span>
