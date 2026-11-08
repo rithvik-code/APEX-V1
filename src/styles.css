@@ -3740,6 +3740,41 @@ body.core-open {
   color: var(--dim);
 }
 
+.corelab__stage {
+  cursor: grab;
+}
+
+.corelab__stage.is-grabbing {
+  cursor: grabbing;
+}
+
+.corelab__cam {
+  display: flex;
+  gap: 4px;
+  margin-top: 10px;
+  pointer-events: auto;
+}
+
+.corelab__cam button {
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  background: none;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 7px;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    color 0.2s,
+    background 0.2s;
+}
+
+.corelab__cam button:hover {
+  border-color: var(--acid);
+  color: var(--acid);
+}
+
 .corelab__caption {
   position: absolute;
   left: var(--pad);
