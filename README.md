@@ -43,11 +43,32 @@ a 6.5 L 60° V12 with twin turbos under a glass power dome; the bike carries a
 998 cc in-line four with DOHC and 16 valves. Both are procedural geometry — no
 models are downloaded.
 
-The terminal section starts in **demo** mode with canned responses. If Ollama is
+The terminal starts in **demo** mode with canned responses. If Ollama is
 running on `127.0.0.1:11434`, the page detects it on load and links to it
-automatically (the status line switches from `DEMO` to `LOCAL`). Use the **LINK**
+automatically (the status line switches from `DEMO` to `LOCAL`). It scores every
+installed model and links the strongest chat model it finds. Use the **LINK**
 button inside the terminal to change provider, endpoint, model, API key or the
 system prompt. Settings live in `localStorage` on your machine.
+
+### Live web grounding
+
+**WEB** is on by default in the terminal bar (`/web on|off` to toggle). Before
+each answer, APEX retrieves current sources:
+
+- **Wikipedia** via Wikimedia Core search + REST summaries — people, events,
+  definitions, anything with a page.
+- **Jolpica F1** for live drivers' standings and the last race result.
+
+The numbered context is injected with grounding rules (cite sources, never
+invent, never call a standings leader "champion" unless confirmed) and every
+grounded answer closes with a `SOURCES` line. `/search <query>` returns the raw
+sources without calling the model. Only the query text goes to those public
+APIs; prompts and answers stay local. If retrieval fails, APEX says so and
+answers from the model's own memory.
+
+Recommended free models: `qwen2.5:7b` (best), `qwen2.5:3b` (fastest),
+`gemma3:4b`. Avoid reasoning-first models such as `qwen3` or `deepseek-r1`:
+current Ollama builds stream their chain-of-thought into the answer.
 
 For the browser terminal to reach Ollama on a non-localhost origin (for example a
 deployed copy of the site), allow that origin in Ollama:

@@ -3,12 +3,15 @@ import {
   DEFAULT_SETTINGS,
   listOllamaModels,
   loadSettings,
+  pickBestModel,
   saveSettings,
+  scoreModel,
   streamChat,
   type AiSettings,
   type ChatMessage,
   type Provider,
 } from "../lib/ai";
+import { retrieveGrounding, type Grounding } from "../lib/web";
 import { sound } from "../lib/sound";
 
 type Entry = {
@@ -21,6 +24,8 @@ type LinkState = "checking" | "online" | "offline";
 
 const COMMANDS = [
   ["/help", "show local commands"],
+  ["/web [on|off]", "toggle live web grounding"],
+  ["/search <query>", "pull live sources without the model"],
   ["/live", "detect a local Ollama model and connect"],
   ["/demo", "drop back to the canned demo"],
   ["/model <name>", "switch the active model"],
@@ -32,17 +37,38 @@ const COMMANDS = [
 ];
 
 const CHIPS = [
-  "Write a retry helper",
+  "Who is the F1 world champion?",
+  "Who is Kimi Antonelli?",
   "Design a local RAG stack",
   "Why is my build slow?",
-  "How is this free?",
 ];
+
+const WEB_KEY = "apex.web.v1";
 
 const WELCOME = `APEX READY.
 
 Terminal is warm. Type /help for local commands, or ask anything.
-The demo link is canned — open LINK to point this terminal at a local
+WEB grounding is ON: current facts (F1, people, releases, news) are
+pulled live from Wikipedia and racing data before the model answers.
+The demo link is canned; open LINK to point this terminal at a local
 Ollama model and it starts thinking for real.`;
+
+function loadWeb(): boolean {
+  try {
+    const raw = localStorage.getItem(WEB_KEY);
+    return raw === null ? true : raw === "1";
+  } catch {
+    return true;
+  }
+}
+
+function resolveModel(found: string[], current: string): string {
+  const best = pickBestModel(found);
+  if (!best) return current;
+  if (!found.includes(current)) return best;
+  // Keep a deliberately chosen model unless the installed best is clearly ahead.
+  return scoreModel(best) - scoreModel(current) > 4 ? best : current;
+}
 
 function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -64,6 +90,7 @@ export function Terminal() {
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [notice, setNotice] = useState("");
+  const [web, setWeb] = useState<boolean>(() => loadWeb());
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -90,14 +117,12 @@ export function Terminal() {
         setModels(found);
         setLink(found.length ? "online" : "offline");
         if (found.length && !silent) {
-          const preferred =
-            found.find((m) => m.includes("qwen2.5:3b")) ?? found[0];
           setSettings((prev) => {
             if (prev.provider === "openai") return prev;
             const next: AiSettings = {
               ...prev,
               provider: "ollama",
-              model: prev.model || preferred,
+              model: resolveModel(found, prev.model),
             };
             saveSettings(next);
             return next;
@@ -128,14 +153,13 @@ export function Terminal() {
     void detect(stored.endpoint, true).then((found) => {
       if (!mounted.current) return;
       if (found.length) {
-        const preferred =
-          found.find((m) => m.includes("qwen2.5:3b")) ?? found[0];
+        const preferred = resolveModel(found, stored.model);
         setSettings((prev) => {
           if (prev.provider === "openai") return prev;
           const next: AiSettings = {
             ...prev,
             provider: "ollama",
-            model: found.includes(prev.model) ? prev.model : preferred,
+            model: resolveModel(found, prev.model),
           };
           saveSettings(next);
           return next;
@@ -145,7 +169,7 @@ export function Terminal() {
           {
             id: uid(),
             role: "meta",
-            content: `LOCAL LINK ESTABLISHED → ${preferred} · UNMETERED`,
+            content: `LOCAL LINK ESTABLISHED → ${preferred} · UNMETERED · WEB ${loadWeb() ? "ON" : "OFF"}`,
           },
         ]);
       } else {
@@ -189,6 +213,26 @@ export function Terminal() {
     sound.tick("click");
   };
 
+  const setWebMode = (next: boolean) => {
+    setWeb(next);
+    try {
+      localStorage.setItem(WEB_KEY, next ? "1" : "0");
+    } catch {
+      // Private contexts can block storage; the toggle still applies this session.
+    }
+    addEntry(
+      "meta",
+      next
+        ? "WEB GROUNDING ON — WIKIPEDIA + LIVE F1 DATA ARE FETCHED BEFORE EACH ANSWER."
+        : "WEB GROUNDING OFF — ANSWERS COME FROM THE MODEL'S OWN MEMORY.",
+    );
+  };
+
+  const toggleWeb = () => {
+    sound.tick("click");
+    setWebMode(!web);
+  };
+
   const handleCommand = (raw: string) => {
     const [command, ...rest] = raw.split(" ");
     const arg = rest.join(" ").trim();
@@ -204,6 +248,36 @@ export function Terminal() {
       case "/clear":
         setEntries(INITIAL_ENTRIES);
         break;
+      case "/web":
+        if (arg && !/^(on|off)$/i.test(arg)) {
+          addEntry("meta", "USAGE: /web [on|off]");
+          break;
+        }
+        setWebMode(arg ? /^on$/i.test(arg) : !web);
+        break;
+      case "/search": {
+        if (!arg) {
+          addEntry("meta", "USAGE: /search <query>");
+          break;
+        }
+        addEntry("meta", `WEB // SEARCHING FOR "${arg.slice(0, 90)}"...`);
+        const searchController = new AbortController();
+        void retrieveGrounding(arg, searchController.signal).then((result) => {
+          if (!mounted.current) return;
+          if (!result) {
+            addEntry(
+              "meta",
+              "WEB // NO SOURCES RETURNED. CHECK THE CONNECTION OR TRY A SHORTER QUERY.",
+            );
+            return;
+          }
+          addEntry(
+            "assistant",
+            `LIVE RETRIEVAL // ${result.fetchedAt.slice(0, 10)}\n\n${result.summary}\n\n${result.sourceLine}`,
+          );
+        });
+        break;
+      }
       case "/live": {
         addEntry("meta", "SCANNING LOCALHOST FOR AN INFERENCE DAEMON...");
         void detect(settings.endpoint).then((found) => {
@@ -214,9 +288,7 @@ export function Terminal() {
             );
             return;
           }
-          const model = found.includes(settings.model)
-            ? settings.model
-            : (found.find((m) => m.includes("qwen2.5:3b")) ?? found[0]);
+          const model = resolveModel(found, settings.model);
           persist({ ...settings, provider: "ollama", model });
           addEntry("meta", `LOCAL LINK LIVE → ${model}`);
         });
@@ -253,7 +325,7 @@ export function Terminal() {
       case "/install":
         addEntry(
           "assistant",
-          `INSTALL APEX\n\n  npm install -g ./cli\n  apex\n\n  # or one-shot\n  apex "summarise this repo"\n\n  # custom persona\n  apex config\n\nRequires Node 18+ and Ollama running locally.`,
+          `INSTALL APEX\n\n  npm install -g ./cli\n  apex\n\n  # or one-shot\n  apex "summarise this repo"\n\n  # custom persona\n  apex config\n\nRequires Node 18+ and Ollama running locally.\n\nBEST FREE MODELS\n  ollama pull qwen2.5:7b   best quality (~4.7 GB)\n  ollama pull qwen2.5:3b   fastest (~1.9 GB)\n  ollama pull gemma3:4b    alternate (~3.3 GB)\n\nAPEX auto-selects the strongest chat model it finds installed.`,
         );
         break;
       case "/stop":
@@ -268,7 +340,14 @@ export function Terminal() {
   const send = async (value: string) => {
     const text = value.trim();
     if (!text) return;
-    if (streaming) return;
+    if (streaming) {
+      if (text.toLowerCase() === "/stop") {
+        setInput("");
+        abortRef.current?.abort();
+        addEntry("meta", "STREAM ABORTED.");
+      }
+      return;
+    }
     setInput("");
     setHistory((prev) => [text, ...prev].slice(0, 30));
     setHistoryIndex(-1);
@@ -280,7 +359,7 @@ export function Terminal() {
     }
 
     const userEntry: Entry = { id: uid(), role: "user", content: text };
-    const assistantId = uid();
+    const metaId = uid();
     const historyForModel: ChatMessage[] = [
       ...entries
         .filter((entry) => entry.role !== "meta")
@@ -291,19 +370,61 @@ export function Terminal() {
       { role: "user", content: text },
     ];
 
-    setEntries((prev) => [
-      ...prev,
-      userEntry,
-      { id: assistantId, role: "assistant", content: "" },
-    ]);
+    setEntries((prev) => [...prev, userEntry]);
     setStreaming(true);
     const controller = new AbortController();
     abortRef.current = controller;
+
+    let grounding: Grounding | null = null;
+    if (web) {
+      setEntries((prev) => [
+        ...prev,
+        {
+          id: metaId,
+          role: "meta",
+          content: "WEB // RETRIEVING LIVE SOURCES...",
+        },
+      ]);
+
+      const result = await retrieveGrounding(text, controller.signal);
+      grounding = result;
+
+      if (!mounted.current) return;
+      if (controller.signal.aborted) {
+        setStreaming(false);
+        abortRef.current = null;
+        return;
+      }
+
+      setEntries((prev) =>
+        prev.map((entry) =>
+          entry.id === metaId
+            ? {
+                ...entry,
+                content: result
+                  ? `WEB // ${result.sources.length} SOURCES · ${result.fetchedAt.slice(
+                      11,
+                      16,
+                    )}Z · ${result.race ? "LIVE F1 + WIKIPEDIA" : "WIKIPEDIA"}`
+                  : "WEB // NO MATCH — ANSWERING FROM LOCAL MEMORY.",
+              }
+            : entry,
+        ),
+      );
+    }
+
+    const assistantId = uid();
+    setEntries((prev) => [
+      ...prev,
+      { id: assistantId, role: "assistant", content: "" },
+    ]);
 
     try {
       await streamChat({
         settings,
         messages: historyForModel,
+        grounding,
+        temperature: grounding ? 0.2 : 0.55,
         signal: controller.signal,
         onToken: (token) => {
           setEntries((prev) =>
@@ -332,6 +453,19 @@ export function Terminal() {
         setLink("offline");
       }
     } finally {
+      const cited = grounding;
+      if (cited && mounted.current && !controller.signal.aborted) {
+        setEntries((prev) =>
+          prev.map((entry) =>
+            entry.id === assistantId && entry.content.trim()
+              ? {
+                  ...entry,
+                  content: `${entry.content.trimEnd()}\n\n${cited.sourceLine}`,
+                }
+              : entry,
+          ),
+        );
+      }
       if (mounted.current) setStreaming(false);
       abortRef.current = null;
     }
@@ -376,11 +510,20 @@ export function Terminal() {
     sound.tick("click");
     if (draft.provider === "ollama") {
       void detect(draft.endpoint).then((found) => {
-        if (found.length) {
+        if (!found.length) {
           addEntry(
             "meta",
-            `LINK READY → ${found.find((m) => m.includes(draft.model)) ?? found[0]}`,
+            "LINK SAVED, BUT NO MODEL RESPONDED. START `ollama serve` AND RUN /live.",
           );
+          return;
+        }
+        const model = resolveModel(found, draft.model);
+        if (model !== draft.model) {
+          const next = { ...draft, model };
+          persist(next);
+          addEntry("meta", `LINK READY → ${model} · AUTO-SELECTED BEST INSTALLED`);
+        } else {
+          addEntry("meta", `LINK READY → ${model}`);
         }
       });
     } else {
@@ -426,6 +569,15 @@ export function Terminal() {
         </span>
         <button
           type="button"
+          className={`term__webbtn${web ? " term__webbtn--on" : ""}`}
+          onClick={toggleWeb}
+          aria-pressed={web}
+          title="Ground answers in live Wikipedia and F1 data"
+        >
+          WEB {web ? "ON" : "OFF"}
+        </button>
+        <button
+          type="button"
           className="term__textbtn"
           onClick={copySession}
           aria-label="Copy session transcript"
@@ -449,10 +601,10 @@ export function Terminal() {
         aria-label="Terminal transcript"
       >
         <div className="term__boot">
-          <span>APEX KERNEL v1.4.0 / BUILD 2026.11.08</span>
+          <span>APEX KERNEL v1.5.0 / BUILD 2026.11.08</span>
           <span>LOCAL-FIRST INFERENCE ENGINE</span>
           <span>NO KEY · NO METER · NO MIDDLEMAN</span>
-          <span>AGENT MODE · TIERS · ROLLBACK</span>
+          <span>WEB GROUNDING · LIVE F1 + WIKIPEDIA</span>
         </div>
 
         {entries.map((entry) => (
@@ -571,6 +723,20 @@ export function Terminal() {
               />
             </label>
           </div>
+          <div className="term__models">
+            <span>BEST FREE MODELS</span>
+            <code>ollama pull qwen2.5:7b</code>
+            <em>best quality · ~4.7 GB</em>
+            <code>ollama pull qwen2.5:3b</code>
+            <em>fastest · ~1.9 GB</em>
+            <code>ollama pull gemma3:4b</code>
+            <em>alternate · ~3.3 GB</em>
+            <p>
+              APEX scores every installed model and auto-selects the strongest
+              one that still fits your machine's speed. WEB grounding is
+              currently <b>{web ? "ON" : "OFF"}</b> — toggle it in the bar.
+            </p>
+          </div>
           <div className="term__settings-foot">
             <p>
               Ollama runs on your machine. No key, no account, no token bill.
@@ -643,6 +809,9 @@ export function Terminal() {
         </span>
         <span>
           MODEL <b>{settings.model || "UNSET"}</b>
+        </span>
+        <span>
+          WEB <b>{web ? "ON" : "OFF"}</b>
         </span>
         <span>
           SYSTEM <b>NO METER</b>

@@ -1,3 +1,5 @@
+import { formatGroundingContext, type Grounding } from "./web";
+
 export type ChatRole = "user" | "assistant" | "system";
 
 export type ChatMessage = {
@@ -19,12 +21,13 @@ export const DEFAULT_SYSTEM_PROMPT = `You are APEX, a terminal-native intelligen
 You are direct, technical and fast. No corporate hedging. No repeated disclaimers. No filler.
 Answer the question first, then stop. Use plain terminal-friendly text.
 When code is required, write complete working code.
+Never invent a fact, name, date or score. If you are unsure, say so in one line.
 You are running on the user's own machine with no metering and no middleman.`;
 
 export const DEFAULT_SETTINGS: AiSettings = {
   provider: "demo",
   endpoint: "http://127.0.0.1:11434",
-  model: "qwen2.5:3b",
+  model: "qwen2.5:7b",
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   apiKey: "",
 };
@@ -64,32 +67,107 @@ export async function listOllamaModels(
   return (data.models ?? []).map((m) => m.name);
 }
 
+// Higher is better. Favours modern general-purpose chat models in the 4–9B
+// sweet spot: accurate enough to trust, small enough to stream fast.
+export function scoreModel(name: string): number {
+  const n = name.toLowerCase();
+  if (/embed|rerank|bge|nomic|minilm|clip|whisper|tts/.test(n)) return -100;
+
+  let score = 6;
+  // Reasoning-first models (qwen3, deepseek-r1) stream their chain-of-thought
+  // into the transcript on current Ollama builds, so they lose to chat models.
+  if (n.includes("qwen3")) score = /instruct|2507/.test(n) ? 30 : 16;
+  else if (n.includes("deepseek-r1")) score = 12;
+  else if (n.includes("qwen2.5")) score = 25;
+  else if (n.includes("gemma3")) score = 24;
+  else if (n.includes("llama3.3")) score = 24;
+  else if (n.includes("llama3.1")) score = 22;
+  else if (/mistral|magistral/.test(n)) score = 21;
+  else if (n.includes("phi4")) score = 20;
+  else if (n.includes("llama3.2")) score = 15;
+  else if (n.includes("qwen")) score = 12;
+
+  const size = n.match(/(?:^|[^a-z0-9])(\d+(?:\.\d+)?)\s*b(?![a-z0-9])/);
+  const params = size ? parseFloat(size[1]) : 0;
+  if (params) {
+    if (params <= 1.5) score -= 4;
+    else if (params <= 2.5) score += 2;
+    else if (params <= 4.5) score += 12;
+    else if (params <= 9) score += 18;
+    else if (params <= 12) score += 15;
+    else if (params <= 16) score += 10;
+    else if (params <= 24) score += 3;
+    else score -= 5;
+  }
+
+  if (/vl|vision/.test(n)) score -= 5;
+  if (/coder|code/.test(n)) score -= 2;
+  return score;
+}
+
+export function pickBestModel(models: string[]): string | null {
+  let best: string | null = null;
+  let bestScore = -Infinity;
+  for (const model of models) {
+    const score = scoreModel(model);
+    if (score > bestScore) {
+      best = model;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
 type StreamOptions = {
   settings: AiSettings;
   messages: ChatMessage[];
   onToken: (token: string) => void;
   signal: AbortSignal;
+  grounding?: Grounding | null;
+  extraSystem?: string;
+  temperature?: number;
+  numPredict?: number;
 };
 
-async function streamOllama({
-  settings,
-  messages,
-  onToken,
-  signal,
-}: StreamOptions): Promise<void> {
+function composeSystem(settings: AiSettings, options: StreamOptions): string {
+  const today = new Date().toISOString().slice(0, 10);
+  const parts = [
+    settings.systemPrompt.trim(),
+    `SESSION DATE: ${today}. Your training data may be older than this date. For anything that could have changed — champions, standings, releases, prices, news — trust live context when it is provided. When no context covers it and you are unsure, say so instead of guessing.`,
+  ];
+  if (options.grounding) parts.push(formatGroundingContext(options.grounding));
+  if (options.extraSystem) parts.push(options.extraSystem);
+  return parts.join("\n\n");
+}
+
+
+async function streamOllama(options: StreamOptions): Promise<void> {
+  const { settings, messages, onToken, signal, grounding, temperature, numPredict } =
+    options;
+  const body: Record<string, unknown> = {
+    model: settings.model,
+    stream: true,
+    keep_alive: "30m",
+    messages: [
+      { role: "system", content: composeSystem(settings, options) },
+      ...messages.map((m) => ({ role: m.role, content: m.content })),
+    ],
+    options: {
+      temperature: temperature ?? (grounding ? 0.2 : 0.55),
+      top_p: 0.9,
+      num_ctx: 8192,
+      num_predict: numPredict ?? (grounding ? 480 : 768),
+    },
+  };
+  // Qwen3 supports a thinking switch; skipping it removes a long cold-start delay
+  // on the smaller quantisations without hurting factual accuracy.
+  if (/^qwen3/i.test(settings.model)) body.think = false;
+
   const res = await fetch(`${trimEndpoint(settings.endpoint)}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     signal,
-    body: JSON.stringify({
-      model: settings.model,
-      stream: true,
-      messages: [
-        { role: "system", content: settings.systemPrompt },
-        ...messages.map((m) => ({ role: m.role, content: m.content })),
-      ],
-      options: { temperature: 0.85, num_ctx: 8192 },
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok || !res.body) {
@@ -127,12 +205,9 @@ async function streamOllama({
   }
 }
 
-async function streamOpenAI({
-  settings,
-  messages,
-  onToken,
-  signal,
-}: StreamOptions): Promise<void> {
+async function streamOpenAI(options: StreamOptions): Promise<void> {
+  const { settings, messages, onToken, signal, grounding, temperature, numPredict } =
+    options;
   const base = trimEndpoint(settings.endpoint);
   const url = base.endsWith("/chat/completions")
     ? base
@@ -148,8 +223,10 @@ async function streamOpenAI({
     body: JSON.stringify({
       model: settings.model,
       stream: true,
+      temperature: temperature ?? (grounding ? 0.2 : 0.55),
+      max_tokens: numPredict ?? (grounding ? 480 : 768),
       messages: [
-        { role: "system", content: settings.systemPrompt },
+        { role: "system", content: composeSystem(settings, options) },
         ...messages.map((m) => ({ role: m.role, content: m.content })),
       ],
     }),
@@ -211,14 +288,16 @@ const DEMO_ANSWERS: Array<{ match: RegExp; answer: string }> = [
 
   3. Pull a model if you don't have one:
 
-       ollama pull qwen2.5:3b
+       ollama pull qwen2.5:7b     # best quality / ~4.7 GB
+       ollama pull qwen2.5:3b     # fastest / ~1.9 GB
 
   4. Point APEX at it:
 
-       apex --model qwen2.5:3b
+       apex --model qwen2.5:7b
 
 No account. No key. No request meter. The only limit is the model
-your machine can carry.`,
+your machine can carry. APEX auto-selects the strongest model you have
+installed and switches to a lighter one if you ask for it.`,
   },
   {
     match: /free|price|cost|limit|unlimited|meter/i,
@@ -259,7 +338,7 @@ export async function retry<T>(
 Direct, dependency-free, done. Ask for the test harness if you want it.`,
   },
   {
-    match: /who|what are you|apex|yourself/i,
+    match: /what are you|who are you|about apex|yourself/i,
     answer: `APEX // TERMINAL INTELLIGENCE
 
   A command-line engine for people who think faster than dashboards.
@@ -271,8 +350,9 @@ Direct, dependency-free, done. Ask for the test harness if you want it.`,
   PROVIDERS ... Ollama / OpenAI-compatible
   CEILING ..... whatever your hardware can hold
 
-  The demo you're typing into is canned. Flip the link to LOCAL and
-  this terminal starts talking to the model on your machine.`,
+  The demo you're typing into is canned. WEB grounding is on by default
+  and pulls live Wikipedia + F1 data before the model answers, so even
+  the demo stays honest about the current season.`,
   },
   {
     match: /prompt|persona|system/i,
@@ -329,9 +409,18 @@ async function streamDemo({
   messages,
   onToken,
   signal,
+  grounding,
 }: StreamOptions): Promise<void> {
   const last = [...messages].reverse().find((m) => m.role === "user");
-  const text = demoAnswerFor(last?.content ?? "");
+  const text = grounding
+    ? `LIVE RETRIEVAL // ${grounding.fetchedAt.slice(0, 10)}
+
+${grounding.summary}
+
+${grounding.sourceLine}
+
+WEB GROUNDING IS ON — THAT ANSWER CAME FROM LIVE SOURCES, NOT THE CANNED DEMO.`
+    : demoAnswerFor(last?.content ?? "");
   const chunks = text.match(/.{1,3}/gs) ?? [text];
 
   for (const chunk of chunks) {
