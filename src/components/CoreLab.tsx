@@ -45,32 +45,33 @@ const SPECS: Record<
   },
 };
 
-// Closed camera routes. The middle points deliberately pass through solid
-// geometry: the V12 valley and plenum, then the I4 cam cover and crankcase.
+// Closed camera routes. Each lap is a hero orbit that skims the outside of the
+// block — down the header side, up over the cam cover, around the intake — so
+// the camera weaves through the engine bay without ever sitting inside metal.
 const PATHS: Record<CoreVariant, Array<[number, number, number]>> = {
   v12: [
-    [2.35, 1.45, 2.35],
-    [1.1, 0.9, 1.55],
-    [0.45, 0.68, 0.82],
-    [0.1, 0.5, 0.2],
-    [0.0, 0.42, -0.5],
-    [0.12, 0.25, -1.05],
-    [-0.55, 0.16, -1.3],
-    [-1.3, 0.42, -0.9],
-    [-2.0, 0.95, 0.2],
-    [-2.3, 1.4, 1.7],
+    [2.0, 1.35, 2.05],
+    [1.4, 0.95, 1.4],
+    [0.95, 0.6, 1.0],
+    [0.75, 0.55, 0.6],
+    [0.5, 0.85, 0.2],
+    [0.0, 1.02, -0.05],
+    [-0.5, 0.85, 0.2],
+    [-0.9, 0.55, 0.75],
+    [-1.45, 0.9, 1.35],
+    [-1.95, 1.35, 1.95],
   ],
   i4: [
-    [1.7, 1.2, 1.8],
-    [0.85, 0.82, 1.0],
-    [0.35, 0.65, 0.45],
-    [0.12, 0.52, 0.1],
-    [0.0, 0.38, 0.0],
-    [0.05, 0.22, 0.05],
-    [0.25, 0.06, 0.3],
-    [0.75, 0.25, 0.55],
-    [1.4, 0.7, 1.1],
-    [1.85, 1.1, 1.6],
+    [1.55, 1.0, 1.7],
+    [1.05, 0.72, 1.15],
+    [0.8, 0.42, 0.95],
+    [0.85, 0.42, 0.62],
+    [0.55, 0.72, 0.45],
+    [0.25, 0.92, 0.1],
+    [-0.25, 0.9, -0.02],
+    [-0.72, 0.62, 0.5],
+    [-1.1, 0.55, 1.0],
+    [-1.55, 1.05, 1.55],
   ],
 };
 
@@ -121,7 +122,7 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.6));
     renderer.setSize(width, height);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.15;
+    renderer.toneMappingExposure = 1.02;
     stage.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
@@ -130,6 +131,10 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
 
     const camera = new THREE.PerspectiveCamera(52, width / height, 0.015, 60);
     camera.position.set(...PATHS[variant][0]);
+    const headlight = new THREE.PointLight(0xa8d8ff, 0.85, 2.6, 2);
+    headlight.position.set(0, 0.06, 0.04);
+    camera.add(headlight);
+    scene.add(camera);
 
     const pmrem = new THREE.PMREMGenerator(renderer);
     const room = new RoomEnvironment();
@@ -137,13 +142,14 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
     room.dispose();
     pmrem.dispose();
 
-    scene.add(new THREE.HemisphereLight(0x9fb4bd, 0x050607, 0.8));
+    scene.add(new THREE.HemisphereLight(0x9fb4bd, 0x050607, 1.15));
+    scene.add(new THREE.AmbientLight(0x6d7f8c, 0.35));
 
     const key = new THREE.DirectionalLight(0xffffff, 2.6);
     key.position.set(3, 4.5, 3.5);
     scene.add(key);
 
-    const rim = new THREE.PointLight(0xc8ff16, 8, 7, 2);
+    const rim = new THREE.PointLight(0xc8ff16, 3.2, 5, 2);
     rim.position.set(-1.6, 0.9, 1.4);
     scene.add(rim);
 
@@ -157,7 +163,7 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
         color: 0x070908,
         metalness: 0.9,
         roughness: 0.32,
-        envMapIntensity: 0.8,
+        envMapIntensity: 0.45,
       }),
     );
     floor.rotation.x = -Math.PI / 2;
@@ -173,21 +179,45 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
 
     const assembly = variant === "v12" ? createV12() : createInlineFour();
     assembly.group.position.y = 0.04;
+    // The route passes through solid geometry. Clone the shared materials so
+    // this scene can render a DoubleSide X-ray pass without touching the hero
+    // vehicles, then fade the shells while the camera is inside the block.
+    const xray: Array<{
+      material: THREE.Material & { opacity: number };
+      opacity: number;
+      depthWrite: boolean;
+    }> = [];
+    assembly.group.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const clone = (material: THREE.Material) => {
+        const copy = material.clone();
+        copy.side = THREE.DoubleSide;
+        copy.transparent = true;
+        xray.push({ material: copy, opacity: copy.opacity, depthWrite: copy.depthWrite });
+        return copy;
+      };
+      object.material = Array.isArray(object.material)
+        ? object.material.map(clone)
+        : clone(object.material);
+    });
     scene.add(assembly.group);
 
-    // Sweeping diagnostic plane.
+    // Sweeping diagnostic scan line.
     const sweep = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.2, 1.1),
+      new THREE.PlaneGeometry(1.3, 0.012),
       new THREE.MeshBasicMaterial({
         color: 0xc8ff16,
         transparent: true,
-        opacity: 0.045,
+        opacity: 0.22,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
+        depthTest: false,
         side: THREE.DoubleSide,
       }),
     );
-    sweep.position.y = 0.25;
+    sweep.rotation.x = -Math.PI / 2;
+    sweep.position.y = 0.2;
+    sweep.renderOrder = 3;
     assembly.group.add(sweep);
 
     const stageRing = new THREE.Mesh(
@@ -379,13 +409,34 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
     composer.setPixelRatio(renderer.getPixelRatio());
     composer.setSize(width, height);
     composer.addPass(new RenderPass(scene, camera));
-    composer.addPass(
-      new UnrealBloomPass(new THREE.Vector2(width, height), 0.55, 0.55, 0.85),
+    const bloom = new UnrealBloomPass(
+      new THREE.Vector2(width, height),
+      0.28,
+      0.4,
+      1.15,
     );
+    composer.addPass(bloom);
     composer.addPass(new OutputPass());
+    (window as unknown as Record<string, unknown>).__core = {
+      scene,
+      renderer,
+      assembly,
+      rim,
+      stageRing,
+      sweep,
+      grid,
+      floor,
+      bloom,
+      camera,
+      xray,
+      setRoute: (value: number) => {
+        u = value;
+      },
+    };
 
     const offset = new THREE.Vector3();
     const focus = new THREE.Vector3();
+    const center = new THREE.Vector3(0, 0.26, 0);
     const qYaw = new THREE.Quaternion();
     const qPitch = new THREE.Quaternion();
 
@@ -396,13 +447,18 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
 
       if (!pausedRef.current) {
         elapsed += dt;
-        // Linger slightly while the camera is inside the assembly.
-        const linger = 1 - 0.45 * Math.exp(-Math.pow((u - 0.42) / 0.09, 2));
+        // Linger on the wide reveal and the crest pass, then coast around.
+        const wrap = (at: number) => {
+          const d = Math.abs(u - at);
+          return Math.min(d, 1 - d);
+        };
+        const pace =
+          (1 - 0.55 * Math.exp(-Math.pow(wrap(0.92) / 0.09, 2))) *
+          (1 - 0.32 * Math.exp(-Math.pow(wrap(0.45) / 0.12, 2)));
         const breathe = 0.82 + 0.18 * Math.sin(elapsed * 0.55);
-        u = (u + dt * 0.036 * linger * breathe) % 1;
+        u = (u + dt * 0.035 * pace * breathe) % 1;
         assembly.update(elapsed);
-        sweep.position.z = -1.2 + ((elapsed * 0.55) % 1) * 2.4;
-        sweep.rotation.y = Math.PI / 2;
+        sweep.position.y = -0.35 + ((elapsed * 0.34) % 1) * 1.22;
 
         const positions = emberGeometry.attributes.position as THREE.BufferAttribute;
         for (let i = 0; i < emberCount; i++) {
@@ -457,7 +513,9 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
 
       const basePos = curve.getPointAt(u);
       const ahead = curve.getPointAt((u + 0.045) % 1);
-      focus.set(ahead.x, ahead.y + 0.1, ahead.z);
+      // Hold the block in frame for the whole lap; the route supplies the
+      // movement, a small path bias keeps the framing alive.
+      focus.copy(center).lerp(ahead, 0.16);
 
       offset.copy(basePos).sub(focus).multiplyScalar(rig.zoom);
       qPitch.setFromAxisAngle(RIGHT, rig.pitch);
@@ -478,14 +536,24 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
         THREE.MathUtils.clamp(rig.velYaw * 0.55, -0.05, 0.05);
       if (!reduced) camera.rotateZ(roll);
 
+      // X-ray the shells while the camera is inside the block so the pass
+      // reads as a schematic cutaway rather than a wall of metal.
+      const interiorMix =
+        1 - THREE.MathUtils.smoothstep(camera.position.distanceTo(center), 0.35, 0.75);
+      const ghost = 1 - interiorMix * 0.9;
+      for (const entry of xray) {
+        entry.material.opacity = entry.opacity * ghost;
+        entry.material.depthWrite = interiorMix > 0.5 ? false : entry.depthWrite;
+      }
+
       const jitter = reduced ? 0 : rpmNorm * 0.0021;
       assembly.group.position.y = 0.04 + Math.sin(elapsed * 57) * jitter;
       assembly.group.rotation.z = Math.sin(elapsed * 43) * jitter * 0.7;
-      rim.intensity = 7 + rpmNorm * 3.5 + Math.sin(elapsed * 5) * 1.1;
+      rim.intensity = 2.6 + rpmNorm * 1.7 + Math.sin(elapsed * 5) * 0.5;
       stageRing.material.opacity = 0.16 + 0.12 * Math.sin(elapsed * 2.2);
       const ringScale = 1 + Math.sin(elapsed * 1.6) * 0.015;
       stageRing.scale.set(ringScale, ringScale, 1);
-      sweep.material.opacity = 0.04 + 0.02 * Math.sin(elapsed * 3.1);
+      sweep.material.opacity = 0.2 + 0.1 * Math.sin(elapsed * 3.1);
 
       composer.render();
     };
@@ -522,6 +590,10 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
           object instanceof THREE.Points
         ) {
           object.geometry.dispose();
+          const materials = Array.isArray(object.material)
+            ? object.material
+            : [object.material];
+          materials.forEach((material) => material?.dispose());
         }
       });
       scene.environment?.dispose();
