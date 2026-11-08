@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { createInlineFour, createV12 } from "../three/engines";
 
 export type CoreVariant = "v12" | "i4";
@@ -70,11 +74,21 @@ const PATHS: Record<CoreVariant, Array<[number, number, number]>> = {
   ],
 };
 
+const UP = new THREE.Vector3(0, 1, 0);
+const RIGHT = new THREE.Vector3(1, 0, 0);
+
+type CameraApi = {
+  zoom: (factor: number) => void;
+  reset: () => void;
+};
+
 export function CoreLab({ variant, onClose, onChange }: Props) {
   const stageRef = useRef<HTMLDivElement>(null);
   const rpmRef = useRef<HTMLSpanElement>(null);
+  const routeRef = useRef<HTMLSpanElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const pausedRef = useRef(false);
+  const camApi = useRef<CameraApi | null>(null);
   const [paused, setPaused] = useState(false);
 
   useEffect(() => {
@@ -176,6 +190,21 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
     sweep.position.y = 0.25;
     assembly.group.add(sweep);
 
+    const stageRing = new THREE.Mesh(
+      new THREE.RingGeometry(1.5, 1.53, 128),
+      new THREE.MeshBasicMaterial({
+        color: 0xc8ff16,
+        transparent: true,
+        opacity: 0.22,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    stageRing.rotation.x = -Math.PI / 2;
+    stageRing.position.y = -0.435;
+    scene.add(stageRing);
+
     const curve = new THREE.CatmullRomCurve3(
       PATHS[variant].map(([x, y, z]) => new THREE.Vector3(x, y, z)),
       true,
@@ -189,6 +218,176 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
     let raf = 0;
     let disposed = false;
     let shownRpm = 3200;
+    let u = 0.02;
+
+    // Embers drifting up through the cutaway.
+    const emberCount = reduced ? 70 : 260;
+    const emberPositions = new Float32Array(emberCount * 3);
+    const emberSeeds = new Float32Array(emberCount);
+    for (let i = 0; i < emberCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 0.4 + Math.random() * 1.9;
+      emberPositions[i * 3] = Math.cos(angle) * radius;
+      emberPositions[i * 3 + 1] = -0.4 + Math.random() * 2.1;
+      emberPositions[i * 3 + 2] = Math.sin(angle) * radius;
+      emberSeeds[i] = Math.random();
+    }
+    const emberGeometry = new THREE.BufferGeometry();
+    emberGeometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(emberPositions, 3),
+    );
+    const embers = new THREE.Points(
+      emberGeometry,
+      new THREE.PointsMaterial({
+        color: 0xc8ff16,
+        size: 0.014,
+        transparent: true,
+        opacity: 0.42,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        sizeAttenuation: true,
+      }),
+    );
+    scene.add(embers);
+
+    // Camera rig: the route flies itself; the user can orbit it at any time.
+    const rig = {
+      yaw: 0,
+      pitch: 0,
+      zoom: 1,
+      yawT: 0,
+      pitchT: 0,
+      zoomT: 1,
+      velYaw: 0,
+      velPitch: 0,
+      dragging: false,
+      lastX: 0,
+      lastY: 0,
+      lastInput: performance.now(),
+    };
+    const pointers = new Map<number, { x: number; y: number }>();
+    let pinchDistance = 0;
+
+    const clampZoom = (value: number) =>
+      THREE.MathUtils.clamp(value, 0.5, 2.3);
+    const isControl = (target: EventTarget | null) =>
+      Boolean((target as HTMLElement | null)?.closest?.("button, a, input, label"));
+
+    const touch = (): void => {
+      rig.lastInput = performance.now();
+    };
+
+    const onPointerDown = (event: PointerEvent): void => {
+      if (isControl(event.target)) return;
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      try {
+        stage.setPointerCapture(event.pointerId);
+      } catch {
+        // The pointer may already be released.
+      }
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        pinchDistance = Math.hypot(a.x - b.x, a.y - b.y);
+      }
+      rig.dragging = pointers.size === 1;
+      rig.lastX = event.clientX;
+      rig.lastY = event.clientY;
+      stage.classList.add("is-grabbing");
+      touch();
+    };
+
+    const onPointerMove = (event: PointerEvent): void => {
+      const point = pointers.get(event.pointerId);
+      if (!point) return;
+      point.x = event.clientX;
+      point.y = event.clientY;
+      touch();
+
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        const distance = Math.hypot(a.x - b.x, a.y - b.y);
+        if (pinchDistance > 0 && distance > 0) {
+          rig.zoomT = clampZoom(rig.zoomT * (pinchDistance / distance));
+        }
+        pinchDistance = distance;
+        return;
+      }
+
+      const dx = event.clientX - rig.lastX;
+      const dy = event.clientY - rig.lastY;
+      rig.lastX = event.clientX;
+      rig.lastY = event.clientY;
+      if (!rig.dragging) return;
+
+      rig.yawT -= dx * 0.006;
+      rig.pitchT = THREE.MathUtils.clamp(rig.pitchT + dy * 0.004, -0.85, 0.85);
+      rig.velYaw = -dx * 0.045;
+      rig.velPitch = dy * 0.03;
+    };
+
+    const onPointerEnd = (event: PointerEvent): void => {
+      pointers.delete(event.pointerId);
+      if (pointers.size < 2) pinchDistance = 0;
+      if (pointers.size === 0) {
+        rig.dragging = false;
+        stage.classList.remove("is-grabbing");
+      }
+      touch();
+    };
+
+    const onWheel = (event: WheelEvent): void => {
+      if (isControl(event.target)) return;
+      event.preventDefault();
+      rig.zoomT = clampZoom(rig.zoomT * Math.exp(event.deltaY * 0.0011));
+      touch();
+    };
+
+    const onDoubleClick = (event: MouseEvent): void => {
+      if (isControl(event.target)) return;
+      rig.yawT = 0;
+      rig.pitchT = 0;
+      rig.zoomT = 1;
+      rig.velYaw = 0;
+      rig.velPitch = 0;
+      touch();
+    };
+
+    stage.addEventListener("pointerdown", onPointerDown);
+    stage.addEventListener("pointermove", onPointerMove);
+    stage.addEventListener("pointerup", onPointerEnd);
+    stage.addEventListener("pointercancel", onPointerEnd);
+    stage.addEventListener("wheel", onWheel, { passive: false });
+    stage.addEventListener("dblclick", onDoubleClick);
+
+    camApi.current = {
+      zoom: (factor) => {
+        rig.zoomT = clampZoom(rig.zoomT * factor);
+        touch();
+      },
+      reset: () => {
+        rig.yawT = 0;
+        rig.pitchT = 0;
+        rig.zoomT = 1;
+        rig.velYaw = 0;
+        rig.velPitch = 0;
+        touch();
+      },
+    };
+
+    const composer = new EffectComposer(renderer);
+    composer.setPixelRatio(renderer.getPixelRatio());
+    composer.setSize(width, height);
+    composer.addPass(new RenderPass(scene, camera));
+    composer.addPass(
+      new UnrealBloomPass(new THREE.Vector2(width, height), 0.55, 0.55, 0.85),
+    );
+    composer.addPass(new OutputPass());
+
+    const offset = new THREE.Vector3();
+    const focus = new THREE.Vector3();
+    const qYaw = new THREE.Quaternion();
+    const qPitch = new THREE.Quaternion();
 
     const tick = () => {
       if (disposed) return;
@@ -197,34 +396,98 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
 
       if (!pausedRef.current) {
         elapsed += dt;
+        // Linger slightly while the camera is inside the assembly.
+        const linger = 1 - 0.45 * Math.exp(-Math.pow((u - 0.42) / 0.09, 2));
+        const breathe = 0.82 + 0.18 * Math.sin(elapsed * 0.55);
+        u = (u + dt * 0.036 * linger * breathe) % 1;
         assembly.update(elapsed);
         sweep.position.z = -1.2 + ((elapsed * 0.55) % 1) * 2.4;
         sweep.rotation.y = Math.PI / 2;
+
+        const positions = emberGeometry.attributes.position as THREE.BufferAttribute;
+        for (let i = 0; i < emberCount; i++) {
+          const y = positions.getY(i) + dt * (0.035 + emberSeeds[i] * 0.09);
+          positions.setY(i, y > 1.7 ? -0.44 : y);
+          const x = positions.getX(i);
+          positions.setX(
+            i,
+            x + Math.sin(elapsed * 0.7 + emberSeeds[i] * 12) * dt * 0.02,
+          );
+        }
+        positions.needsUpdate = true;
+        embers.rotation.y += dt * 0.05;
       }
 
-      if (reduced) {
-        const fixed = curve.getPointAt(0.24);
-        camera.position.copy(fixed);
-        camera.lookAt(0, 0.2, 0);
-      } else {
-        const u = (elapsed * 0.038) % 1;
-        const pos = curve.getPointAt(u);
-        const ahead = curve.getPointAt((u + 0.035) % 1);
-        pos.y += Math.sin(elapsed * 1.3) * 0.012;
-        camera.position.copy(pos);
-        camera.lookAt(ahead.x, ahead.y + 0.12, ahead.z);
-      }
-
+      const rpmTarget =
+        variant === "v12"
+          ? 4200 + Math.sin(elapsed * 2.1) * 2600
+          : 7600 + Math.sin(elapsed * 2.6) * 4200;
+      shownRpm += (rpmTarget - shownRpm) * dt * 4;
+      const rpmNorm = THREE.MathUtils.clamp((shownRpm - 2600) / 9600, 0, 1);
       if (rpmRef.current) {
-        const target =
-          variant === "v12"
-            ? 4200 + Math.sin(elapsed * 2.1) * 2600
-            : 7600 + Math.sin(elapsed * 2.6) * 4200;
-        shownRpm += (target - shownRpm) * dt * 4;
         rpmRef.current.textContent = Math.round(shownRpm).toLocaleString("en-US");
       }
+      if (routeRef.current) {
+        routeRef.current.textContent = String(Math.round(u * 100)).padStart(2, "0");
+      }
 
-      renderer.render(scene, camera);
+      // Inertia after release, then drift back to the route once idle.
+      if (!rig.dragging && pointers.size === 0) {
+        rig.yawT += rig.velYaw * dt;
+        rig.pitchT = THREE.MathUtils.clamp(
+          rig.pitchT + rig.velPitch * dt,
+          -0.85,
+          0.85,
+        );
+        const decay = Math.exp(-dt * 2.8);
+        rig.velYaw *= decay;
+        rig.velPitch *= decay;
+        if (performance.now() - rig.lastInput > 4200) {
+          const ease = 1 - Math.exp(-dt * 1.15);
+          rig.yawT += (0 - rig.yawT) * ease;
+          rig.pitchT += (0 - rig.pitchT) * ease;
+          rig.zoomT += (1 - rig.zoomT) * ease;
+        }
+      }
+
+      const ease = 1 - Math.exp(-dt * 8);
+      rig.yaw += (rig.yawT - rig.yaw) * ease;
+      rig.pitch += (rig.pitchT - rig.pitch) * ease;
+      rig.zoom += (rig.zoomT - rig.zoom) * ease;
+
+      const basePos = curve.getPointAt(u);
+      const ahead = curve.getPointAt((u + 0.045) % 1);
+      focus.set(ahead.x, ahead.y + 0.1, ahead.z);
+
+      offset.copy(basePos).sub(focus).multiplyScalar(rig.zoom);
+      qPitch.setFromAxisAngle(RIGHT, rig.pitch);
+      qYaw.setFromAxisAngle(UP, rig.yaw);
+      offset.applyQuaternion(qPitch).applyQuaternion(qYaw);
+      camera.position.copy(focus).add(offset);
+
+      if (!reduced) {
+        const shake = 0.4 + rpmNorm;
+        camera.position.x += Math.sin(elapsed * 11.3) * 0.0032 * shake;
+        camera.position.y += Math.sin(elapsed * 13.7 + 1.3) * 0.0026 * shake;
+        camera.position.z += Math.cos(elapsed * 9.1) * 0.002;
+      }
+
+      camera.lookAt(focus);
+      const roll =
+        Math.sin(elapsed * 0.35) * 0.01 +
+        THREE.MathUtils.clamp(rig.velYaw * 0.55, -0.05, 0.05);
+      if (!reduced) camera.rotateZ(roll);
+
+      const jitter = reduced ? 0 : rpmNorm * 0.0021;
+      assembly.group.position.y = 0.04 + Math.sin(elapsed * 57) * jitter;
+      assembly.group.rotation.z = Math.sin(elapsed * 43) * jitter * 0.7;
+      rim.intensity = 7 + rpmNorm * 3.5 + Math.sin(elapsed * 5) * 1.1;
+      stageRing.material.opacity = 0.16 + 0.12 * Math.sin(elapsed * 2.2);
+      const ringScale = 1 + Math.sin(elapsed * 1.6) * 0.015;
+      stageRing.scale.set(ringScale, ringScale, 1);
+      sweep.material.opacity = 0.04 + 0.02 * Math.sin(elapsed * 3.1);
+
+      composer.render();
     };
 
     tick();
@@ -235,6 +498,7 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+      composer.setSize(w, h);
     };
     const observer = new ResizeObserver(resize);
     observer.observe(stage);
@@ -243,12 +507,25 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
       disposed = true;
       cancelAnimationFrame(raf);
       observer.disconnect();
+      stage.removeEventListener("pointerdown", onPointerDown);
+      stage.removeEventListener("pointermove", onPointerMove);
+      stage.removeEventListener("pointerup", onPointerEnd);
+      stage.removeEventListener("pointercancel", onPointerEnd);
+      stage.removeEventListener("wheel", onWheel);
+      stage.removeEventListener("dblclick", onDoubleClick);
+      stage.classList.remove("is-grabbing");
+      camApi.current = null;
       scene.traverse((object) => {
-        if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments) {
+        if (
+          object instanceof THREE.Mesh ||
+          object instanceof THREE.LineSegments ||
+          object instanceof THREE.Points
+        ) {
           object.geometry.dispose();
         }
       });
       scene.environment?.dispose();
+      composer.dispose();
       renderer.dispose();
       renderer.forceContextLoss();
       if (renderer.domElement.parentElement === stage) {
@@ -313,7 +590,9 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
         </div>
 
         <div className="corelab__right">
-          <span className="micro">FLYTHROUGH</span>
+          <span className="micro">
+            FLYTHROUGH / ROUTE <span ref={routeRef}>0</span>%
+          </span>
           <div className="corelab__rpm">
             <b>
               <span ref={rpmRef}>4,200</span>
@@ -328,7 +607,28 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
           >
             {paused ? "RESUME" : "HOLD"}
           </button>
-          <span className="corelab__hint">ESC TO CLOSE</span>
+          <div className="corelab__cam">
+            <button
+              type="button"
+              aria-label="Zoom in"
+              onClick={() => camApi.current?.zoom(0.84)}
+            >
+              +
+            </button>
+            <button
+              type="button"
+              aria-label="Zoom out"
+              onClick={() => camApi.current?.zoom(1.19)}
+            >
+              −
+            </button>
+            <button type="button" onClick={() => camApi.current?.reset()}>
+              RESET VIEW
+            </button>
+          </div>
+          <span className="corelab__hint">
+            DRAG TO ORBIT · WHEEL / PINCH TO ZOOM · ESC TO CLOSE
+          </span>
         </div>
 
         <div className="corelab__caption">
@@ -336,7 +636,7 @@ export function CoreLab({ variant, onClose, onChange }: Props) {
           <h3>{spec.title}</h3>
           <p>{spec.subtitle}</p>
           <span className="corelab__caption-note">
-            CAMERA ROUTE INTERSECTS THE ASSEMBLY — CUTAWAY RENDER
+            CAMERA ROUTE INTERSECTS THE ASSEMBLY — DRAG THE VIEW, IT RESUMES WHEN IDLE
           </span>
         </div>
 
