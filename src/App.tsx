@@ -373,6 +373,9 @@ export default function App() {
                 <span>$</span> {INSTALL_CMD}
                 <b>{copied === "hero" ? "COPIED" : "COPY"}</b>
               </button>
+              <span className="hero__camhint">
+                <i /> DRAG — ORBIT · SCROLL — FLY · DOUBLE-CLICK — RESET
+              </span>
             </div>
 
             <div className="hero__telemetry">

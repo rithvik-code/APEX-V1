@@ -9,6 +9,8 @@ import { createSupercar, type VehicleAnchor } from "./car";
 import { createSuperbike } from "./bike";
 
 const ACID = 0xc8ff16;
+const UP_AXIS = new THREE.Vector3(0, 1, 0);
+const RIGHT_AXIS = new THREE.Vector3(1, 0, 0);
 
 // Retina-crisp output, but cap the fill cost on low-core machines.
 function renderPixelRatio(): number {
@@ -139,6 +141,25 @@ export class ApexEngine {
   private basePos = new THREE.Vector3();
   private baseTarget = new THREE.Vector3();
   private lookTarget = new THREE.Vector3();
+  private orbitOffset = new THREE.Vector3();
+  private posPoints = KEYFRAMES.map(
+    (key) => new THREE.Vector3(...key.pos),
+  );
+  private tgtPoints = KEYFRAMES.map(
+    (key) => new THREE.Vector3(...key.tgt),
+  );
+  private keyP = KEYFRAMES.map((key) => key.p);
+  private userYaw = 0;
+  private userPitch = 0;
+  private userYawT = 0;
+  private userPitchT = 0;
+  private yawVel = 0;
+  private pitchVel = 0;
+  private dragging = false;
+  private dragX = 0;
+  private dragY = 0;
+  private lastOrbitInput = 0;
+  private lastProgress = 0;
   private onReady?: () => void;
   private readySent = false;
   private paused = false;
@@ -248,6 +269,11 @@ export class ApexEngine {
     window.addEventListener("scroll", this.onScroll, { passive: true });
     window.addEventListener("pointermove", this.onPointer, { passive: true });
     window.addEventListener("resize", this.onResize);
+    window.addEventListener("pointerdown", this.onDragStart);
+    window.addEventListener("pointermove", this.onDragMove, { passive: true });
+    window.addEventListener("pointerup", this.onDragEnd);
+    window.addEventListener("pointercancel", this.onDragEnd);
+    window.addEventListener("dblclick", this.onResetView);
 
     this.onScroll();
     this.progress = this.targetProgress;
@@ -495,6 +521,67 @@ export class ApexEngine {
     );
   }
 
+  private heroVisible(): boolean {
+    return window.scrollY <= window.innerHeight * 1.4;
+  }
+
+  private orbitTarget(event: Event): HTMLElement | null {
+    const target = event.target as HTMLElement | null;
+    if (
+      target?.closest(
+        "a, button, input, textarea, select, label, [contenteditable], .terminal, .grid, .corelab, .ctl-shell, nav, header, footer",
+      )
+    ) {
+      return null;
+    }
+    return target;
+  }
+
+  private onDragStart = (event: PointerEvent): void => {
+    if (this.paused || event.button !== 0 || event.pointerType === "touch") return;
+    if (!this.heroVisible() || !this.orbitTarget(event)) return;
+    this.dragging = true;
+    this.dragX = event.clientX;
+    this.dragY = event.clientY;
+    this.yawVel = 0;
+    this.pitchVel = 0;
+    this.lastOrbitInput = performance.now();
+    document.body.classList.add("is-orbiting");
+  };
+
+  private onDragMove = (event: PointerEvent): void => {
+    if (!this.dragging) return;
+    const dx = event.clientX - this.dragX;
+    const dy = event.clientY - this.dragY;
+    this.dragX = event.clientX;
+    this.dragY = event.clientY;
+    this.userYawT -= dx * 0.004;
+    this.userPitchT = THREE.MathUtils.clamp(
+      this.userPitchT + dy * 0.003,
+      -0.45,
+      0.45,
+    );
+    this.yawVel = -dx * 0.03;
+    this.pitchVel = dy * 0.02;
+    this.lastOrbitInput = performance.now();
+  };
+
+  private onDragEnd = (): void => {
+    if (!this.dragging) return;
+    this.dragging = false;
+    this.lastOrbitInput = performance.now();
+    document.body.classList.remove("is-orbiting");
+  };
+
+  private onResetView = (event: MouseEvent): void => {
+    if (this.paused || !this.heroVisible() || !this.orbitTarget(event)) return;
+    this.userYawT = 0;
+    this.userPitchT = 0;
+    this.yawVel = 0;
+    this.pitchVel = 0;
+    this.lastOrbitInput = performance.now();
+  };
+
   private onResize(): void {
     const w = window.innerWidth;
     const h = window.innerHeight;
@@ -505,6 +592,43 @@ export class ApexEngine {
     this.composer.setPixelRatio(renderPixelRatio());
     this.composer.setSize(w, h);
     this.crt.uniforms.uRes.value.set(w, h);
+  }
+
+  // Catmull-Rom over the keyframes keeps keyframe pacing while making camera
+  // velocity continuous across segment joints.
+  private sampleTrack(
+    points: THREE.Vector3[],
+    p: number,
+    out: THREE.Vector3,
+  ): void {
+    const keys = this.keyP;
+    let i = 0;
+    while (i < keys.length - 2 && p > keys[i + 1]) i++;
+    const span = Math.max(keys[i + 1] - keys[i], 1e-5);
+    const t = Math.min(1, Math.max(0, (p - keys[i]) / span));
+    const p0 = points[Math.max(0, i - 1)];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[Math.min(points.length - 1, i + 2)];
+    const t2 = t * t;
+    const t3 = t2 * t;
+    out.set(
+      0.5 *
+        (2 * p1.x +
+          (-p0.x + p2.x) * t +
+          (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+          (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+      0.5 *
+        (2 * p1.y +
+          (-p0.y + p2.y) * t +
+          (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+          (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+      0.5 *
+        (2 * p1.z +
+          (-p0.z + p2.z) * t +
+          (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * t2 +
+          (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * t3),
+    );
   }
 
   private sampleCamera(p: number): void {
@@ -519,16 +643,8 @@ export class ApexEngine {
     }
     const raw = b.p === a.p ? 0 : (p - a.p) / (b.p - a.p);
     const t = smoothstep(raw);
-    this.basePos.set(
-      THREE.MathUtils.lerp(a.pos[0], b.pos[0], t),
-      THREE.MathUtils.lerp(a.pos[1], b.pos[1], t),
-      THREE.MathUtils.lerp(a.pos[2], b.pos[2], t),
-    );
-    this.baseTarget.set(
-      THREE.MathUtils.lerp(a.tgt[0], b.tgt[0], t),
-      THREE.MathUtils.lerp(a.tgt[1], b.tgt[1], t),
-      THREE.MathUtils.lerp(a.tgt[2], b.tgt[2], t),
-    );
+    this.sampleTrack(this.posPoints, p, this.basePos);
+    this.sampleTrack(this.tgtPoints, p, this.baseTarget);
 
     const mobile = this.camera.aspect < 0.9;
     if (mobile) {
@@ -585,6 +701,9 @@ export class ApexEngine {
     this.pointer.lerp(this.pointerTarget, 0.05);
     this.progress += (this.targetProgress - this.progress) * Math.min(1, dt * 6);
     const p = this.progress;
+    const scrollSpeed =
+      Math.abs(p - this.lastProgress) / Math.max(dt, 0.001);
+    this.lastProgress = p;
 
     this.sampleCamera(p);
     this.camera.position.copy(this.basePos);
@@ -593,7 +712,44 @@ export class ApexEngine {
     this.lookTarget.copy(this.baseTarget);
     this.lookTarget.x += this.pointer.x * 0.35;
     this.lookTarget.y += this.pointer.y * -0.18;
+
+    // User orbit layered over the cinematic path; drifts back when idle.
+    const now = performance.now();
+    if (!this.dragging) {
+      this.userYawT += this.yawVel * dt;
+      this.userPitchT = THREE.MathUtils.clamp(
+        this.userPitchT + this.pitchVel * dt,
+        -0.45,
+        0.45,
+      );
+      const decay = Math.exp(-dt * 3.2);
+      this.yawVel *= decay;
+      this.pitchVel *= decay;
+      if (now - this.lastOrbitInput > 2800) {
+        const ease = 1 - Math.exp(-dt * 1.3);
+        this.userYawT += (0 - this.userYawT) * ease;
+        this.userPitchT += (0 - this.userPitchT) * ease;
+      }
+    }
+    const orbitEase = 1 - Math.exp(-dt * 8);
+    this.userYaw += (this.userYawT - this.userYaw) * orbitEase;
+    this.userPitch += (this.userPitchT - this.userPitch) * orbitEase;
+    this.orbitOffset.copy(this.camera.position).sub(this.lookTarget);
+    this.orbitOffset.applyAxisAngle(UP_AXIS, this.userYaw);
+    this.orbitOffset.applyAxisAngle(RIGHT_AXIS, this.userPitch);
+    this.camera.position.copy(this.lookTarget).add(this.orbitOffset);
+
+    if (!this.reducedMotion) {
+      this.camera.position.x += Math.sin(this.clockTime * 0.42) * 0.045;
+      this.camera.position.y += Math.cos(this.clockTime * 0.33) * 0.03;
+    }
+
     this.camera.lookAt(this.lookTarget);
+    if (!this.reducedMotion) {
+      this.camera.rotateZ(
+        THREE.MathUtils.clamp(this.yawVel * 0.4, -0.03, 0.03),
+      );
+    }
 
     this.carGroup.rotation.y = Math.sin(this.clockTime * 0.08) * 0.012;
     for (const wheel of this.car.wheels) {
@@ -610,10 +766,14 @@ export class ApexEngine {
     if (p > 0.58) {
       this.tunnel.visible = true;
       const fade = smoothstep((p - 0.58) / 0.22);
-      this.tunnel.children.forEach((child) => {
+      this.tunnel.children.forEach((child, index) => {
         if (child instanceof THREE.Mesh || child instanceof THREE.LineSegments) {
           const material = child.material as THREE.Material & { opacity: number };
-          if ("opacity" in material) material.opacity = fade * 0.34;
+          if ("opacity" in material) {
+            const wave = 0.5 + 0.5 * Math.sin(this.clockTime * 2.1 - index * 0.55);
+            material.opacity =
+              fade * (0.14 + 0.28 * wave) * (index % 6 === 0 ? 1.3 : 1);
+          }
         }
       });
       this.endRing.material.opacity = 0.25 + 0.55 * smoothstep((p - 0.85) / 0.15);
@@ -628,8 +788,9 @@ export class ApexEngine {
 
     if (!this.reducedMotion) {
       const positions = this.streakPositions;
+      const rush = 0.4 + Math.min(2.4, scrollSpeed * 26);
       for (let i = 0; i < this.streakSpeeds.length; i++) {
-        const speed = this.streakSpeeds[i] * dt;
+        const speed = this.streakSpeeds[i] * dt * rush;
         positions[i * 6 + 2] += speed;
         positions[i * 6 + 5] += speed;
         if (positions[i * 6 + 2] > 34) {
@@ -671,6 +832,12 @@ export class ApexEngine {
     window.removeEventListener("scroll", this.onScroll);
     window.removeEventListener("pointermove", this.onPointer);
     window.removeEventListener("resize", this.onResize);
+    window.removeEventListener("pointerdown", this.onDragStart);
+    window.removeEventListener("pointermove", this.onDragMove);
+    window.removeEventListener("pointerup", this.onDragEnd);
+    window.removeEventListener("pointercancel", this.onDragEnd);
+    window.removeEventListener("dblclick", this.onResetView);
+    document.body.classList.remove("is-orbiting");
     this.scene.traverse((object) => {
       if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments || object instanceof THREE.Points) {
         object.geometry?.dispose();

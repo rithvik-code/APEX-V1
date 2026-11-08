@@ -908,6 +908,35 @@ em {
   gap: 12px;
 }
 
+.hero__camhint {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: 6.5px;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+}
+
+.hero__camhint i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--acid);
+  box-shadow: 0 0 8px var(--acid);
+  animation: pulse 1.8s infinite;
+}
+
+body.is-orbiting {
+  cursor: grabbing;
+  user-select: none;
+}
+
+body.is-orbiting * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
