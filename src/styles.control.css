@@ -22,7 +22,7 @@
   background: rgba(200, 255, 22, 0.06);
   color: var(--acid);
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 10px;
   letter-spacing: 0.14em;
   cursor: pointer;
   transition:
@@ -128,7 +128,7 @@
 }
 
 .ctl-screen__empty > span {
-  font-size: 7px;
+  font-size: 10px;
   letter-spacing: 0.24em;
   color: var(--acid);
 }
@@ -151,7 +151,7 @@
 
 .ctl-screen__empty > p {
   margin: 0;
-  font-size: 6.5px;
+  font-size: 9px;
   line-height: 1.8;
   letter-spacing: 0.08em;
   color: var(--dim);
@@ -221,7 +221,7 @@
   gap: 12px;
   pointer-events: none;
   font-family: var(--mono);
-  font-size: 6.5px;
+  font-size: 9px;
   letter-spacing: 0.12em;
   color: var(--muted);
   text-shadow: 0 1px 4px #000;
@@ -316,7 +316,7 @@
 
 .ctl-tools__label {
   margin-right: 4px;
-  font-size: 6px;
+  font-size: 9px;
   letter-spacing: 0.18em;
   color: var(--dim);
 }
@@ -327,7 +327,7 @@
   background: none;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 6.5px;
+  font-size: 9px;
   letter-spacing: 0.1em;
   cursor: pointer;
   transition:
@@ -363,7 +363,7 @@
   max-width: 40%;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: 6px;
+  font-size: 9px;
   letter-spacing: 0.1em;
   color: var(--dim);
 }
@@ -384,7 +384,7 @@
   padding: 7px 11px;
   border-bottom: 1px solid var(--line-soft);
   font-family: var(--mono);
-  font-size: 6px;
+  font-size: 9px;
   letter-spacing: 0.16em;
   color: var(--dim);
 }
@@ -410,7 +410,7 @@
   margin: 0;
   padding: 3px 11px;
   font-family: var(--mono);
-  font-size: 6.5px;
+  font-size: 9px;
   line-height: 1.5;
   color: var(--muted);
   animation: feedIn 0.3s var(--ease) both;
@@ -465,7 +465,7 @@
   margin: 0;
   padding: 10px 12px;
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 10px;
   color: var(--dim);
 }
 
@@ -501,7 +501,7 @@
   justify-content: space-between;
   gap: 10px;
   font-family: var(--mono);
-  font-size: 6px;
+  font-size: 9px;
   letter-spacing: 0.16em;
   color: var(--dim);
 }
@@ -520,7 +520,7 @@
   background: none;
   color: var(--acid);
   font-family: var(--mono);
-  font-size: 6px;
+  font-size: 9px;
   letter-spacing: 0.16em;
   cursor: pointer;
 }
@@ -539,7 +539,7 @@
   background: rgba(0, 0, 0, 0.42);
   color: var(--paper);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.7;
 }
 
@@ -559,7 +559,7 @@
   justify-content: space-between;
   gap: 8px;
   font-family: var(--mono);
-  font-size: 5.5px;
+  font-size: 9px;
   letter-spacing: 0.1em;
   color: var(--dim);
 }
@@ -580,7 +580,7 @@
   background: rgba(0, 0, 0, 0.24);
   color: var(--dim);
   font-family: var(--mono);
-  font-size: 6px;
+  font-size: 9px;
   letter-spacing: 0.1em;
   cursor: pointer;
   transition:
@@ -591,7 +591,7 @@
 
 .ctl-cap i {
   font-style: normal;
-  font-size: 5px;
+  font-size: 9px;
   letter-spacing: 0.12em;
   opacity: 0.55;
 }
@@ -618,7 +618,7 @@
 .ctl-fine {
   margin: 0;
   font-family: var(--mono);
-  font-size: 5.8px;
+  font-size: 9px;
   line-height: 1.75;
   letter-spacing: 0.04em;
   color: var(--dim);
@@ -630,7 +630,7 @@
   align-items: center;
   gap: 8px;
   font-family: var(--mono);
-  font-size: 6px;
+  font-size: 9px;
   letter-spacing: 0.1em;
   color: var(--dim);
 }
@@ -645,7 +645,7 @@
   background: rgba(0, 0, 0, 0.42);
   color: var(--paper);
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 10px;
 }
 
 .ctl-field select:focus,
@@ -672,7 +672,7 @@
   background: rgba(0, 0, 0, 0.24);
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 6px;
+  font-size: 9px;
   letter-spacing: 0.1em;
   text-align: left;
   cursor: pointer;
@@ -736,7 +736,7 @@
   background: none;
   color: var(--paper);
   font-family: var(--mono);
-  font-size: 7.5px;
+  font-size: 10px;
   letter-spacing: 0.14em;
   cursor: pointer;
   transition:
@@ -801,7 +801,7 @@
   border-left: 2px solid var(--acid);
   background: rgba(200, 255, 22, 0.06);
   font-family: var(--mono);
-  font-size: 6.2px;
+  font-size: 9px;
   line-height: 1.7;
   color: var(--acid);
 }
@@ -812,7 +812,7 @@
   border-left: 2px solid var(--alert);
   background: rgba(255, 90, 60, 0.07);
   font-family: var(--mono);
-  font-size: 6.2px;
+  font-size: 9px;
   line-height: 1.7;
   color: var(--alert);
 }
@@ -828,14 +828,14 @@
 
 .ctl-approval__risk {
   font-family: var(--mono);
-  font-size: 5.8px;
+  font-size: 9px;
   letter-spacing: 0.16em;
   color: var(--warn);
 }
 
 .ctl-approval > b {
   font-family: var(--mono);
-  font-size: 7.5px;
+  font-size: 10px;
   line-height: 1.6;
   color: var(--paper);
 }
@@ -843,7 +843,7 @@
 .ctl-approval > p {
   margin: 0;
   font-family: var(--mono);
-  font-size: 6px;
+  font-size: 9px;
   line-height: 1.7;
   color: var(--dim);
 }
@@ -856,7 +856,7 @@
   border: 1px solid var(--line-soft);
   background: rgba(0, 0, 0, 0.4);
   font-family: var(--mono);
-  font-size: 6px;
+  font-size: 9px;
   line-height: 1.6;
   color: var(--muted);
   white-space: pre-wrap;
@@ -880,7 +880,7 @@
 
 .ctl-now > span {
   font-family: var(--mono);
-  font-size: 6px;
+  font-size: 9px;
   letter-spacing: 0.12em;
   color: var(--acid);
 }
@@ -888,7 +888,7 @@
 .ctl-now > p {
   margin: 0;
   font-family: var(--mono);
-  font-size: 6px;
+  font-size: 9px;
   line-height: 1.7;
   color: var(--muted);
 }
@@ -896,7 +896,7 @@
 .ctl-now > em {
   font-style: normal;
   font-family: var(--mono);
-  font-size: 5.8px;
+  font-size: 9px;
   letter-spacing: 0.08em;
   color: var(--dim);
 }
@@ -914,7 +914,7 @@
   padding: 5px 0;
   border-bottom: 1px solid var(--line-soft);
   font-family: var(--mono);
-  font-size: 6px;
+  font-size: 9px;
 }
 
 .ctl-readout span {
@@ -936,7 +936,7 @@
 .ctl-verify {
   margin: 0;
   font-family: var(--mono);
-  font-size: 5.8px;
+  font-size: 9px;
   line-height: 1.7;
   color: var(--muted);
 }
@@ -947,7 +947,7 @@
   border-left: 2px solid var(--acid);
   background: rgba(200, 255, 22, 0.06);
   font-family: var(--mono);
-  font-size: 6.2px;
+  font-size: 9px;
   line-height: 1.7;
   color: var(--paper);
 }
@@ -973,7 +973,7 @@
     0 0 40px rgba(200, 255, 22, 0.12);
   backdrop-filter: blur(10px);
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 10px;
   color: var(--muted);
 }
 
@@ -1030,7 +1030,7 @@
   background: none;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 6.5px;
+  font-size: 9px;
   letter-spacing: 0.1em;
   cursor: pointer;
 }
@@ -1080,7 +1080,7 @@
   align-items: center;
   gap: 12px;
   font-family: var(--mono);
-  font-size: 6.5px;
+  font-size: 9px;
   letter-spacing: 0.12em;
 }
 
@@ -1124,7 +1124,7 @@
   background: rgba(200, 255, 22, 0.06);
   color: var(--acid);
   font-family: var(--mono);
-  font-size: 6.5px;
+  font-size: 9px;
   letter-spacing: 0.12em;
   cursor: pointer;
 }
@@ -1152,7 +1152,7 @@
     radial-gradient(70% 70% at 50% 45%, rgba(23, 30, 25, 0.55), rgba(2, 3, 3, 0.96) 78%),
     #020303;
   font-family: var(--mono);
-  font-size: 6px;
+  font-size: 9px;
   letter-spacing: 0.1em;
   color: var(--dim);
 }
@@ -1171,7 +1171,7 @@
   position: absolute;
   bottom: 5px;
   font-family: var(--mono);
-  font-size: 5.5px;
+  font-size: 9px;
   font-style: normal;
   font-weight: 500;
   letter-spacing: 0.1em;
@@ -1223,7 +1223,7 @@
   background: rgba(0, 0, 0, 0.4);
   color: var(--paper);
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 10px;
 }
 
 .ctl-dock__mission input:focus {
@@ -1238,7 +1238,7 @@
   background: var(--acid);
   color: #050607;
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.12em;
   cursor: pointer;
@@ -1259,7 +1259,7 @@
 .ctl-dock__goal {
   overflow: hidden;
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 10px;
   letter-spacing: 0.04em;
   color: var(--paper);
   text-overflow: ellipsis;
@@ -1269,7 +1269,7 @@
 .ctl-dock__line {
   overflow: hidden;
   font-family: var(--mono);
-  font-size: 6px;
+  font-size: 9px;
   line-height: 1.6;
   color: var(--dim);
   text-overflow: ellipsis;
@@ -1289,7 +1289,7 @@
   background: none;
   color: var(--dim);
   font-family: var(--mono);
-  font-size: 5.5px;
+  font-size: 9px;
   letter-spacing: 0.06em;
   cursor: pointer;
 }
@@ -1308,7 +1308,7 @@
 .ctl-dock__count {
   margin-left: auto;
   font-family: var(--mono);
-  font-size: 5.5px;
+  font-size: 9px;
   letter-spacing: 0.1em;
   color: var(--dim);
 }
@@ -1327,7 +1327,7 @@
   background: none;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 5.8px;
+  font-size: 9px;
   letter-spacing: 0.1em;
   cursor: pointer;
 }
@@ -1350,7 +1350,7 @@
 .ctl-dock__state {
   overflow: hidden;
   font-family: var(--mono);
-  font-size: 5.8px;
+  font-size: 9px;
   color: var(--dim);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1371,7 +1371,7 @@
   background: rgba(0, 0, 0, 0.42);
   color: var(--paper);
   font-family: var(--mono);
-  font-size: 6px;
+  font-size: 9px;
   letter-spacing: 0.04em;
 }
 
@@ -1387,7 +1387,7 @@
   background: none;
   color: var(--dim);
   font-family: var(--mono);
-  font-size: 5.8px;
+  font-size: 9px;
   letter-spacing: 0.1em;
   cursor: pointer;
 }
@@ -1404,7 +1404,7 @@
 
 .ctl-dock__steered {
   font-family: var(--mono);
-  font-size: 5.5px;
+  font-size: 9px;
   letter-spacing: 0.1em;
   color: var(--acid);
 }
@@ -1421,7 +1421,7 @@
 .ctl-steer__label {
   flex: none;
   font-family: var(--mono);
-  font-size: 6px;
+  font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.14em;
   color: var(--acid);
@@ -1435,7 +1435,7 @@
   background: rgba(0, 0, 0, 0.42);
   color: var(--paper);
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 10px;
   letter-spacing: 0.04em;
 }
 
@@ -1451,7 +1451,7 @@
   background: none;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 6px;
+  font-size: 9px;
   letter-spacing: 0.12em;
   cursor: pointer;
   transition:
@@ -1473,7 +1473,7 @@
   flex: none;
   font-family: var(--mono);
   font-style: normal;
-  font-size: 5.5px;
+  font-size: 9px;
   letter-spacing: 0.1em;
   color: var(--acid);
 }
@@ -1491,7 +1491,7 @@
   padding: 5px 8px;
   border-bottom: 1px solid var(--line-soft);
   font-family: var(--mono);
-  font-size: 5.8px;
+  font-size: 9px;
   letter-spacing: 0.12em;
   color: var(--acid);
 }
@@ -1502,7 +1502,7 @@
   background: none;
   color: var(--dim);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1;
   cursor: pointer;
 }
@@ -1517,7 +1517,7 @@
   padding: 7px 8px;
   overflow: auto;
   font-family: var(--mono);
-  font-size: 6px;
+  font-size: 9px;
   line-height: 1.7;
   letter-spacing: 0.03em;
   color: var(--dim);
@@ -1549,7 +1549,7 @@
 .ctl-model__info b {
   overflow: hidden;
   font-family: var(--mono);
-  font-size: 6.5px;
+  font-size: 9px;
   letter-spacing: 0.06em;
   color: var(--paper);
   text-overflow: ellipsis;
@@ -1559,7 +1559,7 @@
 .ctl-model__info span {
   overflow: hidden;
   font-family: var(--mono);
-  font-size: 5.5px;
+  font-size: 9px;
   letter-spacing: 0.04em;
   color: var(--dim);
   text-overflow: ellipsis;
@@ -1570,7 +1570,7 @@
   flex: none;
   font-family: var(--mono);
   font-style: normal;
-  font-size: 5px;
+  font-size: 9px;
   letter-spacing: 0.14em;
   color: var(--dim);
 }
@@ -1595,7 +1595,7 @@
   background: none;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 5.8px;
+  font-size: 9px;
   letter-spacing: 0.1em;
   cursor: pointer;
   transition:
@@ -1624,7 +1624,7 @@
   min-width: 46px;
   text-align: center;
   font-family: var(--mono);
-  font-size: 5.8px;
+  font-size: 9px;
   letter-spacing: 0.12em;
   color: var(--acid);
 }
@@ -1636,7 +1636,7 @@
 
   .ctl-log__line {
     grid-template-columns: 26px 46px 38px minmax(90px, 0.6fr) minmax(0, 1fr);
-    font-size: 6px;
+    font-size: 9px;
   }
 }
 
@@ -1728,7 +1728,7 @@
   .ctl-screen__bottom {
     left: 12px;
     right: 12px;
-    font-size: 5.5px;
+    font-size: 9px;
   }
 
   .ctl-hud {

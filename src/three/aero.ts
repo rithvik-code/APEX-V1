@@ -160,7 +160,7 @@ export function buildCarStreamlines(): Streamline[] {
       makeLine(
         ctrl,
         (z) => (z < -2.6 ? 0.6 : 0.7 + 1.05 * gauss(z, -0.2, 1.9)),
-        (z, _t, s) => THREE.MathUtils.clamp(1.1 - s * 0.62, 0, 1),
+        (_z, _t, s) => THREE.MathUtils.clamp(1.1 - s * 0.62, 0, 1),
       ),
     );
   }

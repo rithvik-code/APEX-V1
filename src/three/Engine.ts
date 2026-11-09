@@ -164,8 +164,8 @@ const LIGHTING_TARGETS: Record<
       key: { intensity: 2.1, color: new THREE.Color(0xffffff) },
       cool: { intensity: 1.7, color: new THREE.Color(0x93b8d8) },
       acid: { intensity: 1.35, color: new THREE.Color(ACID) },
-      under: { intensity: 16 },
-      bikeLight: { intensity: 12 },
+      under: { intensity: 6 },
+      bikeLight: { intensity: 5 },
       rim: { intensity: 22, color: new THREE.Color(0xdff5ff) },
     },
   },
@@ -176,8 +176,8 @@ const LIGHTING_TARGETS: Record<
       key: { intensity: 0.7, color: new THREE.Color(0x8fb8ff) },
       cool: { intensity: 0.9, color: new THREE.Color(0x5f88c8) },
       acid: { intensity: 0.55, color: new THREE.Color(ACID) },
-      under: { intensity: 7 },
-      bikeLight: { intensity: 6 },
+      under: { intensity: 3 },
+      bikeLight: { intensity: 3 },
       rim: { intensity: 30, color: new THREE.Color(0xbfe8ff) },
     },
   },
@@ -188,8 +188,8 @@ const LIGHTING_TARGETS: Record<
       key: { intensity: 1.4, color: new THREE.Color(0xffffff) },
       cool: { intensity: 2.4, color: new THREE.Color(0xff2fb3) },
       acid: { intensity: 2.6, color: new THREE.Color(ACID) },
-      under: { intensity: 22 },
-      bikeLight: { intensity: 18 },
+      under: { intensity: 8 },
+      bikeLight: { intensity: 7 },
       rim: { intensity: 14, color: new THREE.Color(0x7fd0ff) },
     },
   },
@@ -371,9 +371,9 @@ export class ApexEngine {
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.bloom = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
-      0.62,
-      0.62,
-      0.82,
+      0.55,
+      0.55,
+      0.9,
     );
     this.composer.addPass(this.bloom);
     this.crt = new ShaderPass(CRTShader);
@@ -414,12 +414,12 @@ export class ApexEngine {
     acid.position.set(-5, 2, 4);
     this.scene.add(acid);
 
-    const under = new THREE.PointLight(ACID, 16, 6, 2);
-    under.position.set(0, 0.15, 0);
+    const under = new THREE.PointLight(ACID, 6, 6, 2);
+    under.position.set(0, 0.35, 0);
     this.scene.add(under);
 
-    const bikeLight = new THREE.PointLight(ACID, 12, 8, 2);
-    bikeLight.position.set(-9, 0.6, -4);
+    const bikeLight = new THREE.PointLight(ACID, 5, 8, 2);
+    bikeLight.position.set(-9, 0.9, -4);
     this.scene.add(bikeLight);
 
     const rim = new THREE.PointLight(0xdff5ff, 22, 20, 2);
@@ -445,7 +445,7 @@ export class ApexEngine {
         new THREE.MeshBasicMaterial({
           map: texture,
           transparent: true,
-          opacity: 0.055,
+          opacity: 0.04,
           blending: THREE.AdditiveBlending,
           depthWrite: false,
           side: THREE.DoubleSide,
@@ -472,8 +472,8 @@ export class ApexEngine {
       new THREE.CircleGeometry(60, 64),
       new THREE.MeshStandardMaterial({
         color: 0x070909,
-        metalness: 0.85,
-        roughness: 0.3,
+        metalness: 0.8,
+        roughness: 0.42,
         envMapIntensity: 0.35,
       }),
     );
@@ -538,6 +538,8 @@ export class ApexEngine {
     bikeRing.rotation.x = -Math.PI / 2;
     bikeRing.position.set(-9, 0.014, -6);
     this.scene.add(bikeRing);
+
+    return grid;
   }
 
   private buildStreaks(): {
@@ -679,7 +681,7 @@ export class ApexEngine {
     const target = event.target as HTMLElement | null;
     if (
       target?.closest(
-        "a, button, input, textarea, select, label, [contenteditable], .terminal, .grid, .corelab, .ctl-shell, nav, header, footer",
+        "a, button, input, textarea, select, label, [contenteditable], .terminal, .grid, .corelab, .ctl-shell, .aero-dock, .aero-launch, nav, header, footer",
       )
     ) {
       return null;
@@ -742,6 +744,8 @@ export class ApexEngine {
     this.composer.setPixelRatio(renderPixelRatio());
     this.composer.setSize(w, h);
     this.crt.uniforms.uRes.value.set(w, h);
+    this.aeroCar.setPointScale(renderPixelRatio());
+    this.aeroBike.setPointScale(renderPixelRatio());
   }
 
   // Catmull-Rom over the keyframes keeps keyframe pacing while making camera
@@ -842,12 +846,43 @@ export class ApexEngine {
     if (!value) this.clock.getDelta();
   }
 
+  configure(config: SceneConfig): void {
+    this.aeroCar.setEnabled(config.aero && config.focus !== "bike");
+    this.aeroBike.setEnabled(config.aero && config.focus !== "car");
+    for (const flow of [this.aeroCar, this.aeroBike]) {
+      flow.setWindSpeed(config.windSpeed);
+      flow.setDensity(config.density);
+      flow.setTurbulence(config.turbulence);
+      flow.setTimeScale(config.timeScale);
+      flow.setColorMode(config.colorMode);
+    }
+    this.timeScale = config.timeScale;
+    this.autoOrbit = config.autoOrbit;
+    this.gridHelper.visible = config.grid;
+    this.bloom.strength = 0.18 + config.glow * 0.6;
+    this.lightTargets = LIGHTING_TARGETS[config.lighting];
+    this.presetTarget = CAMERA_TARGETS[config.camera];
+
+    const livery =
+      LIVERIES.find((entry) => entry.id === config.livery) ?? LIVERIES[0];
+    this.car.paint.color.setHex(livery.hex);
+    this.bike.accent.color.setHex(
+      livery.id === "silver" || livery.id === "graphite" ? ACID : livery.hex,
+    );
+  }
+
+  exportPNG(): string {
+    this.composer.render();
+    return this.renderer.domElement.toDataURL("image/png");
+  }
+
   private tick = (): void => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.tick);
     if (this.paused) return;
     const dt = Math.min(0.05, this.clock.getDelta());
-    this.clockTime += dt;
+    const adt = dt * this.timeScale;
+    this.clockTime += adt;
     this.pointer.lerp(this.pointerTarget, 0.05);
     this.progress += (this.targetProgress - this.progress) * Math.min(1, dt * 6);
     const p = this.progress;
@@ -866,19 +901,23 @@ export class ApexEngine {
     // User orbit layered over the cinematic path; drifts back when idle.
     const now = performance.now();
     if (!this.dragging) {
-      this.userYawT += this.yawVel * dt;
-      this.userPitchT = THREE.MathUtils.clamp(
-        this.userPitchT + this.pitchVel * dt,
-        -0.45,
-        0.45,
-      );
-      const decay = Math.exp(-dt * 3.2);
-      this.yawVel *= decay;
-      this.pitchVel *= decay;
-      if (now - this.lastOrbitInput > 2800) {
-        const ease = 1 - Math.exp(-dt * 1.3);
-        this.userYawT += (0 - this.userYawT) * ease;
-        this.userPitchT += (0 - this.userPitchT) * ease;
+      if (this.autoOrbit && this.heroVisible()) {
+        this.userYawT += dt * 0.14;
+      } else {
+        this.userYawT += this.yawVel * dt;
+        this.userPitchT = THREE.MathUtils.clamp(
+          this.userPitchT + this.pitchVel * dt,
+          -0.45,
+          0.45,
+        );
+        const decay = Math.exp(-dt * 3.2);
+        this.yawVel *= decay;
+        this.pitchVel *= decay;
+        if (now - this.lastOrbitInput > 2800) {
+          const ease = 1 - Math.exp(-dt * 1.3);
+          this.userYawT += (0 - this.userYawT) * ease;
+          this.userPitchT += (0 - this.userPitchT) * ease;
+        }
       }
     }
     const orbitEase = 1 - Math.exp(-dt * 8);
@@ -887,6 +926,28 @@ export class ApexEngine {
     this.orbitOffset.copy(this.camera.position).sub(this.lookTarget);
     this.orbitOffset.applyAxisAngle(UP_AXIS, this.userYaw);
     this.orbitOffset.applyAxisAngle(RIGHT_AXIS, this.userPitch);
+
+    // Camera presets ease in over the orbit and fade out as the scroll
+    // narrative leaves the hero, so the fly-through is never hijacked.
+    const presetEase = 1 - Math.exp(-dt * 3.6);
+    this.presetCurrent.yaw +=
+      (this.presetTarget.yaw - this.presetCurrent.yaw) * presetEase;
+    this.presetCurrent.pitch +=
+      (this.presetTarget.pitch - this.presetCurrent.pitch) * presetEase;
+    this.presetCurrent.dist +=
+      (this.presetTarget.dist - this.presetCurrent.dist) * presetEase;
+    const presetWeight = 1 - smoothstep((p - 0.16) / 0.16);
+    this.orbitOffset.applyAxisAngle(
+      UP_AXIS,
+      this.presetCurrent.yaw * presetWeight,
+    );
+    this.orbitOffset.applyAxisAngle(
+      RIGHT_AXIS,
+      this.presetCurrent.pitch * presetWeight,
+    );
+    this.orbitOffset.multiplyScalar(
+      1 + (this.presetCurrent.dist - 1) * presetWeight,
+    );
     this.camera.position.copy(this.lookTarget).add(this.orbitOffset);
 
     if (!this.reducedMotion) {
@@ -903,7 +964,7 @@ export class ApexEngine {
 
     this.carGroup.rotation.y = Math.sin(this.clockTime * 0.08) * 0.012;
     for (const wheel of this.car.wheels) {
-      wheel.rotation.x += dt * 0.55;
+      wheel.rotation.x += adt * 0.55;
     }
     this.car.engine.update(this.clockTime);
     this.bike.engine.update(this.clockTime);
@@ -912,6 +973,29 @@ export class ApexEngine {
     this.bike.scan.material.opacity =
       0.16 + 0.3 * Math.abs(Math.sin((this.clockTime * 0.42 * Math.PI) % 1));
     this.bike.scan.visible = p > 0.24 && p < 0.56;
+
+    this.aeroCar.update(dt);
+    this.aeroBike.update(dt);
+
+    // Lighting presets cross-fade instead of cutting.
+    const lightEase = Math.min(1, dt * 3.4);
+    const targets = this.lightTargets;
+    (Object.keys(this.lights) as Array<keyof LightRig>).forEach((name) => {
+      const light = this.lights[name];
+      const target = targets.lights[name];
+      light.intensity += (target.intensity - light.intensity) * lightEase;
+      if (target.color) light.color.lerp(target.color, lightEase);
+    });
+    this.renderer.toneMappingExposure +=
+      (targets.exposure - this.renderer.toneMappingExposure) * lightEase;
+
+    this.shafts.children.forEach((child, index) => {
+      const mesh = child as THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
+      mesh.rotation.z =
+        mesh.userData.tilt + Math.sin(this.clockTime * 0.12 + index * 1.7) * 0.06;
+      mesh.material.opacity =
+        0.03 + 0.014 * (0.5 + 0.5 * Math.sin(this.clockTime * 0.2 + index * 2.1));
+    });
 
     if (p > 0.58) {
       this.tunnel.visible = true;
@@ -940,7 +1024,7 @@ export class ApexEngine {
       const positions = this.streakPositions;
       const rush = 0.4 + Math.min(2.4, scrollSpeed * 26);
       for (let i = 0; i < this.streakSpeeds.length; i++) {
-        const speed = this.streakSpeeds[i] * dt * rush;
+        const speed = this.streakSpeeds[i] * adt * rush;
         positions[i * 6 + 2] += speed;
         positions[i * 6 + 5] += speed;
         if (positions[i * 6 + 2] > 34) {
@@ -954,7 +1038,7 @@ export class ApexEngine {
         }
       }
       this.streaks.geometry.attributes.position.needsUpdate = true;
-      this.dust.rotation.y += dt * 0.004;
+      this.dust.rotation.y += adt * 0.004;
       this.dust.position.y = Math.sin(this.clockTime * 0.1) * 0.15;
     }
 

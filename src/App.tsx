@@ -6,8 +6,15 @@ import { GridDeck } from "./components/GridDeck";
 import { Takeover } from "./components/Takeover";
 import { Preloader } from "./components/Preloader";
 import { Cursor } from "./components/Cursor";
+import { AeroDock, AeroLaunch } from "./components/AeroDock";
 import { useControl } from "./hooks/useControl";
 import { sound } from "./lib/sound";
+import {
+  CAMERA_PRESETS,
+  DEFAULT_SCENE,
+  LIVERIES,
+  type SceneConfig,
+} from "./lib/scene";
 
 const CoreLab = lazy(() =>
   import("./components/CoreLab").then((module) => ({ default: module.CoreLab })),
@@ -97,6 +104,9 @@ export default function App() {
   const [blueprintOpen, setBlueprintOpen] = useState(false);
   const [coreView, setCoreView] = useState<CoreVariant | null>(null);
   const [takeover, setTakeover] = useState(false);
+  const [scene, setScene] = useState<SceneConfig>(DEFAULT_SCENE);
+  const sceneRef = useRef(scene);
+  const audioLockedRef = useRef(false);
   const control = useControl();
   const { copied, copy } = useCopy();
 
@@ -116,6 +126,58 @@ export default function App() {
     target.scrollIntoView({ behavior: reduce ? "auto" : "smooth" });
   }, []);
 
+  const updateScene = useCallback(
+    (patch: Partial<SceneConfig>) => {
+      setScene((prev) => ({ ...prev, ...patch }));
+      if (patch.camera) scrollToId("top");
+      if (patch.focus === "bike") scrollToId("machine");
+      if (patch.focus === "car" || patch.focus === "both") scrollToId("top");
+    },
+    [scrollToId],
+  );
+
+  const toggleAero = useCallback(() => {
+    const next = !sceneRef.current.aero;
+    setScene((prev) => ({ ...prev, aero: next }));
+    if (next) {
+      sound.whoosh();
+      if (!audioLockedRef.current && !sound.isOn) {
+        setAudioOn(sound.toggle());
+      }
+      window.setTimeout(() => scrollToId("top"), 60);
+    }
+  }, [scrollToId]);
+
+  const exportScene = useCallback(() => {
+    const url = engineRef.current?.exportPNG();
+    if (!url) return;
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "apex-wind-tunnel.png";
+    link.click();
+    sound.tick("start");
+  }, []);
+
+  const randomizeScene = useCallback(() => {
+    const pick = <T,>(list: ReadonlyArray<T>): T =>
+      list[Math.floor(Math.random() * list.length)];
+    sound.tick("start");
+    setScene((prev) => ({
+      ...prev,
+      livery: pick(LIVERIES).id,
+      colorMode: pick(["velocity", "pressure", "acid"] as const),
+      lighting: pick(["studio", "midnight", "neon"] as const),
+      windSpeed: 80 + Math.floor(Math.random() * 64) * 5,
+      turbulence: Math.round(Math.random() * 16) * 5 / 100,
+      density: 0.4 + Math.round(Math.random() * 12) * 5 / 100,
+    }));
+  }, []);
+
+  const resetScene = useCallback(() => {
+    sound.tick("click");
+    setScene((prev) => ({ ...DEFAULT_SCENE, aero: prev.aero }));
+  }, []);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     const labels = labelsRef.current;
@@ -130,6 +192,7 @@ export default function App() {
       engine = new Engine(canvas, labels);
       engineRef.current = engine;
       engine.setPaused(pausedRef.current);
+      engine.configure(sceneRef.current);
     });
 
     return () => {
@@ -144,6 +207,12 @@ export default function App() {
     pausedRef.current = paused;
     engineRef.current?.setPaused(paused);
   }, [coreView, takeover]);
+
+  useEffect(() => {
+    sceneRef.current = scene;
+    engineRef.current?.configure(scene);
+    sound.setWind(scene.aero ? scene.windSpeed / 400 : 0);
+  }, [scene]);
 
   useEffect(() => {
     document.body.classList.toggle("locked", booting);
@@ -216,13 +285,48 @@ export default function App() {
       if (coreView || takeover) return;
       const tag = (event.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      const key = event.key.toLowerCase();
+      if (key === "a") {
+        toggleAero();
+        return;
+      }
+      if (key === "escape" && scene.aero) {
+        setScene((prev) => ({ ...prev, aero: false }));
+        return;
+      }
+      if (scene.aero) {
+        if (key === "c") {
+          const index = CAMERA_PRESETS.findIndex((p) => p.id === scene.camera);
+          updateScene({
+            camera: CAMERA_PRESETS[(index + 1) % CAMERA_PRESETS.length].id,
+          });
+          return;
+        }
+        if (key === "l") {
+          const index = LIVERIES.findIndex((l) => l.id === scene.livery);
+          updateScene({ livery: LIVERIES[(index + 1) % LIVERIES.length].id });
+          return;
+        }
+        if (key === "g") {
+          updateScene({ grid: !scene.grid });
+          return;
+        }
+        if (key === "r") {
+          resetScene();
+          return;
+        }
+        if (key === "e") {
+          exportScene();
+          return;
+        }
+      }
       const index = Number(event.key);
       if (!Number.isInteger(index) || index < 0 || index >= CHAPTERS.length) return;
       scrollToId(CHAPTERS[index].id);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [coreView, takeover, scrollToId]);
+  }, [coreView, takeover, scene, toggleAero, updateScene, resetScene, exportScene, scrollToId]);
 
   const finishBoot = () => {
     setBooting(false);
@@ -230,11 +334,14 @@ export default function App() {
   };
 
   const toggleAudio = () => {
+    audioLockedRef.current = true;
     setAudioOn(sound.toggle());
   };
 
   return (
-    <div className={`site${booting ? "" : " is-ready"}`}>
+    <div
+      className={`site${booting ? "" : " is-ready"}${scene.aero ? " aero-on" : ""}`}
+    >
       <a className="skip-link" href="#main">
         SKIP TO CONTENT
       </a>
@@ -348,7 +455,18 @@ export default function App() {
             <span className="hero__kicker">
               [ SYS.00 — TERMINAL INTELLIGENCE ]
             </span>
-            <h1>APEX</h1>
+            <h1 aria-label="APEX">
+              {["A", "P", "E", "X"].map((letter, index) => (
+                <span
+                  key={index}
+                  className="hero__letter"
+                  style={{ animationDelay: `${0.08 + index * 0.09}s` }}
+                  aria-hidden="true"
+                >
+                  {letter}
+                </span>
+              ))}
+            </h1>
             <div className="hero__under">
               <span>TERMINAL INTELLIGENCE AT THE LIMIT</span>
               <span className="hero__under-right">EST. 2026 / LOCALHOST</span>
@@ -374,7 +492,7 @@ export default function App() {
                 <b>{copied === "hero" ? "COPIED" : "COPY"}</b>
               </button>
               <span className="hero__camhint">
-                <i /> DRAG — ORBIT · SCROLL — FLY · DOUBLE-CLICK — RESET
+                <i /> DRAG — ORBIT · DOUBLE-CLICK — RESET
               </span>
             </div>
 
@@ -815,7 +933,7 @@ export default function App() {
         <div className="footer__meta">
           <span>© 2026 APEX INC</span>
           <span>NO RIGHTS RESERVED / LOCAL FIRST</span>
-          <span>P {copied ? "—" : "OK"} / SECTOR {activeChapter.n}</span>
+          <span>STATUS OK / SECTOR {activeChapter.n}</span>
         </div>
       </footer>
 
@@ -833,6 +951,18 @@ export default function App() {
         <b>∞</b>
         <span>NO METER</span>
       </div>
+
+      <AeroLaunch active={scene.aero} onToggle={toggleAero} />
+      {scene.aero && (
+        <AeroDock
+          config={scene}
+          onChange={updateScene}
+          onClose={toggleAero}
+          onExport={exportScene}
+          onRandomize={randomizeScene}
+          onReset={resetScene}
+        />
+      )}
 
       {coreView && (
         <Suspense

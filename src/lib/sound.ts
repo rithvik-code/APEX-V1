@@ -2,6 +2,9 @@ class SoundEngine {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private enabled = false;
+  private windGain: GainNode | null = null;
+  private windFilter: BiquadFilterNode | null = null;
+  private noiseBuffer: AudioBuffer | null = null;
 
   private init(): AudioContext {
     if (this.ctx) return this.ctx;
@@ -37,6 +40,7 @@ class SoundEngine {
     const noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
     const data = noiseBuffer.getChannelData(0);
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    this.noiseBuffer = noiseBuffer;
     const noise = ctx.createBufferSource();
     noise.buffer = noiseBuffer;
     noise.loop = true;
@@ -50,9 +54,26 @@ class SoundEngine {
     noiseFilter.connect(noiseGain);
     noiseGain.connect(master);
 
+    const wind = ctx.createBufferSource();
+    wind.buffer = noiseBuffer;
+    wind.loop = true;
+    wind.playbackRate.value = 0.82;
+    const windFilter = ctx.createBiquadFilter();
+    windFilter.type = "bandpass";
+    windFilter.frequency.value = 420;
+    windFilter.Q.value = 0.9;
+    const windGain = ctx.createGain();
+    windGain.gain.value = 0;
+    wind.connect(windFilter);
+    windFilter.connect(windGain);
+    windGain.connect(master);
+    this.windFilter = windFilter;
+    this.windGain = windGain;
+
     low.start();
     high.start();
     noise.start();
+    wind.start();
 
     this.ctx = ctx;
     this.master = master;
@@ -74,6 +95,35 @@ class SoundEngine {
 
   get isOn(): boolean {
     return this.enabled;
+  }
+
+  setWind(level: number): void {
+    if (!this.ctx || !this.windGain || !this.windFilter) return;
+    const now = this.ctx.currentTime;
+    this.windGain.gain.setTargetAtTime(level * 0.3, now, 0.25);
+    this.windFilter.frequency.setTargetAtTime(300 + level * 1050, now, 0.25);
+  }
+
+  whoosh(): void {
+    if (!this.enabled || !this.ctx || !this.master || !this.noiseBuffer) return;
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.Q.value = 1.4;
+    const gain = ctx.createGain();
+    const now = ctx.currentTime;
+    filter.frequency.setValueAtTime(240, now);
+    filter.frequency.exponentialRampToValueAtTime(2600, now + 0.4);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.22, now + 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.55);
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.master);
+    src.start(now);
+    src.stop(now + 0.6);
   }
 
   tick(kind: "start" | "click" | "hover" | "key" = "click"): void {
