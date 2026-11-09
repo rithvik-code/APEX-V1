@@ -21,8 +21,8 @@ const puppeteer = require("puppeteer-core");
   });
   page.on("pageerror", (e) => errors.push("PAGE: " + e.message));
 
-  await page.goto("http://127.0.0.1:5173", { waitUntil: "networkidle2", timeout: 60000 });
-  await page.waitForSelector(".site.is-ready", { timeout: 30000 });
+  await page.goto("http://127.0.0.1:5173", { waitUntil: "domcontentloaded", timeout: 60000 });
+  await page.waitForSelector(".site.is-ready", { timeout: 45000 });
   await page.evaluate(() => document.getElementById("pitwall").scrollIntoView());
   await new Promise((r) => setTimeout(r, 1500));
 
