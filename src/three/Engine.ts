@@ -270,6 +270,10 @@ export class ApexEngine {
   private autoOrbit = false;
   private presetTarget = CAMERA_TARGETS.hero;
   private presetCurrent = { yaw: 0, pitch: 0, dist: 1 };
+  private focusTarget = new THREE.Vector3();
+  private focusCurrent = new THREE.Vector3();
+  private focusDist = 1;
+  private focusDistCurrent = 1;
 
   constructor(canvas: HTMLCanvasElement, labelsEl: HTMLElement, onReady?: () => void) {
     this.labelsEl = labelsEl;
@@ -862,6 +866,13 @@ export class ApexEngine {
     this.bloom.strength = 0.18 + config.glow * 0.6;
     this.lightTargets = LIGHTING_TARGETS[config.lighting];
     this.presetTarget = CAMERA_TARGETS[config.camera];
+    if (config.focus === "bike") {
+      this.focusTarget.copy(this.bikeGroup.position).sub(this.carGroup.position);
+      this.focusDist = 0.58;
+    } else {
+      this.focusTarget.set(0, 0, 0);
+      this.focusDist = 1;
+    }
 
     const livery =
       LIVERIES.find((entry) => entry.id === config.livery) ?? LIVERIES[0];
@@ -948,6 +959,13 @@ export class ApexEngine {
     this.orbitOffset.multiplyScalar(
       1 + (this.presetCurrent.dist - 1) * presetWeight,
     );
+    const focusEase = 1 - Math.exp(-dt * 3);
+    this.focusCurrent.lerp(this.focusTarget, focusEase);
+    this.focusDistCurrent += (this.focusDist - this.focusDistCurrent) * focusEase;
+    this.orbitOffset.multiplyScalar(
+      1 + (this.focusDistCurrent - 1) * presetWeight,
+    );
+    this.lookTarget.addScaledVector(this.focusCurrent, presetWeight);
     this.camera.position.copy(this.lookTarget).add(this.orbitOffset);
 
     if (!this.reducedMotion) {

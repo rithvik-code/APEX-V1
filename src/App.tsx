@@ -129,9 +129,7 @@ export default function App() {
   const updateScene = useCallback(
     (patch: Partial<SceneConfig>) => {
       setScene((prev) => ({ ...prev, ...patch }));
-      if (patch.camera) scrollToId("top");
-      if (patch.focus === "bike") scrollToId("machine");
-      if (patch.focus === "car" || patch.focus === "both") scrollToId("top");
+      if (patch.camera || patch.focus) scrollToId("top");
     },
     [scrollToId],
   );

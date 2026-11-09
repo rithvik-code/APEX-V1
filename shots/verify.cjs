@@ -64,6 +64,7 @@ const puppeteer = require("puppeteer-core");
   await page.evaluate(() => {
     [...document.querySelectorAll(".aero-seg button")].find((b) => b.textContent === "BIKE")?.click();
     [...document.querySelectorAll(".aero-seg button")].find((b) => b.textContent === "STUDIO")?.click();
+    [...document.querySelectorAll(".aero-seg button")].find((b) => b.textContent === "HERO")?.click();
   });
   await new Promise((r) => setTimeout(r, 4000));
   await page.screenshot({ path: "shots/05-bike-flow.png" });
