@@ -24,9 +24,37 @@ type Entry = {
   id: string;
   role: "user" | "assistant" | "meta";
   content: string;
+  controlGoal?: string;
 };
 
 type LinkState = "checking" | "online" | "offline";
+
+type TerminalProps = {
+  onTakeControl?: (goal: string) => void;
+};
+
+// Matches an actionable computer task so a handoff is offered even when the
+// model is in demo mode or forgets to emit the TAKE_CONTROL tag itself.
+const CONTROL_INTENT =
+  /\b(take control|control (over |my |the |this )?(laptop|computer|pc|desktop|machine|browser|screen)|on my (laptop|computer|pc|desktop|machine)|open (chrome|edge|firefox|browser|notepad|spotify|a tab|my |the browser)|browse to|navigate to|go to (https?:|www\.)|click (on|the)|type (into|in) |edit (this|the|my|that|another) (website|site|page|file)|change (my|the|this|another) (website|site|page|wallpaper|settings|background)|make (changes|edits|a change) (to|on|in)|fill (out|in|the) |submit (the|this)|download (the|this|from)|search (google|bing|the web|youtube)|launch |run (a|this|the) command|create (a|the) file|delete (the|this) file|rename (the|this)|in my browser|on (this|that|another|the) (website|site|page))\b/i;
+
+function controlIntentGoal(text: string): string | undefined {
+  return CONTROL_INTENT.test(text) ? text : undefined;
+}
+
+// The model ends actionable replies with `TAKE_CONTROL: <goal>`; lift that out
+// of the prose and turn it into a one-click handoff to the control agent.
+function splitControlTag(content: string): { text: string; goal: string | null } {
+  const re = /^[ \t]*TAKE_CONTROL:[ \t]*([^\n]+)$/im;
+  const match = content.match(re);
+  if (!match) return { text: content, goal: null };
+  const goal = match[1].trim();
+  const text = content
+    .replace(re, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
+  return { text, goal: goal || null };
+}
 
 const COMMANDS = [
   ["/help", "show local commands"],
@@ -36,6 +64,7 @@ const COMMANDS = [
   ["/demo", "drop back to the canned demo"],
   ["/model <name>", "switch the active model"],
   ["/prompt <text>", "replace the system prompt"],
+  ["/control <goal>", "hand a task to the computer-use agent"],
   ["/settings", "open the link configuration"],
   ["/install", "show CLI install steps"],
   ["/clear", "wipe the session"],
@@ -227,7 +256,7 @@ const INITIAL_ENTRIES: Entry[] = [
   { id: "welcome", role: "assistant", content: WELCOME },
 ];
 
-export function Terminal() {
+export function Terminal({ onTakeControl }: TerminalProps) {
   const [settings, setSettings] = useState<AiSettings>(() => loadSettings());
   const [draft, setDraft] = useState<AiSettings>(() => loadSettings());
   const [entries, setEntries] = useState<Entry[]>(INITIAL_ENTRIES);
@@ -486,6 +515,22 @@ export function Terminal() {
         persist({ ...settings, systemPrompt: arg });
         addEntry("meta", "SYSTEM PROMPT REPLACED. APPLIES TO THE NEXT TURN.");
         break;
+      case "/control":
+        if (!arg) {
+          addEntry(
+            "meta",
+            "USAGE: /control <goal> — HANDS THE TASK TO TAKE CONTROL, THE COMPUTER-USE AGENT.",
+          );
+          break;
+        }
+        if (!onTakeControl) {
+          addEntry("meta", "CONTROL AGENT UNAVAILABLE IN THIS VIEW.");
+          break;
+        }
+        addEntry("meta", `HANDING OFF TO TAKE CONTROL → "${arg.slice(0, 90)}"`);
+        sound.tick("start");
+        onTakeControl(arg);
+        break;
       case "/settings":
         openSettings();
         break;
@@ -525,6 +570,7 @@ export function Terminal() {
       return;
     }
 
+    const intentGoal = controlIntentGoal(text);
     const userEntry: Entry = { id: uid(), role: "user", content: text };
     const metaId = uid();
     // Only recent turns matter for the answer, and a shorter transcript means
@@ -536,6 +582,7 @@ export function Terminal() {
         .map((entry) => {
           const clean = entry.content
             .replace(/\n*SOURCES ─[\s\S]*$/, "")
+            .replace(/^[ \t]*TAKE_CONTROL:[^\n]*$/gim, "")
             .trim();
           return {
             role: entry.role as "user" | "assistant",
@@ -614,7 +661,7 @@ export function Terminal() {
 
     setEntries((prev) => [
       ...prev,
-      { id: assistantId, role: "assistant", content: "" },
+      { id: assistantId, role: "assistant", content: "", controlGoal: intentGoal },
     ]);
 
     // Tokens arrive every few milliseconds; repainting the transcript on each
@@ -828,31 +875,64 @@ export function Terminal() {
           <span>WEB GROUNDING · LIVE F1 + WIKIPEDIA</span>
         </div>
 
-        {entries.map((entry) => (
-          <div key={entry.id} className={`term__entry term__entry--${entry.role}`}>
-            {entry.role === "user" ? (
-              <>
-                <span className="term__sigil">›</span>
-                <p>{entry.content}</p>
-              </>
-            ) : entry.role === "assistant" ? (
-              <>
-                <span className="term__tag">APEX</span>
-                <p>
-                  {entry.content}
-                  {streaming &&
-                    entry.id === entries[entries.length - 1]?.id && (
+        {entries.map((entry) => {
+          const isStreamingEntry =
+            streaming && entry.id === entries[entries.length - 1]?.id;
+          const parsed =
+            entry.role === "assistant" ? splitControlTag(entry.content) : null;
+          const handoff = parsed
+            ? parsed.goal ?? entry.controlGoal ?? null
+            : null;
+          return (
+            <div key={entry.id} className={`term__entry term__entry--${entry.role}`}>
+              {entry.role === "user" ? (
+                <>
+                  <span className="term__sigil">›</span>
+                  <p>{entry.content}</p>
+                </>
+              ) : entry.role === "assistant" ? (
+                <>
+                  <span className="term__tag">APEX</span>
+                  <p>
+                    {parsed?.text ?? entry.content}
+                    {isStreamingEntry && (
                       <span className="term__caret" aria-hidden="true" />
                     )}
+                  </p>
+                  {handoff && onTakeControl && !isStreamingEntry && (
+                    <button
+                      type="button"
+                      className="term__handoff"
+                      onClick={() => {
+                        sound.tick("start");
+                        onTakeControl(handoff);
+                      }}
+                    >
+                      <span className="term__handoff-icon" aria-hidden="true">
+                        ▶
+                      </span>
+                      <span className="term__handoff-label">
+                        RUN IN TAKE CONTROL
+                        <em>
+                          {handoff.length > 72
+                            ? `${handoff.slice(0, 72)}…`
+                            : handoff}
+                        </em>
+                      </span>
+                      <span className="term__handoff-arrow" aria-hidden="true">
+                        ↗
+                      </span>
+                    </button>
+                  )}
+                </>
+              ) : (
+                <p className="term__meta">
+                  <span>//</span> {entry.content}
                 </p>
-              </>
-            ) : (
-              <p className="term__meta">
-                <span>//</span> {entry.content}
-              </p>
-            )}
-          </div>
-        ))}
+              )}
+            </div>
+          );
+        })}
 
         {streaming &&
           entries[entries.length - 1]?.role === "assistant" &&

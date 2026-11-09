@@ -1864,6 +1864,130 @@ body.is-orbiting * {
   animation: blink 1.2s steps(1) infinite;
 }
 
+.term__handoff {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-top: 12px;
+  padding: 12px 14px;
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+  color: var(--acid);
+  background: linear-gradient(
+    100deg,
+    rgba(200, 255, 22, 0.14),
+    rgba(200, 255, 22, 0.04) 55%,
+    rgba(200, 255, 22, 0.1)
+  );
+  border: 1px solid rgba(200, 255, 22, 0.5);
+  border-radius: 4px;
+  font-family: var(--mono);
+  transition:
+    border-color 0.25s ease,
+    box-shadow 0.25s ease,
+    transform 0.25s ease;
+  animation: handoffIn 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.term__handoff::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgba(200, 255, 22, 0.22) 50%,
+    transparent 70%
+  );
+  transform: translateX(-120%);
+  animation: handoffSheen 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.term__handoff:hover {
+  border-color: var(--acid);
+  box-shadow:
+    0 0 0 1px rgba(200, 255, 22, 0.4),
+    0 0 26px rgba(200, 255, 22, 0.28);
+  transform: translateY(-1px);
+}
+
+.term__handoff-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  font-size: 12px;
+  color: #0a0c06;
+  background: var(--acid);
+  border-radius: 50%;
+  box-shadow: 0 0 16px rgba(200, 255, 22, 0.55);
+}
+
+.term__handoff-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+}
+
+.term__handoff-label em {
+  font-style: normal;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.term__handoff-arrow {
+  margin-left: auto;
+  font-size: 16px;
+  transition: transform 0.25s ease;
+}
+
+.term__handoff:hover .term__handoff-arrow {
+  transform: translate(3px, -3px);
+}
+
+@keyframes handoffIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes handoffSheen {
+  0% {
+    transform: translateX(-120%);
+  }
+  55%,
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .term__handoff,
+  .term__handoff::after {
+    animation: none;
+  }
+}
+
 .term__chips {
   display: flex;
   flex-wrap: wrap;

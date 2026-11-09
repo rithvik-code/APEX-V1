@@ -98,15 +98,16 @@ function mapPoint(
 type Props = {
   control: ControlApi;
   onRelease: () => void;
+  initialGoal?: string;
 };
 
-export function Takeover({ control, onRelease }: Props) {
+export function Takeover({ control, onRelease, initialGoal }: Props) {
   const { state, health, online, busy, error } = control;
   const status = state?.status;
   const statusLabel = status ? STATUS_LABEL[status] : "STANDBY";
   const tone = status ? STATUS_TONE[status] : "is-live";
   const active = isActiveStatus(status);
-  const [draftGoal, setDraftGoal] = useState("");
+  const [draftGoal, setDraftGoal] = useState(initialGoal ?? "");
   const [armed, setArmed] = useState<Permissions>({ ...ALL_ARMED });
   const [autoApprove, setAutoApprove] = useState(false);
   const [vision, setVision] = useState(false);
@@ -141,13 +142,17 @@ export function Takeover({ control, onRelease }: Props) {
   stateRef.current = state;
 
   useEffect(() => {
+    if (initialGoal) {
+      setDraftGoal(initialGoal);
+      return;
+    }
     try {
       const saved = localStorage.getItem(GOAL_KEY);
       if (saved) setDraftGoal(saved);
     } catch {
       // Storage can be unavailable in private contexts.
     }
-  }, []);
+  }, [initialGoal]);
 
   useEffect(() => {
     const lastGoal = state?.goal;

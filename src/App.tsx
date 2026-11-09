@@ -104,6 +104,7 @@ export default function App() {
   const [blueprintOpen, setBlueprintOpen] = useState(false);
   const [coreView, setCoreView] = useState<CoreVariant | null>(null);
   const [takeover, setTakeover] = useState(false);
+  const [takeoverGoal, setTakeoverGoal] = useState<string | undefined>(undefined);
   const [scene, setScene] = useState<SceneConfig>(DEFAULT_SCENE);
   const sceneRef = useRef(scene);
   const audioLockedRef = useRef(false);
@@ -112,8 +113,19 @@ export default function App() {
 
   const activeChapter = CHAPTERS.find((c) => c.id === active) ?? CHAPTERS[0];
 
-  const openTakeover = useCallback(() => {
+  const openTakeover = useCallback((goal?: string) => {
     sound.tick("start");
+    // GridDeck wires this straight to onClick, so a MouseEvent can arrive here;
+    // only a real string goal is treated as a handoff from the chat terminal.
+    const text = typeof goal === "string" ? goal.trim() : "";
+    setTakeoverGoal(text || undefined);
+    if (text) {
+      try {
+        localStorage.setItem("apex.control.goal", text);
+      } catch {
+        // Storage can be unavailable in private contexts.
+      }
+    }
     setTakeover(true);
   }, []);
 
@@ -726,7 +738,7 @@ export default function App() {
               </p>
             </div>
 
-            <Terminal />
+            <Terminal onTakeControl={openTakeover} />
           </div>
         </section>
 
@@ -982,7 +994,13 @@ export default function App() {
         </Suspense>
       )}
 
-      {takeover && <Takeover onRelease={closeTakeover} control={control} />}
+      {takeover && (
+        <Takeover
+          onRelease={closeTakeover}
+          control={control}
+          initialGoal={takeoverGoal}
+        />
+      )}
     </div>
   );
 }
