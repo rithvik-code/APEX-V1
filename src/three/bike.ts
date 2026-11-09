@@ -57,6 +57,7 @@ export function createSuperbike(): {
   scan: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
   anchors: VehicleAnchor[];
   engine: EngineAssembly;
+  accent: THREE.LineBasicMaterial;
 } {
   const group = new THREE.Group();
   const anchors: VehicleAnchor[] = [];
@@ -306,5 +307,5 @@ export function createSuperbike(): {
     },
   );
 
-  return { group, scan, anchors, engine: engineAssembly };
+  return { group, scan, anchors, engine: engineAssembly, accent: wire };
 }

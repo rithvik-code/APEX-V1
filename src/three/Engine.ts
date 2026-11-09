@@ -7,6 +7,12 @@ import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { createSupercar, type VehicleAnchor } from "./car";
 import { createSuperbike } from "./bike";
+import { AeroFlow, buildBikeStreamlines, buildCarStreamlines } from "./aero";
+import {
+  LIVERIES,
+  type LightingPreset,
+  type SceneConfig,
+} from "../lib/scene";
 
 const ACID = 0xc8ff16;
 const UP_AXIS = new THREE.Vector3(0, 1, 0);
@@ -109,6 +115,96 @@ function glowTexture(): THREE.CanvasTexture {
   return texture;
 }
 
+function shaftTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d")!;
+  const vertical = ctx.createLinearGradient(0, 0, 0, 256);
+  vertical.addColorStop(0, "rgba(220,255,170,0)");
+  vertical.addColorStop(0.35, "rgba(220,255,170,0.5)");
+  vertical.addColorStop(1, "rgba(220,255,170,0)");
+  ctx.fillStyle = vertical;
+  ctx.fillRect(0, 0, 64, 256);
+  ctx.globalCompositeOperation = "destination-in";
+  const horizontal = ctx.createLinearGradient(0, 0, 64, 0);
+  horizontal.addColorStop(0, "rgba(255,255,255,0)");
+  horizontal.addColorStop(0.5, "rgba(255,255,255,1)");
+  horizontal.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = horizontal;
+  ctx.fillRect(0, 0, 64, 256);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+type LightRig = {
+  hemi: THREE.HemisphereLight;
+  key: THREE.DirectionalLight;
+  cool: THREE.DirectionalLight;
+  acid: THREE.DirectionalLight;
+  under: THREE.PointLight;
+  bikeLight: THREE.PointLight;
+  rim: THREE.PointLight;
+};
+
+type LightTarget = {
+  intensity: number;
+  color?: THREE.Color;
+};
+
+const LIGHTING_TARGETS: Record<
+  LightingPreset,
+  { exposure: number; lights: Record<keyof LightRig, LightTarget> }
+> = {
+  studio: {
+    exposure: 1.05,
+    lights: {
+      hemi: { intensity: 0.7 },
+      key: { intensity: 2.1, color: new THREE.Color(0xffffff) },
+      cool: { intensity: 1.7, color: new THREE.Color(0x93b8d8) },
+      acid: { intensity: 1.35, color: new THREE.Color(ACID) },
+      under: { intensity: 16 },
+      bikeLight: { intensity: 12 },
+      rim: { intensity: 22, color: new THREE.Color(0xdff5ff) },
+    },
+  },
+  midnight: {
+    exposure: 0.82,
+    lights: {
+      hemi: { intensity: 0.22 },
+      key: { intensity: 0.7, color: new THREE.Color(0x8fb8ff) },
+      cool: { intensity: 0.9, color: new THREE.Color(0x5f88c8) },
+      acid: { intensity: 0.55, color: new THREE.Color(ACID) },
+      under: { intensity: 7 },
+      bikeLight: { intensity: 6 },
+      rim: { intensity: 30, color: new THREE.Color(0xbfe8ff) },
+    },
+  },
+  neon: {
+    exposure: 1.18,
+    lights: {
+      hemi: { intensity: 0.45 },
+      key: { intensity: 1.4, color: new THREE.Color(0xffffff) },
+      cool: { intensity: 2.4, color: new THREE.Color(0xff2fb3) },
+      acid: { intensity: 2.6, color: new THREE.Color(ACID) },
+      under: { intensity: 22 },
+      bikeLight: { intensity: 18 },
+      rim: { intensity: 14, color: new THREE.Color(0x7fd0ff) },
+    },
+  },
+};
+
+const CAMERA_TARGETS: Record<
+  SceneConfig["camera"],
+  { yaw: number; pitch: number; dist: number }
+> = {
+  hero: { yaw: 0, pitch: 0, dist: 1 },
+  side: { yaw: 1.35, pitch: 0.06, dist: 1.04 },
+  top: { yaw: 0.35, pitch: -1.12, dist: 1.32 },
+  wing: { yaw: -2.45, pitch: 0.14, dist: 0.88 },
+};
+
 export class ApexEngine {
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
@@ -163,6 +259,17 @@ export class ApexEngine {
   private onReady?: () => void;
   private readySent = false;
   private paused = false;
+  private aeroCar: AeroFlow;
+  private aeroBike: AeroFlow;
+  private bloom: UnrealBloomPass;
+  private gridHelper: THREE.GridHelper;
+  private lights: LightRig;
+  private lightTargets = LIGHTING_TARGETS.studio;
+  private shafts: THREE.Group;
+  private timeScale = 1;
+  private autoOrbit = false;
+  private presetTarget = CAMERA_TARGETS.hero;
+  private presetCurrent = { yaw: 0, pitch: 0, dist: 1 };
 
   constructor(canvas: HTMLCanvasElement, labelsEl: HTMLElement, onReady?: () => void) {
     this.labelsEl = labelsEl;
@@ -197,8 +304,8 @@ export class ApexEngine {
     env.dispose();
     pmrem.dispose();
 
-    this.buildLights();
-    this.buildGround();
+    this.lights = this.buildLights();
+    this.gridHelper = this.buildGround();
 
     this.car = createSupercar();
     this.carGroup.add(this.car.group);
@@ -209,6 +316,13 @@ export class ApexEngine {
     this.bikeGroup.position.set(-9, 0, -6);
     this.bikeGroup.rotation.y = 0.18;
     this.scene.add(this.bikeGroup);
+
+    this.aeroCar = new AeroFlow(buildCarStreamlines(), 720);
+    this.aeroCar.setPointScale(renderPixelRatio());
+    this.carGroup.add(this.aeroCar.group);
+    this.aeroBike = new AeroFlow(buildBikeStreamlines(), 400);
+    this.aeroBike.setPointScale(renderPixelRatio());
+    this.bikeGroup.add(this.aeroBike.group);
 
     this.anchors = [
       ...this.car.anchors.map((a) => ({ ...a, group: this.carGroup })),
@@ -234,6 +348,9 @@ export class ApexEngine {
     this.tunnel.visible = false;
     this.scene.add(this.tunnel);
 
+    this.shafts = this.buildShafts();
+    this.scene.add(this.shafts);
+
     const bgGlow = new THREE.Mesh(
       new THREE.PlaneGeometry(26, 26),
       new THREE.MeshBasicMaterial({
@@ -252,13 +369,13 @@ export class ApexEngine {
     this.composer.setPixelRatio(renderPixelRatio());
     this.composer.setSize(window.innerWidth, window.innerHeight);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    const bloom = new UnrealBloomPass(
+    this.bloom = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
       0.62,
       0.62,
       0.82,
     );
-    this.composer.addPass(bloom);
+    this.composer.addPass(this.bloom);
     this.crt = new ShaderPass(CRTShader);
     this.composer.addPass(this.crt);
     this.composer.addPass(new OutputPass());
@@ -281,7 +398,7 @@ export class ApexEngine {
     this.tick();
   }
 
-  private buildLights(): void {
+  private buildLights(): LightRig {
     const hemi = new THREE.HemisphereLight(0x9fb4bd, 0x050607, 0.7);
     this.scene.add(hemi);
 
@@ -308,9 +425,42 @@ export class ApexEngine {
     const rim = new THREE.PointLight(0xdff5ff, 22, 20, 2);
     rim.position.set(0, 4.5, -12);
     this.scene.add(rim);
+
+    return { hemi, key, cool, acid, under, bikeLight, rim };
   }
 
-  private buildGround(): void {
+  private buildShafts(): THREE.Group {
+    const group = new THREE.Group();
+    const texture = shaftTexture();
+    const spots: Array<[number, number, number, number]> = [
+      [-3.4, 6.4, -1.5, 0.3],
+      [-0.6, 6.8, -3.2, 0.36],
+      [2.4, 6.2, -0.6, 0.28],
+      [-8.2, 6.0, -5.2, 0.34],
+      [-10.4, 6.4, -7.4, 0.26],
+    ];
+    for (const [x, y, z, tilt] of spots) {
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(2.4, 15),
+        new THREE.MeshBasicMaterial({
+          map: texture,
+          transparent: true,
+          opacity: 0.055,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          fog: false,
+        }),
+      );
+      mesh.position.set(x, y, z);
+      mesh.rotation.set(0.24, 0.18, tilt);
+      mesh.userData.tilt = tilt;
+      group.add(mesh);
+    }
+    return group;
+  }
+
+  private buildGround(): THREE.GridHelper {
     const grid = new THREE.GridHelper(240, 240, 0x1d2a16, 0x111713);
     grid.position.y = 0.002;
     const gridMat = grid.material as unknown as THREE.LineBasicMaterial;

@@ -17,6 +17,7 @@ export function createSupercar(): {
   wheels: THREE.Group[];
   anchors: VehicleAnchor[];
   engine: EngineAssembly;
+  paint: THREE.MeshPhysicalMaterial;
 } {
   const group = new THREE.Group();
   const wheels: THREE.Group[] = [];
@@ -495,5 +496,5 @@ export function createSupercar(): {
     },
   );
 
-  return { group, wheels, anchors, engine };
+  return { group, wheels, anchors, engine, paint };
 }
