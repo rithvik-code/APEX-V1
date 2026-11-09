@@ -66,6 +66,20 @@ sources without calling the model. Only the query text goes to those public
 APIs; prompts and answers stay local. If retrieval fails, APEX says so and
 answers from the model's own memory.
 
+### Speed
+
+APEX warms the selected model on load and keeps it resident for 30 minutes, so
+the first question does not pay the cold-start bill. Retrieval only runs for
+questions about the world — code, prose and questions about APEX itself go
+straight to the model. Standings and last-race questions are composed directly
+from the live blocks as a `LIVE READ`, with no model pass at all; the two
+flagship questions are prefetched on load, so they answer from memory in well
+under a second. Streamed tokens are painted in 45 ms batches.
+
+The **NEXT** row under the transcript is generated from your last few messages:
+it follows the topic (F1, code, local inference, APEX itself, or a named
+subject) and skips anything you have already asked.
+
 Recommended free models: `qwen2.5:7b` (best), `qwen2.5:3b` (fastest),
 `gemma3:4b`. Avoid reasoning-first models such as `qwen3` or `deepseek-r1`:
 current Ollama builds stream their chain-of-thought into the answer.

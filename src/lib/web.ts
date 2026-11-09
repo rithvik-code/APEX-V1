@@ -13,6 +13,9 @@ export type Grounding = {
   context: string;
   summary: string;
   sourceLine: string;
+  // Set for race questions the live data can answer outright. The terminal
+  // renders this immediately instead of waiting on an LLM prefill.
+  quick: string | null;
 };
 
 const WIKI_SEARCH = "https://api.wikimedia.org/core/v1/wikipedia/en/search/page";
@@ -189,14 +192,29 @@ async function searchPages(
   return data?.pages ?? [];
 }
 
+const WIKI_TTL = 10 * 60 * 1000;
+const summaryCache = new Map<string, { at: number; data: WikiSummaryData }>();
+
 async function pageSummary(
   key: string,
   signal: AbortSignal,
+  budget = 8000,
 ): Promise<WikiSummaryData | null> {
-  return fetchJson<WikiSummaryData>(
+  const hit = summaryCache.get(key);
+  if (hit && Date.now() - hit.at < WIKI_TTL) return hit.data;
+  const data = await fetchJson<WikiSummaryData>(
     `${WIKI_SUMMARY}${encodeURIComponent(key)}?redirect=true`,
     signal,
+    budget,
   );
+  if (data) {
+    summaryCache.set(key, { at: Date.now(), data });
+    if (summaryCache.size > 32) {
+      const oldest = summaryCache.keys().next().value;
+      if (oldest) summaryCache.delete(oldest);
+    }
+  }
+  return data;
 }
 
 function driverName(driver: F1Driver | undefined): string {
@@ -271,14 +289,29 @@ async function getF1(signal: AbortSignal): Promise<F1Data | null> {
   return data;
 }
 
-// Called once after the page settles so the flagship F1 question answers
-// instantly, and so a later network blip still has standings to fall back on.
+// Called once after the page settles so the flagship F1 questions answer
+// instantly, and so a later network blip still has data to fall back on.
 export async function warmGrounding(): Promise<void> {
-  if (f1Cache && Date.now() - f1Cache.at < F1_TTL) return;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
   try {
-    await getF1(controller.signal);
+    const f1 = await getF1(controller.signal);
+    if (!f1) return;
+    const pages = [
+      f1.leader,
+      f1.winner,
+      "2026 Formula One World Championship",
+    ]
+      .filter((name): name is string => Boolean(name))
+      .map((name) => name.replace(/\s+/g, "_"));
+    await Promise.all(
+      pages.map((page) => pageSummary(page, controller.signal)),
+    );
+    // Populate the answer cache for the two questions the pit wall gets most.
+    await Promise.all([
+      retrieveGrounding("Who is the F1 world champion?", controller.signal, 8000),
+      retrieveGrounding("Who won the last race?", controller.signal, 8000),
+    ]);
   } finally {
     clearTimeout(timer);
   }
@@ -326,7 +359,7 @@ async function wikiSources(
       kind: "wiki" as const,
       title: summary?.title ?? page.title ?? page.key ?? "Wikipedia",
       url: summary?.content_urls?.desktop?.page ?? sourceUrl(page),
-      detail: trim([description, extract].filter(Boolean).join("\n"), 1100),
+      detail: trim([description, extract].filter(Boolean).join("\n"), 800),
     };
   });
 }
@@ -376,9 +409,67 @@ function buildSourceLine(sources: WebSource[]): string {
   return `SOURCES ─ ${parts.join(" · ")}`;
 }
 
+// Data questions do not need a language model to repeat numbers back. This
+// answer is composed straight from the live blocks so it lands in milliseconds.
+function quickRaceAnswer(
+  f1: F1Data,
+  person: WikiSummaryData | null,
+  query: string,
+): string | null {
+  const [standings, race] = f1.detail.split("\n\n");
+  const wantsTitle = /\b(champion|championship|standings|leader|leading)\b/i.test(
+    query,
+  );
+  const wantsRace = /\b(last\s+race|who\s+won|winner|race\s+result|podium)\b/i.test(
+    query,
+  );
+
+  if (wantsTitle && standings) {
+    const extract = person?.extract ? stripHtml(person.extract) : "";
+    const title = extract
+      .split(/(?<=\.)\s+/)
+      .find((sentence) => /champion/i.test(sentence));
+    const note = title
+      ? `${trim(title, 240)}\n\nTitle settled. The rest of the grid is now racing for pride and next year's contract.`
+      : "That is the standings, not the trophy. Nothing is decided until the maths says so.";
+    return `LIVE READ // ${f1.season} · AFTER ROUND ${f1.round}\n${standings}\n\n${note}`;
+  }
+
+  if (wantsRace && race) {
+    return `LIVE READ // ${f1.season} · ROUND ${f1.round}\n${race}\n\nPodium order, straight from the timing data. No recount pending.`;
+  }
+
+  return null;
+}
+
+async function seasonSource(
+  signal: AbortSignal,
+  budget: number,
+): Promise<WebSource[]> {
+  const page = "2026_Formula_One_World_Championship";
+  const data = await pageSummary(page, signal, budget);
+  if (!data?.extract) return [];
+  return [
+    {
+      kind: "wiki",
+      title: data.title ?? "2026 Formula One World Championship",
+      url:
+        data.content_urls?.desktop?.page ??
+        `https://en.wikipedia.org/wiki/${encodeURIComponent(page)}`,
+      detail: trim(
+        [stripHtml(data.description ?? ""), stripHtml(data.extract)]
+          .filter(Boolean)
+          .join("\n"),
+        800,
+      ),
+    },
+  ];
+}
+
 export async function retrieveGrounding(
   query: string,
   signal: AbortSignal,
+  budget = 3000,
 ): Promise<Grounding | null> {
   const clean = query.trim();
   if (!clean) return null;
@@ -389,13 +480,25 @@ export async function retrieveGrounding(
   if (cached && Date.now() - cached.at < CACHE_TTL) return cached.data;
 
   const race = RACE_QUERY.test(clean);
-  const terms = race
-    ? ["2026 Formula One World Championship", base]
-    : [base];
+  // Race questions read only warmed pages: standings, the subject, and the
+  // season page. Fetching them together keeps the worst case to one budget.
+  const f1 = race ? await getF1(signal) : null;
+  if (signal.aborted) return null;
 
-  const [f1, wiki] = await Promise.all([
-    race ? getF1(signal) : Promise.resolve(null),
-    wikiSources(terms, clean, signal, race ? 1 : 3),
+  const subject = f1
+    ? /\b(last\s+race|won|winner|race\s+result)\b/i.test(clean)
+      ? f1.winner
+      : f1.leader
+    : null;
+  const subjectPage = subject?.replace(/\s+/g, "_") ?? null;
+
+  const [wiki, person] = await Promise.all([
+    race
+      ? seasonSource(signal, budget)
+      : wikiSources([base], clean, signal, 2),
+    subjectPage
+      ? pageSummary(subjectPage, signal, budget)
+      : Promise.resolve(null),
   ]);
 
   if (signal.aborted) return null;
@@ -411,31 +514,23 @@ export async function retrieveGrounding(
 
     // The standings leader is usually who "the champion" refers to; for
     // "who won the last race" pull the race winner's page instead.
-    const subject = /\b(last\s+race|won|winner|race\s+result)\b/i.test(clean)
-      ? f1.winner
-      : f1.leader;
-    if (subject) {
-      const page = subject.replace(/\s+/g, "_");
-      const person = await pageSummary(page, signal);
-      if (signal.aborted) return null;
-      if (person?.extract) {
-        sources.push({
-          kind: "wiki",
-          title: person.title ?? subject,
-          url:
-            person.content_urls?.desktop?.page ??
-            `https://en.wikipedia.org/wiki/${encodeURIComponent(page)}`,
-          detail: trim(
-            [
-              stripHtml(person.description ?? ""),
-              stripHtml(person.extract),
-            ]
-              .filter(Boolean)
-              .join("\n"),
-            1100,
-          ),
-        });
-      }
+    if (subject && subjectPage && person?.extract) {
+      sources.push({
+        kind: "wiki",
+        title: person.title ?? subject,
+        url:
+          person.content_urls?.desktop?.page ??
+          `https://en.wikipedia.org/wiki/${encodeURIComponent(subjectPage)}`,
+        detail: trim(
+          [
+            stripHtml(person.description ?? ""),
+            stripHtml(person.extract),
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          800,
+        ),
+      });
     }
   }
   sources.push(...wiki);
@@ -451,6 +546,7 @@ export async function retrieveGrounding(
     context: buildContext(sources, fetchedAt),
     summary: buildSummary(sources),
     sourceLine: buildSourceLine(sources),
+    quick: f1 ? quickRaceAnswer(f1, person, clean) : null,
   };
 
   cache.set(key, { at: Date.now(), data: grounding });
@@ -463,4 +559,29 @@ export async function retrieveGrounding(
 
 export function formatGroundingContext(grounding: Grounding): string {
   return grounding.context;
+}
+
+// Retrieval only pays for itself on questions about the world. Code, prose and
+// questions about APEX itself answer faster straight from the model.
+const SMALL_TALK =
+  /^(?:hi|hey|hello|yo|thanks|thank you|ok|okay|nice|cool)[\s!,.?]*$/i;
+
+const NO_RETRIEVAL =
+  /\b(code|refactor|debug|stack ?trace|exception|typescript|javascript|python|rust|golang|java|react|css|html|sql|regex|snippet|boilerplate|algorithm|function|component|unit test|test harness|compile|build error|build|optimi[sz]e|performance|slow)\b|\b(write|draft|compose|rewrite|brainstorm|design|plan|outline|story|poem|haiku|tagline|slogan|summarise|summarize)\b|\b(apex|yourself|who are you|your (model|prompt|settings|memory)|this (terminal|site|website))\b/i;
+
+const WORLD_QUERY =
+  /\b(today|tonight|now|current(?:ly)?|latest|recent|news|2024|2025|2026|next|this (?:week|month|year|season)|champion|championship|standings|leader|president|prime minister|ceo|founder|owner|price|cost|stock|released?|release date|version|weather|who (?:won|is|was|leads?)|where is|how old|how many|when (?:is|was|did)|score)\b/i;
+
+const ENTITY_START = /^(?:who|what|when|where|why|how|is|are|was|were|did|does|do|can|could|should|would|tell|give|explain|define|describe|design|name|list|find|show)\b/i;
+
+export function needsGrounding(query: string): boolean {
+  const clean = query.trim();
+  if (!clean || clean.startsWith("/")) return false;
+  if (SMALL_TALK.test(clean)) return false;
+  if (NO_RETRIEVAL.test(clean)) return false;
+  if (WORLD_QUERY.test(clean)) return true;
+
+  // A capitalised word after the opening verb usually means a named subject.
+  const rest = clean.replace(ENTITY_START, "").trim();
+  return /\b[A-Z][A-Za-z'’-]{2,}\b/.test(rest);
 }

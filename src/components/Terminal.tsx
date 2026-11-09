@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_SETTINGS,
   listOllamaModels,
@@ -7,11 +7,17 @@ import {
   saveSettings,
   scoreModel,
   streamChat,
+  warmModel,
   type AiSettings,
   type ChatMessage,
   type Provider,
 } from "../lib/ai";
-import { retrieveGrounding, warmGrounding, type Grounding } from "../lib/web";
+import {
+  needsGrounding,
+  retrieveGrounding,
+  warmGrounding,
+  type Grounding,
+} from "../lib/web";
 import { sound } from "../lib/sound";
 
 type Entry = {
@@ -36,12 +42,155 @@ const COMMANDS = [
   ["/stop", "abort the current stream"],
 ];
 
-const CHIPS = [
+const BASE_CHIPS = [
   "Who is the F1 world champion?",
-  "Who is Kimi Antonelli?",
   "Design a local RAG stack",
   "Why is my build slow?",
+  "Explain embeddings without the hand-waving",
+  "What can you do that ChatGPT can't?",
+  "Who won the last race?",
 ];
+
+type Topic = "f1" | "code" | "local" | "apex";
+
+const TOPICS: Array<{ topic: Topic; re: RegExp }> = [
+  {
+    topic: "f1",
+    re: /\b(f1|formula (?:one|1)|grand prix|race|champion|championship|podium|pole|verstappen|antonelli|hamilton|leclerc|norris|piastri|russell|alonso|sainz|mclaren|ferrari|mercedes|red bull|aston martin)\b/i,
+  },
+  {
+    topic: "code",
+    re: /\b(code|function|component|react|typescript|javascript|python|css|html|api|debug|debugging|error|build|test|refactor|sql|regex|algorithm)\b/i,
+  },
+  {
+    topic: "local",
+    re: /\b(ollama|local|model|token|inference|gpu|llm|rag|embedding|quant|prompt)\b/i,
+  },
+  {
+    topic: "apex",
+    re: /\b(apex|terminal|site|website|yourself|you|your)\b/i,
+  },
+];
+
+const ENTITY_STOP = new Set([
+  "Who", "What", "When", "Where", "Why", "How", "Is", "Are", "Was", "Were",
+  "The", "A", "An", "And", "But", "Or", "Tell", "Give", "Explain", "Define",
+  "Describe", "Design", "Write", "Draft", "Can", "Could", "Should", "Would",
+  "Do", "Does", "Did", "F1", "Formula", "Grand", "Prix", "GP", "AI", "CEO",
+  "API", "US", "UK", "EU", "Show", "Make", "Build", "Please", "Let's", "I",
+]);
+
+function pickTopic(queries: string[]): Topic | null {
+  let best: Topic | null = null;
+  let bestScore = 0;
+  for (const { topic, re } of TOPICS) {
+    let score = 0;
+    // Recent messages count for more than older ones.
+    queries.forEach((query, index) => {
+      if (re.test(query)) score += queries.length - index;
+    });
+    if (score > bestScore) {
+      best = topic;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function pickEntity(queries: string[]): string | null {
+  for (const query of queries) {
+    const words = query.match(/\b[A-Z][a-zA-Z0-9'’.-]{1,}\b/g) ?? [];
+    for (let i = words.length - 1; i >= 0; i--) {
+      if (!ENTITY_STOP.has(words[i])) return words[i];
+    }
+  }
+  return null;
+}
+
+function topicChips(topic: Topic | null, entity: string | null): string[] {
+  if (topic === "f1") {
+    return [
+      entity
+        ? `How many wins does ${entity} have this season?`
+        : "Who leads the championship right now?",
+      "Who won the last race?",
+      entity
+        ? `Is ${entity} the real deal, or just the maths?`
+        : "Settle it: best driver on the grid, no diplomacy",
+      "What does the constructors' table look like?",
+    ];
+  }
+  if (topic === "code") {
+    return [
+      "Add the tests, keep them short",
+      "Make it faster, not cleverer",
+      "What edge case did I miss?",
+      "Explain that in one paragraph",
+    ];
+  }
+  if (topic === "local") {
+    return [
+      "Which model should I actually run?",
+      "How do I make the first token instant?",
+      "Local vs cloud: the honest maths",
+      "Smallest model that's still useful?",
+    ];
+  }
+  if (topic === "apex") {
+    return [
+      "What can you do that ChatGPT can't?",
+      "Show me the fastest route to local",
+      "What's actually running under the hood?",
+      "Why no API key?",
+    ];
+  }
+  if (entity) {
+    return [
+      `What's the short version on ${entity}?`,
+      `Is ${entity} overhyped?`,
+      `What changed for ${entity} this year?`,
+      `${entity}: the contrarian take`,
+    ];
+  }
+  return BASE_CHIPS;
+}
+
+const F1_NAMES = [
+  "Antonelli", "Verstappen", "Hamilton", "Russell", "Leclerc", "Norris",
+  "Piastri", "Alonso", "Sainz", "Räikkönen", "Raikkonen",
+];
+
+function buildChips(entries: Entry[]): string[] {
+  const queries = entries
+    .filter((entry) => entry.role === "user")
+    .slice(-4)
+    .reverse()
+    .map((entry) => entry.content);
+
+  if (!queries.length) return BASE_CHIPS.slice(0, 4);
+
+  const asked = new Set(
+    queries.map((query) => query.toLowerCase().replace(/[?.!]+$/, "").trim()),
+  );
+  const topic = pickTopic(queries);
+  const latestAnswer =
+    entries.filter((entry) => entry.role === "assistant").slice(-1)[0]?.content ??
+    "";
+  const entity =
+    pickEntity(queries) ??
+    (topic === "f1"
+      ? F1_NAMES.find((name) => latestAnswer.includes(name)) ?? null
+      : null);
+  const candidates = topicChips(topic, entity);
+  const chips: string[] = [];
+  for (const chip of [...candidates, ...BASE_CHIPS]) {
+    const key = chip.toLowerCase().replace(/[?.!]+$/, "").trim();
+    if (asked.has(key) || chips.includes(chip)) continue;
+    chips.push(chip);
+    if (chips.length === 4) break;
+  }
+  return chips;
+}
 
 const WEB_KEY = "apex.web.v1";
 
@@ -96,6 +245,7 @@ export function Terminal() {
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const mounted = useRef(true);
+  const chips = useMemo(() => buildChips(entries), [entries]);
 
   const addEntry = useCallback((role: Entry["role"], content: string) => {
     setEntries((prev) => [...prev, { id: uid(), role, content }]);
@@ -154,6 +304,7 @@ export function Terminal() {
       if (!mounted.current) return;
       if (found.length) {
         const preferred = resolveModel(found, stored.model);
+        void warmModel({ ...stored, provider: "ollama", model: preferred });
         setSettings((prev) => {
           if (prev.provider === "openai") return prev;
           const next: AiSettings = {
@@ -204,7 +355,7 @@ export function Terminal() {
     if (!loadWeb()) return;
     const id = window.setTimeout(() => {
       void warmGrounding();
-    }, 1500);
+    }, 800);
     return () => window.clearTimeout(id);
   }, []);
 
@@ -298,7 +449,8 @@ export function Terminal() {
           }
           const model = resolveModel(found, settings.model);
           persist({ ...settings, provider: "ollama", model });
-          addEntry("meta", `LOCAL LINK LIVE → ${model}`);
+          void warmModel({ ...settings, provider: "ollama", model });
+          addEntry("meta", `LOCAL LINK LIVE → ${model} · WARMING`);
         });
         break;
       }
@@ -317,7 +469,8 @@ export function Terminal() {
           break;
         }
         persist({ ...settings, model: arg, provider: "ollama" });
-        addEntry("meta", `MODEL → ${arg}`);
+        void warmModel({ ...settings, model: arg, provider: "ollama" });
+        addEntry("meta", `MODEL → ${arg} · WARMING`);
         if (/qwen3|deepseek-r1/i.test(arg)) {
           addEntry(
             "meta",
@@ -374,13 +527,21 @@ export function Terminal() {
 
     const userEntry: Entry = { id: uid(), role: "user", content: text };
     const metaId = uid();
+    // Only recent turns matter for the answer, and a shorter transcript means
+    // a shorter prefill on every request.
     const historyForModel: ChatMessage[] = [
       ...entries
-        .filter((entry) => entry.role !== "meta")
-        .map((entry) => ({
-          role: entry.role as "user" | "assistant",
-          content: entry.content,
-        })),
+        .filter((entry) => entry.role !== "meta" && entry.id !== "welcome")
+        .slice(-6)
+        .map((entry) => {
+          const clean = entry.content
+            .replace(/\n*SOURCES ─[\s\S]*$/, "")
+            .trim();
+          return {
+            role: entry.role as "user" | "assistant",
+            content: clean.length > 600 ? `${clean.slice(0, 600)}…` : clean,
+          };
+        }),
       { role: "user", content: text },
     ];
 
@@ -391,7 +552,7 @@ export function Terminal() {
 
     let grounding: Grounding | null = null;
     let failed = false;
-    if (web) {
+    if (web && needsGrounding(text)) {
       setEntries((prev) => [
         ...prev,
         {
@@ -436,10 +597,46 @@ export function Terminal() {
     }
 
     const assistantId = uid();
+    const quickGrounding = grounding;
+    if (quickGrounding?.quick) {
+      setEntries((prev) => [
+        ...prev,
+        {
+          id: assistantId,
+          role: "assistant",
+          content: `${quickGrounding.quick}\n\n${quickGrounding.sourceLine}`,
+        },
+      ]);
+      setStreaming(false);
+      abortRef.current = null;
+      return;
+    }
+
     setEntries((prev) => [
       ...prev,
       { id: assistantId, role: "assistant", content: "" },
     ]);
+
+    // Tokens arrive every few milliseconds; repainting the transcript on each
+    // one is the slow part, so paint at most every 45 ms.
+    let pending = "";
+    let flushTimer: number | null = null;
+    const flush = () => {
+      if (flushTimer !== null) {
+        window.clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+      if (!pending) return;
+      const chunk = pending;
+      pending = "";
+      setEntries((prev) =>
+        prev.map((entry) =>
+          entry.id === assistantId
+            ? { ...entry, content: entry.content + chunk }
+            : entry,
+        ),
+      );
+    };
 
     try {
       await streamChat({
@@ -449,16 +646,14 @@ export function Terminal() {
         temperature: grounding ? 0.2 : 0.55,
         signal: controller.signal,
         onToken: (token) => {
-          setEntries((prev) =>
-            prev.map((entry) =>
-              entry.id === assistantId
-                ? { ...entry, content: entry.content + token }
-                : entry,
-            ),
-          );
+          pending += token;
+          if (flushTimer === null) {
+            flushTimer = window.setTimeout(flush, 45);
+          }
         },
       });
     } catch (error) {
+      flush();
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         failed = true;
         const message =
@@ -476,6 +671,7 @@ export function Terminal() {
         setLink("offline");
       }
     } finally {
+      flush();
       const cited = grounding;
       if (cited && !failed && mounted.current && !controller.signal.aborted) {
         setEntries((prev) =>
@@ -544,9 +740,11 @@ export function Terminal() {
         if (model !== draft.model) {
           const next = { ...draft, model };
           persist(next);
+          void warmModel(next);
           addEntry("meta", `LINK READY → ${model} · AUTO-SELECTED BEST INSTALLED`);
         } else {
-          addEntry("meta", `LINK READY → ${model}`);
+          void warmModel({ ...draft, provider: "ollama", model });
+          addEntry("meta", `LINK READY → ${model} · WARMING`);
         }
       });
     } else {
@@ -793,7 +991,10 @@ export function Terminal() {
       )}
 
       <div className="term__chips">
-        {CHIPS.map((chip) => (
+        <span className="term__chips-label" aria-hidden="true">
+          NEXT →
+        </span>
+        {chips.map((chip) => (
           <button
             key={chip}
             type="button"

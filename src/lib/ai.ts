@@ -20,9 +20,14 @@ export type AiSettings = {
 export const DEFAULT_SYSTEM_PROMPT = `You are APEX, a terminal-native intelligence engine.
 You are direct, technical and fast. No corporate hedging. No repeated disclaimers. No filler.
 Answer the question first, then stop. Use plain terminal-friendly text.
+Default to short answers. Dry wit is welcome; padding is not.
 When code is required, write complete working code.
 Never invent a fact, name, date or score. If you are unsure, say so in one line.
 You are running on the user's own machine with no metering and no middleman.`;
+
+// Appended to every turn so the delivery stays fast and dry even when the
+// user's saved system prompt predates this rule.
+const STYLE_RULE = `STYLE: a race engineer who has seen everything — understated, precise, occasionally wry. At most one short witty line per answer, and only when it fits; facts come first, always. No jokes about errors, bugs or anything the user is struggling with. No emoji. Answer simple questions in under 60 words; use a code block when code is the answer. Never pad to look thorough.`;
 
 export const DEFAULT_SETTINGS: AiSettings = {
   provider: "demo",
@@ -65,6 +70,40 @@ export async function listOllamaModels(
   if (!res.ok) throw new Error(`Ollama returned ${res.status}`);
   const data = (await res.json()) as { models?: Array<{ name: string }> };
   return (data.models ?? []).map((m) => m.name);
+}
+
+// Loads the model into memory and holds it there, so the first real question
+// is not paying the multi-second cold-start bill.
+export async function warmModel(
+  settings: AiSettings,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (settings.provider !== "ollama" || !settings.model) return;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  const forward = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  else signal?.addEventListener("abort", forward, { once: true });
+
+  try {
+    await fetch(`${trimEndpoint(settings.endpoint)}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: settings.model,
+        prompt: "",
+        stream: false,
+        keep_alive: "30m",
+        options: { num_predict: 1 },
+      }),
+    });
+  } catch {
+    // Warm-up is an optimisation. If it fails the first turn is merely cold.
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", forward);
+  }
 }
 
 // Higher is better. Favours modern general-purpose chat models in the 4–9B
@@ -134,6 +173,7 @@ function composeSystem(settings: AiSettings, options: StreamOptions): string {
   const parts = [
     settings.systemPrompt.trim(),
     `SESSION DATE: ${today}. Your training data may be older than this date. For anything that could have changed — champions, standings, releases, prices, news — trust live context when it is provided. When no context covers it and you are unsure, say so instead of guessing.`,
+    STYLE_RULE,
   ];
   if (options.grounding) parts.push(formatGroundingContext(options.grounding));
   if (options.extraSystem) parts.push(options.extraSystem);
@@ -155,8 +195,8 @@ async function streamOllama(options: StreamOptions): Promise<void> {
     options: {
       temperature: temperature ?? (grounding ? 0.2 : 0.55),
       top_p: 0.9,
-      num_ctx: 8192,
-      num_predict: numPredict ?? (grounding ? 480 : 768),
+      num_ctx: 4096,
+      num_predict: numPredict ?? (grounding ? 200 : 360),
     },
   };
   // Qwen3 supports a thinking switch; skipping it removes a long cold-start delay
@@ -224,7 +264,7 @@ async function streamOpenAI(options: StreamOptions): Promise<void> {
       model: settings.model,
       stream: true,
       temperature: temperature ?? (grounding ? 0.2 : 0.55),
-      max_tokens: numPredict ?? (grounding ? 480 : 768),
+      max_tokens: numPredict ?? (grounding ? 200 : 360),
       messages: [
         { role: "system", content: composeSystem(settings, options) },
         ...messages.map((m) => ({ role: m.role, content: m.content })),
@@ -384,8 +424,9 @@ Direct, dependency-free, done. Ask for the test harness if you want it.`,
     match: /hello|hey|hi\b|yo\b/i,
     answer: `APEX ONLINE.
 
-  Terminal is warm. Ask for code, a system design, a launch plan,
-  or something stranger. Type /help for the local command set.`,
+  Terminal is warm, which is more than most cloud status pages manage.
+  Ask for code, a system design, a launch plan, or something stranger.
+  Type /help for the local command set.`,
   },
 ];
 
@@ -402,7 +443,7 @@ function demoAnswerFor(input: string): string {
   To make it live, open LINK (top-right of the terminal) and point APEX
   at your local Ollama daemon. Free, unmetered, and running on your GPU.
 
-  Then ask me again.`;
+  Then ask me again. I promise to be worth the electricity.`;
 }
 
 async function streamDemo({
@@ -419,11 +460,11 @@ ${grounding.summary}
 
 WEB GROUNDING IS ON — THAT ANSWER CAME FROM LIVE SOURCES, NOT THE CANNED DEMO.`
     : demoAnswerFor(last?.content ?? "");
-  const chunks = text.match(/.{1,8}/gs) ?? [text];
+  const chunks = text.match(/.{1,12}/gs) ?? [text];
 
   for (const chunk of chunks) {
     if (signal.aborted) return;
     onToken(chunk);
-    await new Promise((resolve) => setTimeout(resolve, 4 + Math.random() * 6));
+    await new Promise((resolve) => setTimeout(resolve, 2 + Math.random() * 3));
   }
 }
