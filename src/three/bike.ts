@@ -36,6 +36,31 @@ function edgesOf(
   return mesh;
 }
 
+// Angular body panel extruded from a side profile: [z (forward+), y].
+function panel(
+  profile: Array<[number, number]>,
+  width: number,
+  material: THREE.Material,
+): THREE.Mesh {
+  const shape = new THREE.Shape();
+  shape.moveTo(profile[0][0], profile[0][1]);
+  for (let i = 1; i < profile.length; i++) {
+    shape.lineTo(profile[i][0], profile[i][1]);
+  }
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: width,
+    bevelEnabled: true,
+    bevelThickness: 0.015,
+    bevelSize: 0.015,
+    bevelSegments: 1,
+    steps: 1,
+  });
+  geo.rotateY(-Math.PI / 2);
+  geo.translate(width / 2, 0, 0);
+  return new THREE.Mesh(geo, material);
+}
+
 function radialTexture(): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
   canvas.width = 128;
@@ -64,9 +89,20 @@ export function createSuperbike(): {
 
   const shell = new THREE.MeshStandardMaterial({
     color: 0x121518,
-    metalness: 0.82,
-    roughness: 0.3,
-    envMapIntensity: 0.9,
+    metalness: 0.9,
+    roughness: 0.26,
+    envMapIntensity: 1.1,
+  });
+  const carbon = new THREE.MeshStandardMaterial({
+    color: 0x0a0c0d,
+    metalness: 0.6,
+    roughness: 0.52,
+  });
+  const mirror = new THREE.MeshStandardMaterial({
+    color: 0xc7ced4,
+    metalness: 1,
+    roughness: 0.07,
+    envMapIntensity: 1.7,
   });
   const wire = new THREE.LineBasicMaterial({
     color: ACID,
@@ -90,161 +126,346 @@ export function createSuperbike(): {
     roughness: 0.04,
     clearcoat: 1,
     envMapIntensity: 2,
+    side: THREE.DoubleSide,
   });
 
-  // Wheels ------------------------------------------------------------------
-  for (const z of [1.02, -0.98]) {
+  // Wheels: turbine-blade rims, wide rear slick, acid containment rings -------
+  function buildWheel(z: number, rear: boolean): THREE.Group {
     const wheel = new THREE.Group();
     wheel.position.set(0, 0.56, z);
 
-    const tireGeo = new THREE.TorusGeometry(0.54, 0.075, 12, 52);
+    const tireR = rear ? 0.5 : 0.52;
+    const tireTube = rear ? 0.105 : 0.075;
+    const tireGeo = new THREE.TorusGeometry(tireR, tireTube, 14, 56);
     tireGeo.rotateY(Math.PI / 2);
     wheel.add(new THREE.Mesh(tireGeo, rubber));
 
-    const outerGeo = new THREE.TorusGeometry(0.615, 0.006, 4, 64);
+    const outerGeo = new THREE.TorusGeometry(tireR + tireTube + 0.004, 0.005, 4, 64);
     outerGeo.rotateY(Math.PI / 2);
     wheel.add(new THREE.Mesh(outerGeo, acid));
 
-    const rimGeo = new THREE.TorusGeometry(0.3, 0.014, 6, 44);
+    const rimGeo = new THREE.TorusGeometry(0.3, 0.016, 6, 44);
     rimGeo.rotateY(Math.PI / 2);
     wheel.add(new THREE.Mesh(rimGeo, acid));
 
-    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.13, 16), metal);
+    const hub = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.06, rear ? 0.17 : 0.12, 16),
+      metal,
+    );
     hub.rotation.z = Math.PI / 2;
     wheel.add(hub);
 
-    for (let i = 0; i < 8; i++) {
-      const angle = (i / 8) * Math.PI * 2;
-      const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.56, 0.012), metal);
-      spoke.rotation.x = angle;
-      wheel.add(spoke);
+    for (let i = 0; i < 6; i++) {
+      const holder = new THREE.Group();
+      holder.rotation.x = (i / 6) * Math.PI * 2;
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.52, 0.014), metal);
+      blade.rotation.y = 0.42;
+      holder.add(blade);
+      wheel.add(holder);
     }
 
-    group.add(wheel);
+    const discSides = rear ? [-0.07] : [-0.06, 0.06];
+    for (const x of discSides) {
+      const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.012, 32), metal);
+      disc.rotation.z = Math.PI / 2;
+      disc.position.x = x;
+      wheel.add(disc);
+      const caliper = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.09, 0.06), acid);
+      caliper.position.set(x, 0.17, 0.08);
+      wheel.add(caliper);
+    }
+
+    return wheel;
   }
 
-  // Frame -------------------------------------------------------------------
+  group.add(buildWheel(1.02, false));
+  group.add(buildWheel(-0.98, true));
+
+  // Front fender: carbon arc hugging the front slick -------------------------
+  const fenderArc = 2.2;
+  const fenderGeo = new THREE.TorusGeometry(0.64, 0.028, 8, 32, fenderArc);
+  fenderGeo.rotateY(Math.PI / 2);
+  const fender = new THREE.Mesh(fenderGeo, carbon);
+  fender.rotation.x = Math.PI / 2 - fenderArc / 2;
+  fender.position.set(0, 0.56, 1.02);
+  fender.scale.set(2.6, 1, 1);
+  group.add(fender);
+
+  const fenderLineGeo = new THREE.TorusGeometry(0.665, 0.004, 4, 32, fenderArc);
+  fenderLineGeo.rotateY(Math.PI / 2);
+  const fenderLine = new THREE.Mesh(fenderLineGeo, acid);
+  fenderLine.rotation.x = Math.PI / 2 - fenderArc / 2;
+  fenderLine.position.set(0, 0.56, 1.02);
+  fenderLine.scale.set(2.6, 1, 1);
+  group.add(fenderLine);
+
+  // Lime trellis frame --------------------------------------------------------
   const frame = new THREE.Group();
-  const framePoints: Array<[THREE.Vector3, THREE.Vector3, number]> = [
-    [new THREE.Vector3(0.13, 1.12, 0.72), new THREE.Vector3(0.13, 0.56, 1.03), 0.026],
-    [new THREE.Vector3(-0.13, 1.12, 0.72), new THREE.Vector3(-0.13, 0.56, 1.03), 0.026],
-    [new THREE.Vector3(0.14, 0.58, -0.98), new THREE.Vector3(0.14, 0.68, -0.08), 0.03],
-    [new THREE.Vector3(-0.14, 0.58, -0.98), new THREE.Vector3(-0.14, 0.68, -0.08), 0.03],
-    [new THREE.Vector3(0.14, 0.62, -0.1), new THREE.Vector3(0.14, 1.02, -0.64), 0.022],
-    [new THREE.Vector3(-0.14, 0.62, -0.1), new THREE.Vector3(-0.14, 1.02, -0.64), 0.022],
-    [new THREE.Vector3(0.12, 0.7, 0.1), new THREE.Vector3(0.12, 0.85, 0.92), 0.02],
-    [new THREE.Vector3(-0.12, 0.7, 0.1), new THREE.Vector3(-0.12, 0.85, 0.92), 0.02],
-  ];
-  for (const [a, b, radius] of framePoints) {
-    frame.add(strut(a, b, radius, metal));
+  const trellis: Array<[THREE.Vector3, THREE.Vector3]> = [];
+  for (const side of [-1, 1]) {
+    const x = side * 0.12;
+    const head = new THREE.Vector3(x, 1.08, 0.68);
+    const mid = new THREE.Vector3(x, 0.95, 0.25);
+    const pivot = new THREE.Vector3(x, 0.62, -0.15);
+    const sub = new THREE.Vector3(x * 0.7, 0.98, -0.55);
+    trellis.push([head, mid], [mid, pivot], [head, pivot], [mid, sub], [pivot, sub]);
+  }
+  for (const [a, b] of trellis) {
+    frame.add(strut(a, b, 0.02, acid));
   }
 
-  const handlebar = strut(
-    new THREE.Vector3(-0.34, 1.19, 0.62),
-    new THREE.Vector3(0.34, 1.19, 0.62),
-    0.018,
-    metal,
+  // Inverted forks + clip-ons -------------------------------------------------
+  for (const side of [-1, 1]) {
+    const x = side * 0.11;
+    frame.add(
+      strut(new THREE.Vector3(x, 1.16, 0.7), new THREE.Vector3(x, 0.86, 0.86), 0.026, metal),
+    );
+    frame.add(
+      strut(new THREE.Vector3(x, 0.86, 0.86), new THREE.Vector3(x, 0.56, 1.02), 0.018, metal),
+    );
+    frame.add(
+      strut(new THREE.Vector3(side * 0.1, 1.12, 0.68), new THREE.Vector3(side * 0.3, 1.1, 0.6), 0.015, metal),
+    );
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.09, 10), carbon);
+    grip.position.set(side * 0.32, 1.1, 0.59);
+    grip.rotation.z = Math.PI / 2;
+    frame.add(grip);
+  }
+  const crown = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.04, 0.08), metal);
+  crown.position.set(0, 1.15, 0.71);
+  frame.add(crown);
+
+  // Single-sided swingarm: rear wheel hangs exposed on the right --------------
+  const swingarm = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.11, 0.92), carbon);
+  swingarm.position.set(-0.18, 0.59, -0.55);
+  swingarm.rotation.x = 0.05;
+  frame.add(edgesOf(swingarm, wire, 30));
+  frame.add(
+    strut(new THREE.Vector3(-0.18, 0.62, -0.12), new THREE.Vector3(-0.18, 0.56, -0.98), 0.04, metal),
   );
-  frame.add(handlebar);
+  const axleNut = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.05, 6), acid);
+  axleNut.rotation.z = Math.PI / 2;
+  axleNut.position.set(-0.24, 0.56, -0.98);
+  frame.add(axleNut);
 
   const rearShock = strut(
-    new THREE.Vector3(0, 0.62, -0.28),
-    new THREE.Vector3(0, 1.0, -0.56),
-    0.035,
+    new THREE.Vector3(0, 0.64, -0.28),
+    new THREE.Vector3(0, 0.98, -0.52),
+    0.032,
     acid,
   );
   frame.add(rearShock);
-
-  const exhaust = strut(
-    new THREE.Vector3(0.24, 0.62, -0.2),
-    new THREE.Vector3(0.33, 0.78, -1.02),
-    0.055,
-    metal,
-  );
-  frame.add(exhaust);
-
-  const exhaustTip = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.06, 0.16, 18), acid);
-  exhaustTip.position.set(0.33, 0.79, -1.06);
-  exhaustTip.rotation.x = Math.PI / 2;
-  frame.add(exhaustTip);
-
   group.add(frame);
 
-  // Bodywork ----------------------------------------------------------------
-  const tank = edgesOf(
-    new THREE.Mesh(new THREE.SphereGeometry(1, 28, 18), shell),
-    wire,
-    32,
-  );
-  tank.scale.set(0.34, 0.27, 0.56);
-  tank.position.set(0, 1.0, 0.32);
-  group.add(tank);
-
+  // Faceted stealth bodywork --------------------------------------------------
   const fairing = edgesOf(
-    new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.62), shell),
-    wire,
-    26,
-  );
-  fairing.scale.set(0.32, 0.34, 0.46);
-  fairing.position.set(0, 1.0, 0.8);
-  fairing.rotation.x = 0.16;
-  group.add(fairing);
-
-  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.28), glass);
-  screen.position.set(0, 1.28, 0.86);
-  screen.rotation.x = -0.66;
-  group.add(screen);
-
-  const seat = edgesOf(
-    new THREE.Mesh(new RoundedBoxGeometry(0.28, 0.09, 0.62, 3, 0.025), shell),
-    wire,
-    32,
-  );
-  seat.position.set(0, 1.055, -0.48);
-  group.add(seat);
-
-  const tail = edgesOf(
-    new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.55, 4), shell),
+    panel(
+      [
+        [1.3, 0.92],
+        [1.28, 1.06],
+        [1.05, 1.16],
+        [0.72, 1.18],
+        [0.45, 1.1],
+        [0.38, 0.9],
+        [0.5, 0.62],
+        [0.72, 0.5],
+        [1.05, 0.62],
+        [1.22, 0.78],
+      ],
+      0.44,
+      shell,
+    ),
     wire,
     24,
   );
-  tail.rotation.x = Math.PI / 2;
-  tail.rotation.z = Math.PI / 4;
-  tail.position.set(0, 1.06, -1.05);
+  group.add(fairing);
+
+  const belly = edgesOf(
+    panel(
+      [
+        [0.55, 0.5],
+        [0.45, 0.38],
+        [-0.15, 0.34],
+        [-0.4, 0.45],
+        [-0.35, 0.55],
+        [0.2, 0.55],
+      ],
+      0.36,
+      carbon,
+    ),
+    wire,
+    26,
+  );
+  group.add(belly);
+
+  // Mirrored fuel tank — the H2R signature finish -----------------------------
+  const tank = edgesOf(
+    panel(
+      [
+        [0.42, 1.02],
+        [0.3, 1.14],
+        [-0.05, 1.16],
+        [-0.28, 1.08],
+        [-0.3, 0.98],
+        [0.1, 0.94],
+      ],
+      0.36,
+      mirror,
+    ),
+    wire,
+    24,
+  );
+  group.add(tank);
+
+  const seat = new THREE.Mesh(new RoundedBoxGeometry(0.24, 0.06, 0.5, 2, 0.02), carbon);
+  seat.position.set(0, 1.0, -0.5);
+  group.add(seat);
+
+  const tail = edgesOf(
+    panel(
+      [
+        [-0.35, 1.02],
+        [-0.6, 1.06],
+        [-1.05, 1.12],
+        [-1.28, 1.06],
+        [-1.26, 0.98],
+        [-0.9, 0.94],
+        [-0.55, 0.92],
+        [-0.35, 0.96],
+      ],
+      0.22,
+      shell,
+    ),
+    wire,
+    24,
+  );
   group.add(tail);
 
-  // In-line four: DOHC, 16 valves, exposed in the frame.
+  const tailLed = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.012, 0.012), acid);
+  tailLed.position.set(0, 1.05, -1.29);
+  group.add(tailLed);
+
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.26), glass);
+  screen.position.set(0, 1.24, 0.78);
+  screen.rotation.x = -0.55;
+  group.add(screen);
+
+  // Ram-air nose intake + angular LED eyes ------------------------------------
+  const intake = edgesOf(
+    new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.13, 0.12), carbon),
+    wire,
+    20,
+  );
+  intake.position.set(0, 1.0, 1.26);
+  group.add(intake);
+  const intakeGlow = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.09), acid);
+  intakeGlow.position.set(0, 1.0, 1.325);
+  group.add(intakeGlow);
+
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.018, 0.02), acid);
+    eye.position.set(side * 0.16, 0.9, 1.22);
+    eye.rotation.y = -side * 0.35;
+    eye.rotation.z = side * 0.12;
+    group.add(eye);
+  }
+
+  // Carbon winglets with acid endplates ---------------------------------------
+  for (const side of [-1, 1]) {
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.014, 0.14), carbon);
+    wing.position.set(side * 0.32, 0.98, 0.85);
+    wing.rotation.z = -side * 0.12;
+    wing.rotation.y = side * 0.1;
+    group.add(wing);
+
+    const endplate = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.09, 0.14), carbon);
+    endplate.position.set(side * 0.49, 1.0, 0.85);
+    group.add(endplate);
+    const tipLine = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.006, 0.14), acid);
+    tipLine.position.set(side * 0.49, 1.048, 0.85);
+    group.add(tipLine);
+
+    // Mirror-delete camera pods on stalks.
+    group.add(
+      strut(
+        new THREE.Vector3(side * 0.22, 1.05, 0.8),
+        new THREE.Vector3(side * 0.32, 1.14, 0.75),
+        0.008,
+        metal,
+      ),
+    );
+    const pod = new THREE.Mesh(new THREE.SphereGeometry(0.022, 12, 10), carbon);
+    pod.position.set(side * 0.33, 1.15, 0.75);
+    group.add(pod);
+    const lens = new THREE.Mesh(new THREE.CircleGeometry(0.01, 12), acid);
+    lens.position.set(side * 0.33, 1.15, 0.773);
+    group.add(lens);
+  }
+
+  // Energy lines tracing the bodywork -----------------------------------------
+  for (const side of [-1, 1]) {
+    const fairingLine = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.01, 0.5), acid);
+    fairingLine.position.set(side * 0.24, 0.88, 0.75);
+    group.add(fairingLine);
+    const tailLine = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.008, 0.6), acid);
+    tailLine.position.set(side * 0.125, 1.02, -0.8);
+    group.add(tailLine);
+  }
+  const spineLine = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.006, 0.5), acid);
+  spineLine.position.set(0, 1.175, 0.05);
+  group.add(spineLine);
+
+  // Supercharged inline-four ---------------------------------------------------
   const engineAssembly = createInlineFour();
   engineAssembly.group.scale.setScalar(0.5);
   engineAssembly.group.position.set(0, 0.55, 0.08);
   group.add(engineAssembly.group);
 
-  // Engine cradle tubes.
+  // Supercharger housing + intake plumbing behind the block.
+  const supercharger = new THREE.Mesh(new RoundedBoxGeometry(0.2, 0.16, 0.18, 2, 0.03), metal);
+  supercharger.position.set(0, 0.5, -0.28);
+  group.add(edgesOf(supercharger, wire, 30));
+  const scRing = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.008, 6, 28), acid);
+  scRing.rotation.y = Math.PI / 2;
+  scRing.position.set(-0.11, 0.5, -0.28);
+  group.add(scRing);
   for (const side of [-1, 1]) {
     group.add(
       strut(
-        new THREE.Vector3(side * 0.24, 0.84, 0.38),
-        new THREE.Vector3(side * 0.24, 0.44, 0.38),
-        0.013,
+        new THREE.Vector3(side * 0.06, 0.58, -0.28),
+        new THREE.Vector3(side * 0.07, 0.8, -0.1),
+        0.028,
         metal,
       ),
     );
     group.add(
       strut(
-        new THREE.Vector3(side * 0.24, 0.44, 0.38),
-        new THREE.Vector3(side * 0.24, 0.44, -0.2),
-        0.013,
+        new THREE.Vector3(side * 0.07, 0.8, -0.1),
+        new THREE.Vector3(side * 0.08, 0.95, 0.15),
+        0.028,
         metal,
       ),
     );
   }
 
-  const headlight = new THREE.Mesh(new THREE.CircleGeometry(0.09, 24), acid);
-  headlight.position.set(0, 1.04, 1.16);
-  headlight.rotation.x = -0.2;
-  group.add(headlight);
+  // Exhaust: four headers into a short right-side canister ---------------------
+  for (let i = 0; i < 4; i++) {
+    const x = -0.12 + i * 0.08;
+    group.add(
+      strut(new THREE.Vector3(x, 0.5, 0.32), new THREE.Vector3(x, 0.32, 0.15), 0.016, metal),
+    );
+  }
+  group.add(strut(new THREE.Vector3(0, 0.32, 0.1), new THREE.Vector3(0.2, 0.34, -0.3), 0.028, metal));
+  group.add(strut(new THREE.Vector3(0.2, 0.34, -0.3), new THREE.Vector3(0.3, 0.5, -0.5), 0.028, metal));
+  const muffler = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.09, 0.42, 18), metal);
+  muffler.rotation.x = Math.PI / 2;
+  muffler.position.set(0.31, 0.52, -0.62);
+  group.add(muffler);
+  const exhaustTip = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.008, 6, 28), acid);
+  exhaustTip.position.set(0.31, 0.52, -0.84);
+  group.add(exhaustTip);
 
-  // Swinging detail ring + floating bolts
+  // Floating detail ring --------------------------------------------------------
   const detailRing = new THREE.Mesh(
     new THREE.TorusGeometry(0.82, 0.004, 3, 72),
     new THREE.MeshBasicMaterial({
@@ -259,7 +480,7 @@ export function createSuperbike(): {
   detailRing.position.set(0, 0.95, 0);
   group.add(detailRing);
 
-  // Scanning beam -----------------------------------------------------------
+  // Scanning beam ---------------------------------------------------------------
   const scan = new THREE.Mesh(
     new THREE.PlaneGeometry(2.6, 3.4),
     new THREE.MeshBasicMaterial({
@@ -281,29 +502,29 @@ export function createSuperbike(): {
       id: "bike-power",
       index: "B-01",
       label: "OUTPUT",
-      value: "210 HP / 32K CTX",
-      position: new THREE.Vector3(0.2, 1.15, 0.32),
+      value: "310 HP / 32K CTX",
+      position: new THREE.Vector3(0.24, 1.1, 0.3),
     },
     {
       id: "bike-mass",
       index: "B-02",
       label: "DRY MASS",
-      value: "186 KG",
-      position: new THREE.Vector3(0.22, 0.7, 0.12),
+      value: "216 KG",
+      position: new THREE.Vector3(0.26, 0.6, -0.15),
     },
     {
       id: "bike-aero",
       index: "B-03",
-      label: "AERO SHELL",
-      value: "0.21 CD",
-      position: new THREE.Vector3(0.18, 1.14, 0.86),
+      label: "AERO WINGLETS",
+      value: "0.24 CD",
+      position: new THREE.Vector3(0.45, 1.05, 0.85),
     },
     {
       id: "bike-dohc",
       index: "B-04",
-      label: "DOHC / 16V",
-      value: "IN-LINE FOUR",
-      position: new THREE.Vector3(0, 0.92, 0.08),
+      label: "SC / DOHC 16V",
+      value: "SUPERCHARGED I4",
+      position: new THREE.Vector3(0, 0.82, 0.05),
     },
   );
 

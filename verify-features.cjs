@@ -14,6 +14,16 @@ const ok = (name, pass, detail = "") => {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+async function shot(page, name) {
+  await page.screenshot({
+    path: path.join(OUT, `${name}.jpg`),
+    type: "jpeg",
+    quality: 72,
+    optimizeForSpeed: true,
+    captureBeyondViewport: false,
+  });
+}
+
 async function setRange(page, labelText, value) {
   return page.evaluate(
     (label, val) => {
@@ -67,6 +77,7 @@ async function setInput(page, selector, value) {
   const browser = await puppeteer.launch({
     executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe",
     headless: true,
+    protocolTimeout: 300000,
     args: [
       "--no-sandbox",
       "--disable-dev-shm-usage",
@@ -74,7 +85,9 @@ async function setInput(page, selector, value) {
       "--use-angle=swiftshader",
       "--enable-unsafe-swiftshader",
       "--autoplay-policy=no-user-gesture-required",
-      "--window-size=1440,900",
+      "--disable-background-timer-throttling",
+      "--disable-renderer-backgrounding",
+      "--window-size=1280,720",
     ],
   });
   const cdp = await browser.target().createCDPSession();
@@ -87,7 +100,7 @@ async function setInput(page, selector, value) {
   await ctx.overridePermissions(URL, ["clipboard-read", "clipboard-write"]);
 
   const page = await browser.newPage();
-  await page.setViewport({ width: 1440, height: 900 });
+  await page.setViewport({ width: 1280, height: 720 });
   const errors = [];
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
   page.on("console", (msg) => {
@@ -117,7 +130,7 @@ async function setInput(page, selector, value) {
     b.map((x) => x.textContent.trim()),
   );
   ok("dock tabs", tabs.join(",") === "FLOW,STYLE,DYNO,GARAGE,REPLAY", tabs.join(","));
-  await page.screenshot({ path: path.join(OUT, "01-dock-flow.png") });
+  await shot(page, "01-dock-flow");
 
   /* ---- #2 rain + night ---- */
   await clickText(page, ".aero-seg button", "RAIN");
@@ -129,7 +142,7 @@ async function setInput(page, selector, value) {
     return seg?.classList.contains("is-on") && night?.classList.contains("is-on");
   });
   ok("rain + night toggles", !!rainOn);
-  await page.screenshot({ path: path.join(OUT, "02-rain-night.png") });
+  await shot(page, "02-rain-night");
 
   /* ---- #5 exploded view + #6 painter ---- */
   await clickText(page, ".aero-dock__tabs button", "STYLE");
@@ -151,7 +164,7 @@ async function setInput(page, selector, value) {
     () => [...document.querySelectorAll(".assembly-label")].filter((e) => getComputedStyle(e).opacity !== "0").length,
   );
   ok("exploded view + labels", exploded && labelCount >= 4, `${labelCount} labels visible`);
-  await page.screenshot({ path: path.join(OUT, "03-exploded-paint.png") });
+  await shot(page, "03-exploded-paint");
   await setRange(page, "EXPLODED VIEW", 0);
   await sleep(900);
 
@@ -175,7 +188,7 @@ async function setInput(page, selector, value) {
     return nonzero > 500;
   });
   ok("dyno chart drawn", chartPainted);
-  await page.screenshot({ path: path.join(OUT, "04-dyno.png") });
+  await shot(page, "04-dyno");
   await page.click(".aero-dock__actions--single .aero-dock__export");
   await sleep(1200);
   ok("dyno sheet export", fs.existsSync(path.join(OUT, "apex-dyno-sheet.csv")));
@@ -201,7 +214,7 @@ async function setInput(page, selector, value) {
     [...document.querySelectorAll(".aero-dock__flash")].some((f) => f.textContent.includes("SETUP LOADED")),
   );
   ok("share code import roundtrip", loaded);
-  await page.screenshot({ path: path.join(OUT, "05-garage.png") });
+  await shot(page, "05-garage");
 
   /* ---- #3 ghost lap + #9 clip ---- */
   await clickText(page, ".aero-dock__tabs button", "REPLAY");
@@ -225,7 +238,7 @@ async function setInput(page, selector, value) {
   await sleep(1200);
   const replayUI = await page.evaluate(() => !!document.querySelector(".aero-scrub"));
   ok("ghost lap replay + scrubber", replayUI);
-  await page.screenshot({ path: path.join(OUT, "06-replay.png") });
+  await shot(page, "06-replay");
   await clickText(page, ".aero-btn", "PAUSE");
   await sleep(300);
   await clickText(page, ".aero-btn", "EXIT");
@@ -264,7 +277,7 @@ async function setInput(page, selector, value) {
     return !!dock && rain?.classList.contains("is-on");
   });
   ok("engineer tuned scene live", !!tunedDock);
-  await page.screenshot({ path: path.join(OUT, "07-engineer.png") });
+  await shot(page, "07-engineer");
 
   /* ---- #32 vox ---- */
   const vox = await page.evaluate(() => {
@@ -310,7 +323,7 @@ async function setInput(page, selector, value) {
     return notice.includes("LOADED") && goal.includes("notepad");
   });
   ok("playbook load restores mission", pbLoaded);
-  await page.screenshot({ path: path.join(OUT, "08-playbooks.png") });
+  await shot(page, "08-playbooks");
   await page.keyboard.press("Escape");
   await sleep(600);
 
@@ -335,10 +348,10 @@ async function setInput(page, selector, value) {
     };
   });
   ok("mobile dock fits viewport", mobBox.inside && !mobBox.overflow, JSON.stringify(mobBox.rect));
-  await mob.screenshot({ path: path.join(OUT, "09-mobile-flow.png") });
+  await shot(mob, "09-mobile-flow");
   await clickText(mob, ".aero-dock__tabs button", "DYNO");
   await sleep(500);
-  await mob.screenshot({ path: path.join(OUT, "10-mobile-dyno.png") });
+  await shot(mob, "10-mobile-dyno");
   const mobTab = await mob.evaluate(() => !!document.querySelector(".aero-dyno canvas"));
   ok("mobile tab switch", mobTab);
   ok("mobile no page errors", mobErrors.length === 0, mobErrors.join("; "));
