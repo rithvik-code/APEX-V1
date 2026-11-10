@@ -186,7 +186,7 @@ export function createSuperbike(): {
   const fenderGeo = new THREE.TorusGeometry(0.64, 0.028, 8, 32, fenderArc);
   fenderGeo.rotateY(Math.PI / 2);
   const fender = new THREE.Mesh(fenderGeo, carbon);
-  fender.rotation.x = Math.PI / 2 - fenderArc / 2;
+  fender.rotation.x = fenderArc / 2 - Math.PI / 2;
   fender.position.set(0, 0.56, 1.02);
   fender.scale.set(2.6, 1, 1);
   group.add(fender);
@@ -194,7 +194,7 @@ export function createSuperbike(): {
   const fenderLineGeo = new THREE.TorusGeometry(0.665, 0.004, 4, 32, fenderArc);
   fenderLineGeo.rotateY(Math.PI / 2);
   const fenderLine = new THREE.Mesh(fenderLineGeo, acid);
-  fenderLine.rotation.x = Math.PI / 2 - fenderArc / 2;
+  fenderLine.rotation.x = fenderArc / 2 - Math.PI / 2;
   fenderLine.position.set(0, 0.56, 1.02);
   fenderLine.scale.set(2.6, 1, 1);
   group.add(fenderLine);

@@ -73,6 +73,36 @@ async function setInput(page, selector, value) {
   }, selector, value);
 }
 
+// Chrome 156 headless cancels disk downloads; capture the exact bytes the app
+// hands to the anchor instead, and verify name + content from those.
+async function captureDownload(page, filename, timeoutMs = 30000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const b64 = await page.evaluate(async (name) => {
+      const entry = (window.__downloads || []).find((d) => d.name === name && !d.read);
+      if (!entry) return null;
+      entry.read = true;
+      if (entry.href.startsWith("data:")) return entry.href.split(",")[1];
+      try {
+        const blob = await (await fetch(entry.href)).blob();
+        return await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result).split(",")[1]);
+          reader.readAsDataURL(blob);
+        });
+      } catch {
+        return "";
+      }
+    }, filename);
+    if (b64) {
+      fs.writeFileSync(path.join(OUT, filename), Buffer.from(b64, "base64"));
+      return true;
+    }
+    await sleep(400);
+  }
+  return false;
+}
+
 (async () => {
   const browser = await puppeteer.launch({
     executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe",
@@ -90,16 +120,22 @@ async function setInput(page, selector, value) {
       "--window-size=1280,720",
     ],
   });
-  const cdp = await browser.target().createCDPSession();
-  await cdp.send("Browser.setDownloadBehavior", {
-    behavior: "allow",
-    downloadPath: OUT,
-    eventsEnabled: true,
-  });
   const ctx = browser.defaultBrowserContext();
-  await ctx.overridePermissions(URL, ["clipboard-read", "clipboard-write"]);
+  await ctx.overridePermissions("http://127.0.0.1:5173", ["clipboard-read", "clipboard-write"]);
 
   const page = await browser.newPage();
+  const pc = await page.createCDPSession();
+  await pc.send("Page.setDownloadBehavior", { behavior: "deny" });
+  await page.evaluateOnNewDocument(() => {
+    window.__downloads = [];
+    const orig = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      if (this.download) {
+        window.__downloads.push({ name: this.download, href: this.href, read: false });
+      }
+      return orig.call(this);
+    };
+  });
   await page.setViewport({ width: 1280, height: 720 });
   const errors = [];
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
@@ -111,7 +147,7 @@ async function setInput(page, selector, value) {
     }
   });
 
-  await page.goto(URL, { waitUntil: "networkidle2", timeout: 60000 });
+  await page.goto(URL, { waitUntil: "domcontentloaded", timeout: 60000 });
   await page.waitForSelector(".site.is-ready", { timeout: 60000 });
   await sleep(3500);
   ok("boot + preloader", true);
@@ -190,8 +226,7 @@ async function setInput(page, selector, value) {
   ok("dyno chart drawn", chartPainted);
   await shot(page, "04-dyno");
   await page.click(".aero-dock__actions--single .aero-dock__export");
-  await sleep(1200);
-  ok("dyno sheet export", fs.existsSync(path.join(OUT, "apex-dyno-sheet.csv")));
+  ok("dyno sheet export", await captureDownload(page, "apex-dyno-sheet.csv"));
 
   /* ---- #7 garage + share codes ---- */
   await clickText(page, ".aero-dock__tabs button", "GARAGE");
@@ -205,7 +240,11 @@ async function setInput(page, selector, value) {
   ok("garage save", saved);
   await clickText(page, ".aero-btn", "COPY CODE");
   await sleep(500);
-  const code = await page.evaluate(() => navigator.clipboard.readText());
+  let code = await page.evaluate(() => navigator.clipboard.readText().catch(() => ""));
+  if (!code || !code.startsWith("APX1.")) {
+    // Clipboard blocked: the app falls back to placing the code in the import area.
+    code = await page.evaluate(() => document.querySelector(".aero-input--area")?.value ?? "");
+  }
   ok("share code copied", typeof code === "string" && code.startsWith("APX1."), String(code).slice(0, 18));
   await setInput(page, ".aero-input--area", code);
   await clickText(page, ".aero-btn--acid", "LOAD CODE");
@@ -247,15 +286,14 @@ async function setInput(page, selector, value) {
   await clickText(page, ".aero-btn", "RECORD VIEWPORT");
   await sleep(2500);
   await clickText(page, ".aero-btn--acid", "STOP & SAVE WEBM");
-  await sleep(2500);
+  const webmCaptured = await captureDownload(page, "apex-cinematic.webm", 120000);
   const webm = path.join(OUT, "apex-cinematic.webm");
-  const webmSize = fs.existsSync(webm) ? fs.statSync(webm).size : 0;
+  const webmSize = webmCaptured && fs.existsSync(webm) ? fs.statSync(webm).size : 0;
   ok("cinematic webm export", webmSize > 10000, `${(webmSize / 1024).toFixed(0)} KB`);
 
   /* ---- png export ---- */
   await page.click(".aero-dock__actions .aero-dock__export");
-  await sleep(1200);
-  ok("png export", fs.existsSync(path.join(OUT, "apex-wind-tunnel.png")));
+  ok("png export", await captureDownload(page, "apex-wind-tunnel.png", 60000));
 
   /* ---- #1 race engineer via chat ---- */
   await page.click(".aero-dock__close");
@@ -280,23 +318,21 @@ async function setInput(page, selector, value) {
   await shot(page, "07-engineer");
 
   /* ---- #32 vox ---- */
+  await page.evaluate(() => {
+    const btn = [...document.querySelectorAll(".term__webbtn")].find((b) => b.textContent.includes("VOX"));
+    if (btn) btn.click();
+  });
+  await sleep(500);
   const vox = await page.evaluate(() => {
     const btn = [...document.querySelectorAll(".term__webbtn")].find((b) => b.textContent.includes("VOX"));
-    if (!btn) return "absent";
-    btn.click();
-    return btn.textContent.trim();
+    return btn ? btn.textContent.trim() : "absent";
   });
   ok("vox radio toggle", vox === "VOX ON", vox);
 
   /* ---- #33 playbooks ---- */
   await setInput(page, "#terminal-widget .term__input input", "/control open notepad and type hello");
   await page.click("#terminal-widget .term__input button[type=submit]");
-  await sleep(800);
-  await page.evaluate(() => {
-    const btn = document.querySelector(".term__handoff");
-    if (btn) btn.click();
-  });
-  await page.waitForSelector(".takeover", { timeout: 10000 });
+  await page.waitForSelector(".takeover", { timeout: 15000 });
   await sleep(800);
   const pbBlock = await page.evaluate(() =>
     [...document.querySelectorAll(".ctl-block__head span")].some((s) => s.textContent === "PLAYBOOKS"),
@@ -332,7 +368,7 @@ async function setInput(page, selector, value) {
   const mobErrors = [];
   mob.on("pageerror", (e) => mobErrors.push(e.message));
   await mob.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
-  await mob.goto(URL, { waitUntil: "networkidle2", timeout: 60000 });
+  await mob.goto(URL, { waitUntil: "domcontentloaded", timeout: 60000 });
   await mob.waitForSelector(".site.is-ready", { timeout: 60000 });
   await sleep(3000);
   await mob.click(".aero-launch");

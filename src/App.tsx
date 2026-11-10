@@ -188,7 +188,9 @@ export default function App() {
     const link = document.createElement("a");
     link.href = url;
     link.download = "apex-wind-tunnel.png";
+    document.body.appendChild(link);
     link.click();
+    link.remove();
     sound.tick("start");
   }, []);
 
