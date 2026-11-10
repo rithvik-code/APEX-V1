@@ -5,14 +5,22 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
-import { createSupercar, type VehicleAnchor } from "./car";
+import { createSupercar, numberTexture, type Assembly, type VehicleAnchor } from "./car";
 import { createSuperbike } from "./bike";
 import { AeroFlow, buildBikeStreamlines, buildCarStreamlines } from "./aero";
+import { WeatherSystem } from "./weather";
 import {
   LIVERIES,
   type LightingPreset,
   type SceneConfig,
 } from "../lib/scene";
+import {
+  ClipRecorder,
+  newLapId,
+  sampleLap,
+  type CameraSample,
+  type LapRecording,
+} from "../lib/clip";
 
 const ACID = 0xc8ff16;
 const UP_AXIS = new THREE.Vector3(0, 1, 0);
@@ -274,6 +282,28 @@ export class ApexEngine {
   private focusCurrent = new THREE.Vector3();
   private focusDist = 1;
   private focusDistCurrent = 1;
+  private weather: WeatherSystem;
+  private floorMat: THREE.MeshStandardMaterial;
+  private explodeTarget = 0;
+  private explodeCurrent = 0;
+  private rpmTarget = 0.32;
+  private rpmCurrent = 0.32;
+  private dynoOn = false;
+  private engineTime = 0;
+  private carRoundels: THREE.Object3D[] = [];
+  private assemblyLabels: Array<{ el: HTMLElement; assembly: Assembly }> = [];
+  private clip: ClipRecorder | null = null;
+  private lapSamples: CameraSample[] = [];
+  private lapStart = 0;
+  private lapConfig: SceneConfig | null = null;
+  private recordingLap = false;
+  private lastSampleAt = 0;
+  private replay: LapRecording | null = null;
+  private replayTime = 0;
+  private replayPlaying = false;
+  private ghostLine: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial> | null = null;
+  private replayPos = new THREE.Vector3();
+  private replayTgt = new THREE.Vector3();
 
   constructor(canvas: HTMLCanvasElement, labelsEl: HTMLElement, onReady?: () => void) {
     this.labelsEl = labelsEl;
@@ -309,11 +339,31 @@ export class ApexEngine {
     pmrem.dispose();
 
     this.lights = this.buildLights();
-    this.gridHelper = this.buildGround();
+    const ground = this.buildGround();
+    this.gridHelper = ground.grid;
+    this.floorMat = ground.floor;
 
     this.car = createSupercar();
     this.carGroup.add(this.car.group);
     this.scene.add(this.carGroup);
+    this.car.group.traverse((object) => {
+      if (object.userData.isNumber) this.carRoundels.push(object);
+    });
+    this.weather = new WeatherSystem(
+      this.scene,
+      this.carGroup,
+      this.floorMat,
+      this.reducedMotion,
+    );
+
+    for (const assembly of this.car.assemblies) {
+      const el = document.createElement("div");
+      el.className = "assembly-label";
+      el.textContent = assembly.label;
+      el.style.opacity = "0";
+      this.labelsEl.appendChild(el);
+      this.assemblyLabels.push({ el, assembly });
+    }
 
     this.bike = createSuperbike();
     this.bikeGroup.add(this.bike.group);
@@ -464,7 +514,7 @@ export class ApexEngine {
     return group;
   }
 
-  private buildGround(): THREE.GridHelper {
+  private buildGround(): { grid: THREE.GridHelper; floor: THREE.MeshStandardMaterial } {
     const grid = new THREE.GridHelper(240, 240, 0x1d2a16, 0x111713);
     grid.position.y = 0.002;
     const gridMat = grid.material as unknown as THREE.LineBasicMaterial;
@@ -472,15 +522,13 @@ export class ApexEngine {
     gridMat.opacity = 0.5;
     this.scene.add(grid);
 
-    const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(60, 64),
-      new THREE.MeshStandardMaterial({
-        color: 0x070909,
-        metalness: 0.8,
-        roughness: 0.42,
-        envMapIntensity: 0.35,
-      }),
-    );
+    const floorMat = new THREE.MeshStandardMaterial({
+      color: 0x070909,
+      metalness: 0.8,
+      roughness: 0.42,
+      envMapIntensity: 0.35,
+    });
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(60, 64), floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.01;
     this.scene.add(floor);
@@ -543,7 +591,7 @@ export class ApexEngine {
     bikeRing.position.set(-9, 0.014, -6);
     this.scene.add(bikeRing);
 
-    return grid;
+    return { grid, floor: floorMat };
   }
 
   private buildStreaks(): {
@@ -850,6 +898,27 @@ export class ApexEngine {
     if (!value) this.clock.getDelta();
   }
 
+  private updateAssemblyLabels(): void {
+    const show = this.explodeCurrent > 0.04;
+    const v = new THREE.Vector3();
+    for (const { el, assembly } of this.assemblyLabels) {
+      if (!show) {
+        el.style.opacity = "0";
+        continue;
+      }
+      assembly.group.getWorldPosition(v);
+      v.y += 0.35;
+      v.project(this.camera);
+      const x = (v.x * 0.5 + 0.5) * window.innerWidth;
+      const y = (-v.y * 0.5 + 0.5) * window.innerHeight;
+      const inFront = v.z < 1 && v.z > -1;
+      el.style.opacity = inFront
+        ? String(Math.min(1, this.explodeCurrent * 1.5))
+        : "0";
+      el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`;
+    }
+  }
+
   configure(config: SceneConfig): void {
     this.aeroCar.setEnabled(config.aero && config.focus !== "bike");
     this.aeroBike.setEnabled(config.aero && config.focus !== "car");
@@ -866,6 +935,10 @@ export class ApexEngine {
     this.bloom.strength = 0.18 + config.glow * 0.6;
     this.lightTargets = LIGHTING_TARGETS[config.lighting];
     this.presetTarget = CAMERA_TARGETS[config.camera];
+    this.explodeTarget = config.explode;
+    this.rpmTarget = config.rpm;
+    this.dynoOn = config.dyno;
+    this.weather.configure(config);
     if (config.focus === "bike") {
       this.focusTarget.copy(this.bikeGroup.position).sub(this.carGroup.position);
       this.focusDist = 0.58;
@@ -876,15 +949,164 @@ export class ApexEngine {
 
     const livery =
       LIVERIES.find((entry) => entry.id === config.livery) ?? LIVERIES[0];
-    this.car.paint.color.setHex(livery.hex);
-    this.bike.accent.color.setHex(
-      livery.id === "silver" || livery.id === "graphite" ? ACID : livery.hex,
-    );
+
+    if (config.paint.enabled) {
+      // Livery painter overrides the preset swatches with a custom scheme.
+      this.car.paint.color.set(config.paint.base);
+      for (const material of this.car.accentMats) material.color.set(config.paint.accent);
+      (this.car.stripe.material as THREE.MeshBasicMaterial).color.set(config.paint.accent);
+      this.car.stripe.visible = config.paint.stripe;
+      this.car.numberMat.map?.dispose();
+      this.car.numberMat.map = numberTexture(config.paint.number, config.paint.accent);
+      this.car.numberMat.needsUpdate = true;
+      for (const roundel of this.carRoundels) roundel.visible = true;
+      this.bike.accent.color.set(config.paint.accent);
+    } else {
+      this.car.paint.color.setHex(livery.hex);
+      for (const material of this.car.accentMats) material.color.setHex(ACID);
+      this.car.stripe.visible = false;
+      for (const roundel of this.carRoundels) roundel.visible = false;
+      this.bike.accent.color.setHex(
+        livery.id === "silver" || livery.id === "graphite" ? ACID : livery.hex,
+      );
+    }
   }
 
   exportPNG(): string {
     this.composer.render();
     return this.renderer.domElement.toDataURL("image/png");
+  }
+
+  /* ---- Cinematic WebM capture ------------------------------------------- */
+
+  startClip(provider: () => string[]): boolean {
+    if (this.clip || typeof MediaRecorder === "undefined") return false;
+    try {
+      this.clip = new ClipRecorder(this.renderer.domElement, provider);
+      this.clip.start();
+      return true;
+    } catch {
+      this.clip = null;
+      return false;
+    }
+  }
+
+  async stopClip(): Promise<Blob | null> {
+    if (!this.clip) return null;
+    const clip = this.clip;
+    this.clip = null;
+    return clip.stop();
+  }
+
+  get isClipping(): boolean {
+    return this.clip !== null;
+  }
+
+  /* ---- Ghost lap recording ---------------------------------------------- */
+
+  startLap(config: SceneConfig): void {
+    this.stopLapReplay();
+    this.lapSamples = [];
+    this.lapConfig = { ...config, paint: { ...config.paint } };
+    this.lapStart = performance.now();
+    this.lastSampleAt = 0;
+    this.recordingLap = true;
+  }
+
+  stopLap(): LapRecording | null {
+    if (!this.recordingLap) return null;
+    this.recordingLap = false;
+    const duration = (performance.now() - this.lapStart) / 1000;
+    if (this.lapSamples.length < 2 || !this.lapConfig) return null;
+    return {
+      id: newLapId(),
+      name: `LAP ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+      createdAt: Date.now(),
+      duration,
+      samples: this.lapSamples,
+      config: this.lapConfig,
+    };
+  }
+
+  get isRecordingLap(): boolean {
+    return this.recordingLap;
+  }
+
+  get lapElapsed(): number {
+    return this.recordingLap ? (performance.now() - this.lapStart) / 1000 : 0;
+  }
+
+  /* ---- Ghost lap replay -------------------------------------------------- */
+
+  playLap(lap: LapRecording): void {
+    this.replay = lap;
+    this.replayTime = 0;
+    this.replayPlaying = true;
+    this.buildGhostLine(lap);
+  }
+
+  pauseLap(): void {
+    this.replayPlaying = false;
+  }
+
+  resumeLap(): void {
+    if (!this.replay) return;
+    if (this.replayTime >= this.replay.duration) this.replayTime = 0;
+    this.replayPlaying = true;
+  }
+
+  seekLap(time: number): void {
+    if (!this.replay) return;
+    this.replayTime = Math.min(this.replay.duration, Math.max(0, time));
+    this.replayPlaying = false;
+  }
+
+  stopLapReplay(): void {
+    this.replay = null;
+    this.replayPlaying = false;
+    this.clearGhostLine();
+  }
+
+  get isReplaying(): boolean {
+    return this.replay !== null;
+  }
+
+  get replayPaused(): boolean {
+    return this.replay !== null && !this.replayPlaying;
+  }
+
+  get replayDuration(): number {
+    return this.replay?.duration ?? 0;
+  }
+
+  get currentReplayTime(): number {
+    return this.replayTime;
+  }
+
+  private buildGhostLine(lap: LapRecording): void {
+    this.clearGhostLine();
+    if (lap.samples.length < 2) return;
+    const points = lap.samples.map((s) => new THREE.Vector3(...s.pos));
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    this.ghostLine = new THREE.Line(
+      geometry,
+      new THREE.LineBasicMaterial({
+        color: ACID,
+        transparent: true,
+        opacity: 0.32,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    this.scene.add(this.ghostLine);
+  }
+
+  private clearGhostLine(): void {
+    if (!this.ghostLine) return;
+    this.scene.remove(this.ghostLine);
+    this.ghostLine.geometry.dispose();
+    this.ghostLine.material.dispose();
+    this.ghostLine = null;
   }
 
   private tick = (): void => {
@@ -980,12 +1202,71 @@ export class ApexEngine {
       );
     }
 
-    this.carGroup.rotation.y = Math.sin(this.clockTime * 0.08) * 0.012;
-    for (const wheel of this.car.wheels) {
-      wheel.rotation.x += adt * 0.55;
+    // Ghost-lap replay overrides the live rig with the recorded camera flight.
+    if (this.replay) {
+      if (this.replayPlaying) {
+        this.replayTime += dt;
+        if (this.replayTime >= this.replay.duration) {
+          this.replayTime = this.replay.duration;
+          this.replayPlaying = false;
+        }
+      }
+      const sample = sampleLap(this.replay, this.replayTime);
+      this.replayPos.set(...sample.pos);
+      this.replayTgt.set(...sample.tgt);
+      this.camera.position.copy(this.replayPos);
+      this.camera.fov = sample.fov;
+      this.camera.updateProjectionMatrix();
+      this.camera.lookAt(this.replayTgt);
     }
-    this.car.engine.update(this.clockTime);
-    this.bike.engine.update(this.clockTime);
+
+    if (this.recordingLap) {
+      const nowMs = performance.now();
+      if (nowMs - this.lastSampleAt > 33 && this.lapSamples.length < 4000) {
+        this.lastSampleAt = nowMs;
+        this.lapSamples.push({
+          t: (nowMs - this.lapStart) / 1000,
+          pos: [this.camera.position.x, this.camera.position.y, this.camera.position.z],
+          tgt: [this.lookTarget.x, this.lookTarget.y, this.lookTarget.z],
+          fov: this.camera.fov,
+        });
+      }
+    }
+
+    this.carGroup.rotation.y = Math.sin(this.clockTime * 0.08) * 0.012;
+
+    // Exploded view eases assemblies apart along their offset vectors and
+    // spreads the wheels outward so the internals read clearly.
+    this.explodeCurrent +=
+      (this.explodeTarget - this.explodeCurrent) * (1 - Math.exp(-dt * 4));
+    for (const assembly of this.car.assemblies) {
+      assembly.group.position
+        .copy(assembly.offset)
+        .multiplyScalar(this.explodeCurrent);
+    }
+
+    // Dyno: RPM drives a continuously accumulated engine clock so the crank
+    // never jumps when the rev slider moves, and the wheels/exhaust respond.
+    this.rpmCurrent += (this.rpmTarget - this.rpmCurrent) * (1 - Math.exp(-dt * 5));
+    const spin = this.dynoOn ? 0.6 + this.rpmCurrent * 7.5 : 1;
+    this.engineTime += adt * spin;
+    const wheelSpin = 0.55 + (this.dynoOn ? this.rpmCurrent * 9 : 0);
+    for (const wheel of this.car.wheels) {
+      wheel.rotation.x += adt * wheelSpin;
+      const side = wheel.userData.side as number;
+      wheel.position.x =
+        (wheel.userData.baseX as number) + side * 1.5 * this.explodeCurrent;
+    }
+    this.car.engine.update(this.engineTime);
+    this.bike.engine.update(this.dynoOn ? this.engineTime : this.clockTime);
+    const glowTarget = this.dynoOn
+      ? 0.22 + this.rpmCurrent * 0.6 + Math.sin(this.clockTime * 40) * 0.05 * this.rpmCurrent
+      : 0;
+    this.car.exhaustGlow.opacity +=
+      (glowTarget - this.car.exhaustGlow.opacity) * (1 - Math.exp(-dt * 8));
+
+    this.weather.update(dt);
+    this.updateAssemblyLabels();
     this.bikeGroup.position.y = Math.sin(this.clockTime * 0.6) * 0.008;
     this.bike.scan.position.y = 0.35 + ((this.clockTime * 0.42) % 1.4);
     this.bike.scan.material.opacity =
@@ -995,17 +1276,21 @@ export class ApexEngine {
     this.aeroCar.update(dt);
     this.aeroBike.update(dt);
 
-    // Lighting presets cross-fade instead of cutting.
+    // Lighting presets cross-fade instead of cutting. Night race dims the
+    // ambient rig so the headlights and neon carry the scene.
     const lightEase = Math.min(1, dt * 3.4);
     const targets = this.lightTargets;
+    const nightDim = 1 - this.weather.night * 0.66;
     (Object.keys(this.lights) as Array<keyof LightRig>).forEach((name) => {
       const light = this.lights[name];
       const target = targets.lights[name];
-      light.intensity += (target.intensity - light.intensity) * lightEase;
+      const dim = name === "hemi" || name === "key" || name === "cool" ? nightDim : 1;
+      light.intensity += (target.intensity * dim - light.intensity) * lightEase;
       if (target.color) light.color.lerp(target.color, lightEase);
     });
+    const exposureTarget = targets.exposure * (1 - this.weather.night * 0.16);
     this.renderer.toneMappingExposure +=
-      (targets.exposure - this.renderer.toneMappingExposure) * lightEase;
+      (exposureTarget - this.renderer.toneMappingExposure) * lightEase;
 
     this.shafts.children.forEach((child, index) => {
       const mesh = child as THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
@@ -1071,6 +1356,7 @@ export class ApexEngine {
 
     this.updateLabels(p);
     this.composer.render();
+    this.clip?.frame(this.renderer.domElement);
 
     if (!this.readySent) {
       this.readySent = true;
@@ -1090,6 +1376,14 @@ export class ApexEngine {
     window.removeEventListener("pointercancel", this.onDragEnd);
     window.removeEventListener("dblclick", this.onResetView);
     document.body.classList.remove("is-orbiting");
+    for (const { el } of this.assemblyLabels) el.remove();
+    this.weather.dispose();
+    this.clearGhostLine();
+    this.recordingLap = false;
+    if (this.clip) {
+      void this.clip.stop();
+      this.clip = null;
+    }
     this.scene.traverse((object) => {
       if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments || object instanceof THREE.Points) {
         object.geometry?.dispose();

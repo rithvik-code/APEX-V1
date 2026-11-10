@@ -5,6 +5,12 @@ class SoundEngine {
   private windGain: GainNode | null = null;
   private windFilter: BiquadFilterNode | null = null;
   private noiseBuffer: AudioBuffer | null = null;
+  private engineGain: GainNode | null = null;
+  private engineOscA: OscillatorNode | null = null;
+  private engineOscB: OscillatorNode | null = null;
+  private engineFilter: BiquadFilterNode | null = null;
+  private rainGain: GainNode | null = null;
+  private rainFilter: BiquadFilterNode | null = null;
 
   private init(): AudioContext {
     if (this.ctx) return this.ctx;
@@ -70,10 +76,53 @@ class SoundEngine {
     this.windFilter = windFilter;
     this.windGain = windGain;
 
+    // Dyno engine note — two detuned oscillators whose pitch tracks RPM.
+    const engineFilter = ctx.createBiquadFilter();
+    engineFilter.type = "lowpass";
+    engineFilter.frequency.value = 700;
+    engineFilter.Q.value = 3;
+    const engineGain = ctx.createGain();
+    engineGain.gain.value = 0;
+    const engineA = ctx.createOscillator();
+    engineA.type = "sawtooth";
+    engineA.frequency.value = 40;
+    const engineB = ctx.createOscillator();
+    engineB.type = "square";
+    engineB.frequency.value = 81;
+    engineB.detune.value = 9;
+    engineA.connect(engineFilter);
+    engineB.connect(engineFilter);
+    engineFilter.connect(engineGain);
+    engineGain.connect(master);
+    this.engineFilter = engineFilter;
+    this.engineGain = engineGain;
+    this.engineOscA = engineA;
+    this.engineOscB = engineB;
+
+    // Rain bed — bright filtered noise, level tracks the weather slider.
+    const rain = ctx.createBufferSource();
+    rain.buffer = noiseBuffer;
+    rain.loop = true;
+    rain.playbackRate.value = 1.5;
+    const rainFilter = ctx.createBiquadFilter();
+    rainFilter.type = "bandpass";
+    rainFilter.frequency.value = 1800;
+    rainFilter.Q.value = 0.5;
+    const rainGain = ctx.createGain();
+    rainGain.gain.value = 0;
+    rain.connect(rainFilter);
+    rainFilter.connect(rainGain);
+    rainGain.connect(master);
+    this.rainFilter = rainFilter;
+    this.rainGain = rainGain;
+
     low.start();
     high.start();
     noise.start();
     wind.start();
+    engineA.start();
+    engineB.start();
+    rain.start();
 
     this.ctx = ctx;
     this.master = master;
@@ -102,6 +151,47 @@ class SoundEngine {
     const now = this.ctx.currentTime;
     this.windGain.gain.setTargetAtTime(level * 0.3, now, 0.25);
     this.windFilter.frequency.setTargetAtTime(300 + level * 1050, now, 0.25);
+  }
+
+  setEngine(norm: number): void {
+    if (!this.ctx || !this.engineGain || !this.engineOscA || !this.engineOscB || !this.engineFilter) return;
+    const now = this.ctx.currentTime;
+    const n = Math.min(1, Math.max(0, norm));
+    const freq = 34 + n * 214;
+    this.engineOscA.frequency.setTargetAtTime(freq, now, 0.07);
+    this.engineOscB.frequency.setTargetAtTime(freq * 2.02, now, 0.07);
+    this.engineFilter.frequency.setTargetAtTime(480 + n * 2800, now, 0.09);
+    this.engineGain.gain.setTargetAtTime(n > 0.001 ? 0.05 + n * 0.17 : 0, now, 0.12);
+  }
+
+  setRain(level: number): void {
+    if (!this.ctx || !this.rainGain || !this.rainFilter) return;
+    const now = this.ctx.currentTime;
+    const n = Math.min(1, Math.max(0, level));
+    this.rainGain.gain.setTargetAtTime(n * 0.13, now, 0.3);
+    this.rainFilter.frequency.setTargetAtTime(1200 + n * 2400, now, 0.3);
+  }
+
+  // A short radio squelch burst, played around pit-wall voice replies.
+  radio(): void {
+    if (!this.enabled || !this.ctx || !this.master || !this.noiseBuffer) return;
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.value = 1700;
+    filter.Q.value = 0.9;
+    const gain = ctx.createGain();
+    const now = ctx.currentTime;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.13, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.master);
+    src.start(now);
+    src.stop(now + 0.22);
   }
 
   whoosh(): void {

@@ -10,7 +10,40 @@ export type VehicleAnchor = {
   position: THREE.Vector3;
 };
 
+export type Assembly = {
+  id: string;
+  label: string;
+  group: THREE.Group;
+  offset: THREE.Vector3;
+};
+
 const ACID = 0xc8ff16;
+
+// A roundel decal: dark disc with an acid rim and the racing number. Rendered to
+// a canvas so the livery painter can change number and accent without a reload.
+export function numberTexture(number: string, accent: string): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d")!;
+  ctx.clearRect(0, 0, 256, 256);
+  ctx.beginPath();
+  ctx.arc(128, 128, 116, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(8,10,9,0.92)";
+  ctx.fill();
+  ctx.lineWidth = 9;
+  ctx.strokeStyle = accent;
+  ctx.stroke();
+  ctx.fillStyle = accent;
+  ctx.font = "700 132px 'Archivo','Arial Black',sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(number.slice(0, 3) || "01", 128, 138);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  return texture;
+}
 
 export function createSupercar(): {
   group: THREE.Group;
@@ -18,10 +51,23 @@ export function createSupercar(): {
   anchors: VehicleAnchor[];
   engine: EngineAssembly;
   paint: THREE.MeshPhysicalMaterial;
+  assemblies: Assembly[];
+  accentMats: THREE.MeshBasicMaterial[];
+  numberMat: THREE.MeshBasicMaterial;
+  stripe: THREE.Mesh;
+  exhaustGlow: THREE.MeshBasicMaterial;
+  headlamp: THREE.MeshBasicMaterial;
 } {
   const group = new THREE.Group();
   const wheels: THREE.Group[] = [];
   const anchors: VehicleAnchor[] = [];
+
+  // Exploded-view assemblies. Each is a group offset from its assembled pose.
+  const shell = new THREE.Group();
+  const canopy = new THREE.Group();
+  const frontAero = new THREE.Group();
+  const rearWing = new THREE.Group();
+  const power = new THREE.Group();
 
   const paint = new THREE.MeshPhysicalMaterial({
     color: 0xaab2ba,
@@ -59,7 +105,14 @@ export function createSupercar(): {
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
-  const headlight = new THREE.MeshBasicMaterial({ color: 0xf2ffe0 });
+  const headlamp = new THREE.MeshBasicMaterial({ color: 0xf2ffe0 });
+  const exhaustGlow = new THREE.MeshBasicMaterial({
+    color: 0xff7a2a,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
   const metal = new THREE.MeshStandardMaterial({
     color: 0x9aa1a8,
     metalness: 1,
@@ -96,7 +149,7 @@ export function createSupercar(): {
   bodyGeo.translate(0, 0, -0.81);
   bodyGeo.rotateY(-Math.PI / 2);
   const body = new THREE.Mesh(bodyGeo, paint);
-  group.add(body);
+  shell.add(body);
 
   // Canopy
   const canopyShape = new THREE.Shape();
@@ -115,8 +168,8 @@ export function createSupercar(): {
   });
   canopyGeo.translate(0, 0, -0.6);
   canopyGeo.rotateY(-Math.PI / 2);
-  const canopy = new THREE.Mesh(canopyGeo, glass);
-  group.add(canopy);
+  const canopyMesh = new THREE.Mesh(canopyGeo, glass);
+  canopy.add(canopyMesh);
 
   // Spine and canopy trim
   const spine = new THREE.Mesh(
@@ -124,7 +177,7 @@ export function createSupercar(): {
     acidSoft,
   );
   spine.position.set(0, 1.185, -0.38);
-  group.add(spine);
+  canopy.add(spine);
 
   // Front splitter + canards
   const splitter = new THREE.Mesh(
@@ -132,7 +185,7 @@ export function createSupercar(): {
     carbon,
   );
   splitter.position.set(0, 0.155, 2.16);
-  group.add(splitter);
+  frontAero.add(splitter);
 
   for (const side of [-1, 1]) {
     const canard = new THREE.Mesh(
@@ -141,7 +194,7 @@ export function createSupercar(): {
     );
     canard.position.set(side * 0.76, 0.34, 1.94);
     canard.rotation.z = side * 0.12;
-    group.add(canard);
+    frontAero.add(canard);
   }
 
   // Side skirts with the single acid accent line
@@ -151,11 +204,11 @@ export function createSupercar(): {
       carbon,
     );
     skirt.position.set(side * 0.9, 0.18, 0);
-    group.add(skirt);
+    shell.add(skirt);
 
     const glow = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.022, 2.2), acid);
     glow.position.set(side * 0.952, 0.205, 0);
-    group.add(glow);
+    shell.add(glow);
   }
 
   // Rear wing
@@ -165,7 +218,7 @@ export function createSupercar(): {
   );
   wing.position.set(0, 1.08, -2.04);
   wing.rotation.x = -0.08;
-  group.add(wing);
+  rearWing.add(wing);
 
   for (const side of [-1, 1]) {
     const upright = new THREE.Mesh(
@@ -173,24 +226,24 @@ export function createSupercar(): {
       carbon,
     );
     upright.position.set(side * 0.56, 0.9, -2.02);
-    group.add(upright);
+    rearWing.add(upright);
 
     const plate = new THREE.Mesh(
       new RoundedBoxGeometry(0.02, 0.2, 0.5, 2, 0.01),
       carbon,
     );
     plate.position.set(side * 0.79, 1.06, -2.04);
-    group.add(plate);
+    rearWing.add(plate);
   }
 
   const wingGlow = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.008, 0.02), acidSoft);
   wingGlow.position.set(0, 1.04, -2.24);
-  group.add(wingGlow);
+  rearWing.add(wingGlow);
 
   // Rear light bar and exhaust
   const tail = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.035, 0.02), acid);
   tail.position.set(0, 0.68, -2.38);
-  group.add(tail);
+  shell.add(tail);
 
   const tailGlow = new THREE.Mesh(
     new THREE.BoxGeometry(1.7, 0.14, 0.02),
@@ -203,13 +256,13 @@ export function createSupercar(): {
     }),
   );
   tailGlow.position.set(0, 0.68, -2.39);
-  group.add(tailGlow);
+  shell.add(tailGlow);
 
   for (const side of [-1, 1]) {
     const exhaust = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.085, 0.18, 20), metal);
     exhaust.rotation.x = Math.PI / 2;
     exhaust.position.set(side * 0.4, 0.33, -2.3);
-    group.add(exhaust);
+    shell.add(exhaust);
 
     const exhaustInner = new THREE.Mesh(
       new THREE.CylinderGeometry(0.065, 0.065, 0.19, 20),
@@ -217,7 +270,12 @@ export function createSupercar(): {
     );
     exhaustInner.rotation.x = Math.PI / 2;
     exhaustInner.position.set(side * 0.4, 0.33, -2.31);
-    group.add(exhaustInner);
+    shell.add(exhaustInner);
+
+    const glowDisc = new THREE.Mesh(new THREE.CircleGeometry(0.07, 20), exhaustGlow);
+    glowDisc.position.set(side * 0.4, 0.33, -2.405);
+    glowDisc.rotation.y = Math.PI;
+    shell.add(glowDisc);
   }
 
   // Rear diffuser fins
@@ -227,15 +285,15 @@ export function createSupercar(): {
       carbon,
     );
     fin.position.set(-0.6 + i * 0.2, 0.17, -2.22);
-    group.add(fin);
+    rearWing.add(fin);
   }
 
   // Headlights
   for (const side of [-1, 1]) {
-    const lamp = new THREE.Mesh(new RoundedBoxGeometry(0.4, 0.055, 0.035, 3, 0.015), headlight);
+    const lamp = new THREE.Mesh(new RoundedBoxGeometry(0.4, 0.055, 0.035, 3, 0.015), headlamp);
     lamp.position.set(side * 0.52, 0.47, 2.3);
     lamp.rotation.x = -0.22;
-    group.add(lamp);
+    shell.add(lamp);
 
     const lampGlow = new THREE.Mesh(
       new THREE.BoxGeometry(0.58, 0.16, 0.02),
@@ -248,7 +306,7 @@ export function createSupercar(): {
       }),
     );
     lampGlow.position.set(side * 0.52, 0.47, 2.32);
-    group.add(lampGlow);
+    shell.add(lampGlow);
   }
 
   // Hood vents
@@ -256,7 +314,7 @@ export function createSupercar(): {
     const vent = new THREE.Mesh(new RoundedBoxGeometry(0.3, 0.015, 0.42, 2, 0.01), carbon);
     vent.position.set(side * 0.44, 0.685, 1.36);
     vent.rotation.x = -0.06;
-    group.add(vent);
+    shell.add(vent);
   }
 
   // ---------------------------------------------------------------------------
@@ -333,7 +391,7 @@ export function createSupercar(): {
   hoop.rotation.z = Math.PI;
   hoop.rotation.x = -0.1;
   cabin.add(hoop);
-  group.add(cabin);
+  canopy.add(cabin);
 
   // ---------------------------------------------------------------------------
   // V12 twin-turbo, mounted behind the cabin under a glass power dome.
@@ -341,21 +399,21 @@ export function createSupercar(): {
   const engine = createV12();
   engine.group.scale.setScalar(0.46);
   engine.group.position.set(0, 0.78, -1.52);
-  group.add(engine.group);
+  power.add(engine.group);
 
   const engineBase = new THREE.Mesh(
     new RoundedBoxGeometry(0.94, 0.06, 1.02, 3, 0.03),
     carbon,
   );
   engineBase.position.set(0, 0.87, -1.5);
-  group.add(engineBase);
+  power.add(engineBase);
 
   const engineGlass = new THREE.Mesh(
     new RoundedBoxGeometry(0.86, 0.26, 0.92, 3, 0.06),
     glass,
   );
   engineGlass.position.set(0, 1.02, -1.5);
-  group.add(engineGlass);
+  power.add(engineGlass);
 
   for (const side of [-1, 1]) {
     const rail = new THREE.Mesh(
@@ -363,7 +421,7 @@ export function createSupercar(): {
       acid,
     );
     rail.position.set(side * 0.42, 1.15, -1.5);
-    group.add(rail);
+    power.add(rail);
   }
 
   const engineVent = new THREE.Mesh(
@@ -371,16 +429,16 @@ export function createSupercar(): {
     carbon,
   );
   engineVent.position.set(0, 1.16, -1.92);
-  group.add(engineVent);
+  power.add(engineVent);
 
   // Mirrors
   for (const side of [-1, 1]) {
     const stalk = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.02, 0.02), carbon);
     stalk.position.set(side * 0.98, 0.84, 0.66);
-    group.add(stalk);
+    shell.add(stalk);
     const mirror = new THREE.Mesh(new RoundedBoxGeometry(0.1, 0.065, 0.16, 2, 0.015), paint);
     mirror.position.set(side * 1.08, 0.86, 0.66);
-    group.add(mirror);
+    shell.add(mirror);
   }
 
   // Underbody glow
@@ -396,7 +454,32 @@ export function createSupercar(): {
   );
   glowPlane.rotation.x = -Math.PI / 2;
   glowPlane.position.y = 0.025;
-  group.add(glowPlane);
+  shell.add(glowPlane);
+
+  // Livery painter — hood stripe and racing-number roundels, hidden until enabled.
+  const stripe = new THREE.Mesh(
+    new THREE.BoxGeometry(0.22, 0.014, 1.5),
+    new THREE.MeshBasicMaterial({ color: ACID }),
+  );
+  stripe.position.set(0, 0.742, 1.16);
+  stripe.rotation.x = -0.05;
+  stripe.visible = false;
+  shell.add(stripe);
+
+  const numberMat = new THREE.MeshBasicMaterial({
+    map: numberTexture("01", "#c8ff16"),
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  for (const side of [-1, 1]) {
+    const roundel = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.5), numberMat);
+    roundel.position.set(side * 0.918, 0.5, 0.12);
+    roundel.rotation.y = side * (Math.PI / 2);
+    roundel.visible = false;
+    roundel.userData.isNumber = true;
+    shell.add(roundel);
+  }
 
   // ---------------------------------------------------------------------------
   // Wheels
@@ -450,6 +533,8 @@ export function createSupercar(): {
       wheel.add(spoke);
     }
 
+    wheel.userData.side = side;
+    wheel.userData.baseX = side * 0.93;
     group.add(wheel);
     wheels.push(wheel);
   }
@@ -462,7 +547,7 @@ export function createSupercar(): {
     );
     arch.rotation.y = Math.PI / 2;
     arch.position.set(side * 0.9, 0.47, z);
-    group.add(arch);
+    shell.add(arch);
   }
 
   anchors.push(
@@ -496,5 +581,27 @@ export function createSupercar(): {
     },
   );
 
-  return { group, wheels, anchors, engine, paint };
+  group.add(shell, canopy, frontAero, rearWing, power);
+
+  const assemblies: Assembly[] = [
+    { id: "shell", label: "MONOCOQUE", group: shell, offset: new THREE.Vector3(0, 0, 0) },
+    { id: "canopy", label: "CANOPY / COCKPIT", group: canopy, offset: new THREE.Vector3(0, 1.3, 0.2) },
+    { id: "frontAero", label: "FRONT AERO", group: frontAero, offset: new THREE.Vector3(0, 0.2, 1.8) },
+    { id: "rearWing", label: "REAR WING / DIFFUSER", group: rearWing, offset: new THREE.Vector3(0, 0.75, -1.9) },
+    { id: "power", label: "V12 BITURBO", group: power, offset: new THREE.Vector3(0, 1.85, -0.5) },
+  ];
+
+  return {
+    group,
+    wheels,
+    anchors,
+    engine,
+    paint,
+    assemblies,
+    accentMats: [acid, acidSoft],
+    numberMat,
+    stripe,
+    exhaustGlow,
+    headlamp,
+  };
 }

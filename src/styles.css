@@ -1437,6 +1437,35 @@ body.is-orbiting * {
   color: var(--paper);
 }
 
+.assembly-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 4px 9px;
+  border: 1px solid rgba(200, 255, 22, 0.4);
+  background: rgba(7, 9, 8, 0.82);
+  backdrop-filter: blur(6px);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--acid);
+  white-space: nowrap;
+  opacity: 0;
+  will-change: transform, opacity;
+  transition: opacity 0.2s linear;
+  box-shadow: 0 0 18px rgba(200, 255, 22, 0.08);
+}
+
+.assembly-label::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 1px;
+  height: 5px;
+  background: rgba(200, 255, 22, 0.5);
+}
+
 .blueprint {
   margin-top: clamp(40px, 7vh, 70px);
   border: 1px solid var(--line);
