@@ -564,6 +564,152 @@
   color: var(--dim);
 }
 
+.ctl-playbook-save {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ctl-playbook-name {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.42);
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+}
+
+.ctl-playbook-name::placeholder {
+  color: var(--dim);
+}
+
+.ctl-playbook-name:focus {
+  outline: 0;
+  border-color: var(--acid);
+}
+
+.ctl-playbook-name:disabled {
+  opacity: 0.5;
+}
+
+.ctl-playbooks {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(200, 255, 22, 0.4) transparent;
+}
+
+.ctl-playbooks::-webkit-scrollbar {
+  width: 4px;
+}
+
+.ctl-playbooks::-webkit-scrollbar-thumb {
+  background: rgba(200, 255, 22, 0.35);
+  border-radius: 2px;
+}
+
+.ctl-playbooks li {
+  display: flex;
+  align-items: stretch;
+  gap: 5px;
+}
+
+.ctl-playbook {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px solid var(--line-soft);
+  background: rgba(0, 0, 0, 0.24);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    background 0.2s;
+}
+
+.ctl-playbook:hover:not(:disabled) {
+  border-color: rgba(200, 255, 22, 0.4);
+  background: rgba(200, 255, 22, 0.06);
+}
+
+.ctl-playbook:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ctl-playbook b {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  color: var(--paper);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ctl-playbook span {
+  font-family: var(--mono);
+  font-size: 8px;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  color: var(--dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ctl-playbook-run,
+.ctl-playbook-del {
+  flex: none;
+  width: 28px;
+  border: 1px solid var(--line-soft);
+  background: none;
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    color 0.2s,
+    border-color 0.2s,
+    background 0.2s;
+}
+
+.ctl-playbook-run {
+  color: var(--acid);
+}
+
+.ctl-playbook-run:hover:not(:disabled) {
+  border-color: var(--acid);
+  background: rgba(200, 255, 22, 0.1);
+}
+
+.ctl-playbook-run:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.ctl-playbook-del {
+  color: var(--dim);
+  font-size: 13px;
+}
+
+.ctl-playbook-del:hover {
+  color: #ff5d5d;
+  border-color: rgba(255, 93, 93, 0.5);
+}
+
 .ctl-caps {
   display: grid;
   grid-template-columns: 1fr 1fr;

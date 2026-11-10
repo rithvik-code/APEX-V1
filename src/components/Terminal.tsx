@@ -18,6 +18,16 @@ import {
   warmGrounding,
   type Grounding,
 } from "../lib/web";
+import { tuneFromText } from "../lib/engineer";
+import {
+  createRecognizer,
+  pttSupported,
+  speakRadio,
+  stopRadio,
+  voxSupported,
+  type Recognizer,
+} from "../lib/radio";
+import type { SceneConfig } from "../lib/scene";
 import { sound } from "../lib/sound";
 
 type Entry = {
@@ -25,12 +35,15 @@ type Entry = {
   role: "user" | "assistant" | "meta";
   content: string;
   controlGoal?: string;
+  engineer?: boolean;
 };
 
 type LinkState = "checking" | "online" | "offline";
 
 type TerminalProps = {
   onTakeControl?: (goal: string) => void;
+  scene: SceneConfig;
+  onTune?: (patch: Partial<SceneConfig>) => void;
 };
 
 // Matches an actionable computer task so a handoff is offered even when the
@@ -58,6 +71,8 @@ function splitControlTag(content: string): { text: string; goal: string | null }
 
 const COMMANDS = [
   ["/help", "show local commands"],
+  ["/race <request>", "race engineer tunes the car live"],
+  ["/vox [on|off]", "speak replies over the racing radio"],
   ["/web [on|off]", "toggle live web grounding"],
   ["/search <query>", "pull live sources without the model"],
   ["/live", "detect a local Ollama model and connect"],
@@ -72,17 +87,22 @@ const COMMANDS = [
 ];
 
 const BASE_CHIPS = [
+  "More downforce for the wet",
   "Who is the F1 world champion?",
+  "Run the dyno to redline",
   "Design a local RAG stack",
   "Why is my build slow?",
-  "Explain embeddings without the hand-waving",
   "What can you do that ChatGPT can't?",
   "Who won the last race?",
 ];
 
-type Topic = "f1" | "code" | "local" | "apex";
+type Topic = "tune" | "f1" | "code" | "local" | "apex";
 
 const TOPICS: Array<{ topic: Topic; re: RegExp }> = [
+  {
+    topic: "tune",
+    re: /\b(downforce|drag|wet setup|rain mode|night race|dyno|redline|explode|paint it|livery|top speed|wind speed|grid floor|auto-orbit)\b/i,
+  },
   {
     topic: "f1",
     re: /\b(f1|formula (?:one|1)|grand prix|race|champion|championship|podium|pole|verstappen|antonelli|hamilton|leclerc|norris|piastri|russell|alonso|sainz|mclaren|ferrari|mercedes|red bull|aston martin)\b/i,
@@ -137,6 +157,16 @@ function pickEntity(queries: string[]): string | null {
 }
 
 function topicChips(topic: Topic | null, entity: string | null): string[] {
+  if (topic === "tune") {
+    return [
+      "Night race, neon lighting",
+      "Explode the car and show the engine",
+      "Paint it racing red, number 46",
+      "Top speed setup for the straights",
+      "Rain mode, heavy storm",
+      "Reset the setup to stock",
+    ];
+  }
   if (topic === "f1") {
     return [
       entity
@@ -226,10 +256,11 @@ const WEB_KEY = "apex.web.v1";
 const WELCOME = `APEX READY.
 
 Terminal is warm. Type /help for local commands, or ask anything.
+RACE ENGINEER on duty: say "more downforce for the wet" and the car
+tunes itself live. RADIO is push-to-talk, VOX speaks the replies.
 WEB grounding is ON: current facts (F1, people, releases, news) are
 pulled live from Wikipedia and racing data before the model answers.
-The demo link is canned; open LINK to point this terminal at a local
-Ollama model and it starts thinking for real.`;
+Open LINK to point this terminal at a local Ollama model.`;
 
 function loadWeb(): boolean {
   try {
@@ -256,7 +287,7 @@ const INITIAL_ENTRIES: Entry[] = [
   { id: "welcome", role: "assistant", content: WELCOME },
 ];
 
-export function Terminal({ onTakeControl }: TerminalProps) {
+export function Terminal({ onTakeControl, scene, onTune }: TerminalProps) {
   const [settings, setSettings] = useState<AiSettings>(() => loadSettings());
   const [draft, setDraft] = useState<AiSettings>(() => loadSettings());
   const [entries, setEntries] = useState<Entry[]>(INITIAL_ENTRIES);
@@ -269,12 +300,22 @@ export function Terminal({ onTakeControl }: TerminalProps) {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [notice, setNotice] = useState("");
   const [web, setWeb] = useState<boolean>(() => loadWeb());
+  const [vox, setVox] = useState(false);
+  const [listening, setListening] = useState(false);
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const mounted = useRef(true);
+  const voxRef = useRef(false);
+  const recognizerRef = useRef<Recognizer | null>(null);
+  const sendRef = useRef<(value: string) => void>(() => {});
   const chips = useMemo(() => buildChips(entries), [entries]);
+
+  useEffect(() => {
+    voxRef.current = vox;
+    if (!vox) stopRadio();
+  }, [vox]);
 
   const addEntry = useCallback((role: Entry["role"], content: string) => {
     setEntries((prev) => [...prev, { id: uid(), role, content }]);
@@ -377,7 +418,11 @@ export function Terminal({ onTakeControl }: TerminalProps) {
   }, [entries, streaming, settingsOpen]);
 
   useEffect(() => {
-    return () => abortRef.current?.abort();
+    return () => {
+      abortRef.current?.abort();
+      stopRadio();
+      recognizerRef.current?.stop();
+    };
   }, []);
 
   useEffect(() => {
@@ -421,6 +466,38 @@ export function Terminal({ onTakeControl }: TerminalProps) {
     setWebMode(!web);
   };
 
+  const setVoxMode = (next: boolean) => {
+    setVox(next);
+    addEntry(
+      "meta",
+      next
+        ? "VOX ON — REPLIES COME OVER THE RACING RADIO. PUSH RADIO TO TALK BACK."
+        : "VOX OFF — RADIO SILENT.",
+    );
+  };
+
+  const toggleVox = () => {
+    sound.tick("click");
+    setVoxMode(!vox);
+  };
+
+  const togglePtt = () => {
+    if (listening) {
+      recognizerRef.current?.stop();
+      return;
+    }
+    if (!recognizerRef.current) {
+      recognizerRef.current = createRecognizer(
+        (text) => sendRef.current(text),
+        () => setListening(false),
+      );
+    }
+    if (!recognizerRef.current) return;
+    sound.tick("start");
+    setListening(true);
+    recognizerRef.current.start();
+  };
+
   const handleCommand = (raw: string) => {
     const [command, ...rest] = raw.split(" ");
     const arg = rest.join(" ").trim();
@@ -435,6 +512,43 @@ export function Terminal({ onTakeControl }: TerminalProps) {
         break;
       case "/clear":
         setEntries(INITIAL_ENTRIES);
+        break;
+      case "/race": {
+        if (!arg) {
+          addEntry(
+            "meta",
+            "USAGE: /race <request> — E.G. /race more downforce for the wet",
+          );
+          break;
+        }
+        if (!onTune) {
+          addEntry("meta", "RACE ENGINEER UNAVAILABLE IN THIS VIEW.");
+          break;
+        }
+        const action = tuneFromText(arg, scene);
+        if (!action) {
+          addEntry(
+            "meta",
+            "ENGINEER // NO TUNING CHANGE DETECTED. TRY: MORE DOWNFORCE FOR THE WET.",
+          );
+          break;
+        }
+        addEntry("user", arg);
+        onTune(action.patch);
+        sound.whoosh();
+        setEntries((prev) => [
+          ...prev,
+          { id: uid(), role: "assistant", content: action.reply, engineer: true },
+        ]);
+        if (voxRef.current) speakRadio(action.reply);
+        break;
+      }
+      case "/vox":
+        if (arg && !/^(on|off)$/i.test(arg)) {
+          addEntry("meta", "USAGE: /vox [on|off]");
+          break;
+        }
+        setVoxMode(arg ? /^on$/i.test(arg) : !vox);
         break;
       case "/web":
         if (arg && !/^(on|off)$/i.test(arg)) {
@@ -570,6 +684,24 @@ export function Terminal({ onTakeControl }: TerminalProps) {
       return;
     }
 
+    const engineerAction = onTune ? tuneFromText(text, scene) : null;
+    if (engineerAction && onTune) {
+      setEntries((prev) => [...prev, { id: uid(), role: "user", content: text }]);
+      onTune(engineerAction.patch);
+      sound.whoosh();
+      setEntries((prev) => [
+        ...prev,
+        {
+          id: uid(),
+          role: "assistant",
+          content: engineerAction.reply,
+          engineer: true,
+        },
+      ]);
+      if (voxRef.current) speakRadio(engineerAction.reply);
+      return;
+    }
+
     const intentGoal = controlIntentGoal(text);
     const userEntry: Entry = { id: uid(), role: "user", content: text };
     const metaId = uid();
@@ -656,6 +788,7 @@ export function Terminal({ onTakeControl }: TerminalProps) {
       ]);
       setStreaming(false);
       abortRef.current = null;
+      if (voxRef.current) speakRadio(quickGrounding.quick);
       return;
     }
 
@@ -667,6 +800,7 @@ export function Terminal({ onTakeControl }: TerminalProps) {
     // Tokens arrive every few milliseconds; repainting the transcript on each
     // one is the slow part, so paint at most every 45 ms.
     let pending = "";
+    let fullText = "";
     let flushTimer: number | null = null;
     const flush = () => {
       if (flushTimer !== null) {
@@ -694,6 +828,7 @@ export function Terminal({ onTakeControl }: TerminalProps) {
         signal: controller.signal,
         onToken: (token) => {
           pending += token;
+          fullText += token;
           if (flushTimer === null) {
             flushTimer = window.setTimeout(flush, 45);
           }
@@ -734,8 +869,21 @@ export function Terminal({ onTakeControl }: TerminalProps) {
       }
       if (mounted.current) setStreaming(false);
       abortRef.current = null;
+      if (
+        voxRef.current &&
+        !failed &&
+        mounted.current &&
+        !controller.signal.aborted &&
+        fullText.trim()
+      ) {
+        speakRadio(fullText);
+      }
     }
   };
+
+  useEffect(() => {
+    sendRef.current = (value) => void send(value);
+  });
 
   const onSubmit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -844,6 +992,29 @@ export function Terminal({ onTakeControl }: TerminalProps) {
         >
           WEB {web ? "ON" : "OFF"}
         </button>
+        {pttSupported() && (
+          <button
+            type="button"
+            className={`term__radiobtn${listening ? " term__radiobtn--live" : ""}`}
+            onClick={togglePtt}
+            aria-pressed={listening}
+            title="Push to talk — speak a tuning request to the race engineer"
+          >
+            <i aria-hidden="true" />
+            {listening ? "ON AIR" : "RADIO"}
+          </button>
+        )}
+        {voxSupported() && (
+          <button
+            type="button"
+            className={`term__webbtn${vox ? " term__webbtn--on" : ""}`}
+            onClick={toggleVox}
+            aria-pressed={vox}
+            title="Speak replies over the racing radio"
+          >
+            VOX {vox ? "ON" : "OFF"}
+          </button>
+        )}
         <button
           type="button"
           className="term__textbtn"
@@ -884,7 +1055,10 @@ export function Terminal({ onTakeControl }: TerminalProps) {
             ? parsed.goal ?? entry.controlGoal ?? null
             : null;
           return (
-            <div key={entry.id} className={`term__entry term__entry--${entry.role}`}>
+            <div
+              key={entry.id}
+              className={`term__entry term__entry--${entry.role}${entry.engineer ? " term__entry--engineer" : ""}`}
+            >
               {entry.role === "user" ? (
                 <>
                   <span className="term__sigil">›</span>
@@ -892,7 +1066,11 @@ export function Terminal({ onTakeControl }: TerminalProps) {
                 </>
               ) : entry.role === "assistant" ? (
                 <>
-                  <span className="term__tag">APEX</span>
+                  <span
+                    className={`term__tag${entry.engineer ? " term__tag--engineer" : ""}`}
+                  >
+                    {entry.engineer ? "ENGINEER" : "APEX"}
+                  </span>
                   <p>
                     {parsed?.text ?? entry.content}
                     {isStreamingEntry && (

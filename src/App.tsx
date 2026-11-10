@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApexEngine } from "./three/Engine";
 import { Terminal } from "./components/Terminal";
 import type { CoreVariant } from "./components/CoreLab";
@@ -6,13 +6,17 @@ import { GridDeck } from "./components/GridDeck";
 import { Takeover } from "./components/Takeover";
 import { Preloader } from "./components/Preloader";
 import { Cursor } from "./components/Cursor";
-import { AeroDock, AeroLaunch } from "./components/AeroDock";
+import { AeroDock, AeroLaunch, type DockBridge, type DockStatus } from "./components/AeroDock";
 import { useControl } from "./hooks/useControl";
 import { sound } from "./lib/sound";
+import { downloadBlob } from "./lib/clip";
 import {
+  aeroTelemetry,
   CAMERA_PRESETS,
   DEFAULT_SCENE,
+  dynoPoint,
   LIVERIES,
+  readSetupFromUrl,
   type SceneConfig,
 } from "./lib/scene";
 
@@ -105,8 +109,20 @@ export default function App() {
   const [coreView, setCoreView] = useState<CoreVariant | null>(null);
   const [takeover, setTakeover] = useState(false);
   const [takeoverGoal, setTakeoverGoal] = useState<string | undefined>(undefined);
-  const [scene, setScene] = useState<SceneConfig>(DEFAULT_SCENE);
+  const [scene, setScene] = useState<SceneConfig>(() => {
+    const shared = readSetupFromUrl();
+    return shared ? { ...DEFAULT_SCENE, ...shared, aero: true } : DEFAULT_SCENE;
+  });
   const sceneRef = useRef(scene);
+  const [dockStatus, setDockStatus] = useState<DockStatus>({
+    isClipping: false,
+    isRecordingLap: false,
+    lapElapsed: 0,
+    isReplaying: false,
+    replayPaused: false,
+    replayTime: 0,
+    replayDuration: 0,
+  });
   const audioLockedRef = useRef(false);
   const control = useControl();
   const { copied, copy } = useCopy();
@@ -142,6 +158,14 @@ export default function App() {
     (patch: Partial<SceneConfig>) => {
       setScene((prev) => ({ ...prev, ...patch }));
       if (patch.camera || patch.focus) scrollToId("top");
+    },
+    [scrollToId],
+  );
+
+  const tuneScene = useCallback(
+    (patch: Partial<SceneConfig>) => {
+      setScene((prev) => ({ ...prev, ...patch, aero: true }));
+      scrollToId("top");
     },
     [scrollToId],
   );
@@ -188,6 +212,49 @@ export default function App() {
     setScene((prev) => ({ ...DEFAULT_SCENE, aero: prev.aero }));
   }, []);
 
+  const dockBridge = useMemo<DockBridge>(() => {
+    const telemetry = () => {
+      const cfg = sceneRef.current;
+      const flow = aeroTelemetry(cfg.windSpeed);
+      const power = dynoPoint(cfg.rpm);
+      return [
+        `SPD ${cfg.windSpeed} KM/H`,
+        `DF ${Math.round(flow.downforceKg)} KG`,
+        `DRAG ${Math.round(flow.dragN)} N`,
+        `PWR ${Math.round(power.powerHp)} HP`,
+      ];
+    };
+    return {
+      startClip: () => {
+        engineRef.current?.startClip(telemetry);
+      },
+      stopClip: () => {
+        void engineRef.current?.stopClip().then((blob) => {
+          if (blob) downloadBlob(blob, "apex-cinematic.webm");
+        });
+      },
+      startLap: () => {
+        engineRef.current?.startLap(sceneRef.current);
+      },
+      stopLap: () => engineRef.current?.stopLap() ?? null,
+      playLap: (lap) => {
+        engineRef.current?.playLap(lap);
+      },
+      pauseLap: () => {
+        engineRef.current?.pauseLap();
+      },
+      resumeLap: () => {
+        engineRef.current?.resumeLap();
+      },
+      seekLap: (time) => {
+        engineRef.current?.seekLap(time);
+      },
+      stopReplay: () => {
+        engineRef.current?.stopLapReplay();
+      },
+    };
+  }, []);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     const labels = labelsRef.current;
@@ -222,7 +289,29 @@ export default function App() {
     sceneRef.current = scene;
     engineRef.current?.configure(scene);
     sound.setWind(scene.aero ? scene.windSpeed / 400 : 0);
+    sound.setEngine(scene.aero && scene.dyno ? scene.rpm : 0);
+    sound.setRain(scene.aero && scene.weather === "rain" ? scene.rainAmount : 0);
   }, [scene]);
+
+  useEffect(() => {
+    if (!scene.aero) return;
+    const read = () => {
+      const engine = engineRef.current;
+      if (!engine) return;
+      setDockStatus({
+        isClipping: engine.isClipping,
+        isRecordingLap: engine.isRecordingLap,
+        lapElapsed: engine.lapElapsed,
+        isReplaying: engine.isReplaying,
+        replayPaused: engine.replayPaused,
+        replayTime: engine.currentReplayTime,
+        replayDuration: engine.replayDuration,
+      });
+    };
+    read();
+    const id = window.setInterval(read, 100);
+    return () => window.clearInterval(id);
+  }, [scene.aero]);
 
   useEffect(() => {
     document.body.classList.toggle("locked", booting);
@@ -738,7 +827,7 @@ export default function App() {
               </p>
             </div>
 
-            <Terminal onTakeControl={openTakeover} />
+            <Terminal onTakeControl={openTakeover} scene={scene} onTune={tuneScene} />
           </div>
         </section>
 
@@ -971,6 +1060,8 @@ export default function App() {
           onExport={exportScene}
           onRandomize={randomizeScene}
           onReset={resetScene}
+          bridge={dockBridge}
+          status={dockStatus}
         />
       )}
 

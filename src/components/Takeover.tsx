@@ -20,8 +20,15 @@ import {
   type Permissions,
   type PullState,
   type ScreenBounds,
+  type StartMissionInput,
 } from "../lib/control";
 import type { ControlApi } from "../hooks/useControl";
+import {
+  loadPlaybooks,
+  removePlaybook,
+  savePlaybook,
+  type Playbook,
+} from "../lib/playbooks";
 import { sound } from "../lib/sound";
 
 const GOAL_KEY = "apex.control.goal";
@@ -124,6 +131,8 @@ export function Takeover({ control, onRelease, initialGoal }: Props) {
   const [ocrResult, setOcrResult] = useState<OcrResult | null>(null);
   const [pulls, setPulls] = useState<Record<string, PullState>>({});
   const [feedFailed, setFeedFailed] = useState(false);
+  const [playbooks, setPlaybooks] = useState<Playbook[]>(() => loadPlaybooks());
+  const [playbookName, setPlaybookName] = useState("");
   const pullSnapshot = useRef<Record<string, boolean>>({});
 
   const permissionMap: Permissions =
@@ -277,18 +286,28 @@ export function Takeover({ control, onRelease, initialGoal }: Props) {
     window.setTimeout(() => setNotice((current) => (current === message ? "" : current)), 5000);
   }, []);
 
-  const engage = async () => {
+  const engage = async (override?: StartMissionInput) => {
     if (!online) {
       flash("The local control daemon is offline. Start it with: npm run apexd");
       return;
     }
-    const goal = draftGoal.trim();
+    const mission: StartMissionInput = override ?? {
+      goal: draftGoal,
+      permissions: armed,
+      autoApprove,
+      vision,
+      ocr,
+      plannerModel,
+      visionModel,
+      maxSteps,
+    };
+    const goal = mission.goal.trim();
     if (!goal) {
       flash("Describe the mission first.");
       goalRef.current?.focus();
       return;
     }
-    if (!CAPABILITIES.some((cap) => armed[cap.key])) {
+    if (!CAPABILITIES.some((cap) => mission.permissions[cap.key])) {
       flash("Arm at least one capability.");
       return;
     }
@@ -298,21 +317,63 @@ export function Takeover({ control, onRelease, initialGoal }: Props) {
     } catch {
       // Non-fatal.
     }
-    const next = await control.start({
-      goal,
-      permissions: armed,
-      autoApprove,
-      vision,
-      ocr,
-      plannerModel,
-      visionModel,
-      maxSteps,
-    });
+    const next = await control.start({ ...mission, goal });
     if (next) {
       flash("Control handed over. Every action is logged; STOP or ESC takes it back.");
       if (yieldTimer.current) window.clearTimeout(yieldTimer.current);
       yieldTimer.current = window.setTimeout(() => setMinimized(true), 1400);
     }
+  };
+
+  const currentMission = (): StartMissionInput => ({
+    goal: draftGoal.trim(),
+    permissions: { ...armed },
+    autoApprove,
+    vision,
+    ocr,
+    plannerModel,
+    visionModel,
+    maxSteps,
+  });
+
+  const saveCurrentPlaybook = () => {
+    const mission = currentMission();
+    if (!mission.goal) {
+      flash("Describe the mission before saving it as a playbook.");
+      goalRef.current?.focus();
+      return;
+    }
+    savePlaybook(playbookName, mission);
+    setPlaybooks(loadPlaybooks());
+    setPlaybookName("");
+    flash("PLAYBOOK SAVED — one click to load, ▶ to run.");
+    sound.tick("start");
+  };
+
+  const restorePlaybook = (playbook: Playbook) => {
+    setDraftGoal(playbook.mission.goal);
+    setArmed({ ...playbook.mission.permissions });
+    setVision(playbook.mission.vision);
+    setOcr(playbook.mission.ocr);
+    setPlannerModel(playbook.mission.plannerModel);
+    setVisionModel(playbook.mission.visionModel);
+    setMaxSteps(playbook.mission.maxSteps);
+    // Playbooks never inherit auto-approve; the operator re-arms it deliberately.
+    setAutoApprove(false);
+  };
+
+  const loadPlaybookIntoConsole = (playbook: Playbook) => {
+    if (active) return;
+    restorePlaybook(playbook);
+    flash(`PLAYBOOK "${playbook.name}" LOADED — review the loadout, then ENGAGE.`);
+    sound.tick("start");
+  };
+
+  const runPlaybook = (playbook: Playbook) => {
+    if (active) return;
+    restorePlaybook(playbook);
+    // One-click run still gates every risky action behind approval.
+    void engage({ ...playbook.mission, autoApprove: false });
   };
 
   const release = async () => {
@@ -779,6 +840,80 @@ export function Takeover({ control, onRelease, initialGoal }: Props) {
               <span>{active ? "LOCKED WHILE APEX DRIVES" : "NATURAL LANGUAGE · 4000 MAX"}</span>
               <span>{(active && state ? state.goal : draftGoal).length} / 4000</span>
             </div>
+          </div>
+
+          <div className="ctl-block">
+            <div className="ctl-block__head">
+              <span>PLAYBOOKS</span>
+              <span>{playbooks.length}/12</span>
+            </div>
+            <div className="ctl-playbook-save">
+              <input
+                className="ctl-playbook-name"
+                type="text"
+                value={playbookName}
+                maxLength={28}
+                placeholder="NAME THIS MISSION"
+                disabled={active}
+                onChange={(event) => setPlaybookName(event.target.value)}
+                aria-label="Playbook name"
+              />
+              <button
+                type="button"
+                className="ctl-link"
+                onClick={saveCurrentPlaybook}
+                disabled={active || !draftGoal.trim()}
+              >
+                SAVE
+              </button>
+            </div>
+            {playbooks.length === 0 ? (
+              <p className="ctl-fine">
+                Save the mission + loadout as a one-click macro. Runs always
+                keep per-action approval, undo and STOP.
+              </p>
+            ) : (
+              <ul className="ctl-playbooks">
+                {playbooks.map((playbook) => (
+                  <li key={playbook.id}>
+                    <button
+                      type="button"
+                      className="ctl-playbook"
+                      onClick={() => loadPlaybookIntoConsole(playbook)}
+                      disabled={active}
+                      title={playbook.mission.goal}
+                    >
+                      <b>{playbook.name}</b>
+                      <span>
+                        {playbook.mission.goal.slice(0, 64)}
+                        {playbook.mission.goal.length > 64 ? "…" : ""}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="ctl-playbook-run"
+                      onClick={() => runPlaybook(playbook)}
+                      disabled={active || !online}
+                      aria-label={`Run playbook ${playbook.name}`}
+                      title="Run now — approvals still required"
+                    >
+                      ▶
+                    </button>
+                    <button
+                      type="button"
+                      className="ctl-playbook-del"
+                      onClick={() => {
+                        setPlaybooks(removePlaybook(playbook.id));
+                        sound.tick("click");
+                      }}
+                      aria-label={`Delete playbook ${playbook.name}`}
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <div className="ctl-block">
