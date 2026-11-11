@@ -559,6 +559,9 @@ export class ApexEngine {
     this.onScroll();
     this.progress = this.targetProgress;
     this.lastCameraPos.copy(this.camera.position);
+    if (import.meta.env.DEV) {
+      (window as unknown as { __apexEngine?: ApexEngine }).__apexEngine = this;
+    }
     this.tick();
   }
 
