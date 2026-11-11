@@ -269,7 +269,7 @@ export class ApexEngine {
   private portalFlare: THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial>;
   private tunnelDive = -1;
   private tunnelDiveFrom = new THREE.Vector3();
-  private tunnelDiveTarget = new THREE.Vector3(0, 5, -118);
+  private tunnelDiveTarget = new THREE.Vector3(0, 5, -116.6);
   private progress = 0;
   private targetProgress = 0;
   private pointer = new THREE.Vector2();
