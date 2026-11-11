@@ -2,6 +2,27 @@ import { spawn } from "node:child_process";
 
 const active = new Set();
 
+function killTree(child) {
+  if (!child?.pid) return;
+  try {
+    if (process.platform === "win32") {
+      spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+        windowsHide: true,
+        stdio: "ignore",
+      });
+    } else {
+      child.kill("SIGKILL");
+    }
+  } catch {
+    // Fall through to the direct kill.
+  }
+  try {
+    child.kill();
+  } catch {
+    // Already gone.
+  }
+}
+
 export function psB64(value) {
   return Buffer.from(String(value), "utf8").toString("base64");
 }
@@ -43,11 +64,11 @@ export function runPowerShell(script, { timeoutMs = 30000, signal } = {}) {
       fn(value);
     };
     const onAbort = () => {
-      child.kill();
+      killTree(child);
       finish(reject, new DOMException("Control stopped", "AbortError"));
     };
     const timer = setTimeout(() => {
-      child.kill();
+      killTree(child);
       finish(reject, new Error(`PowerShell timed out after ${timeoutMs}ms`));
     }, timeoutMs);
 
@@ -58,8 +79,7 @@ export function runPowerShell(script, { timeoutMs = 30000, signal } = {}) {
       if (stderr.length < 64_000) stderr += chunk.toString("utf8");
     });
     child.on("error", (error) => finish(reject, error));
-    child.on("close", (code) => {
-      if (signal?.aborted) {
+    child.on("close", (code) => {      if (signal?.aborted) {
         finish(reject, new DOMException("Control stopped", "AbortError"));
         return;
       }

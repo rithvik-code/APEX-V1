@@ -60,11 +60,13 @@ export function runCommand(command, { cwd, timeoutMs = 120_000, signal } = {}) {
     let timedOut = false;
     let truncated = false;
     let settled = false;
+    let killTimer = null;
 
     const finish = (fn, value) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
       active.delete(child);
       signal?.removeEventListener("abort", onAbort);
       fn(value);
@@ -76,15 +78,34 @@ export function runCommand(command, { cwd, timeoutMs = 120_000, signal } = {}) {
     const timer = setTimeout(() => {
       timedOut = true;
       killTree(child.pid);
+      // If the shell refuses to die, settle anyway; a stalled agent loop is
+      // worse than a leaked process that the safety manager will reap.
+      killTimer = setTimeout(() => {
+        finish(resolve, {
+          command: clean,
+          code: -1,
+          stdout,
+          stderr,
+          ms: Date.now() - started,
+          timedOut: true,
+          truncated,
+        });
+      }, 2500);
     }, timeoutMs);
 
     child.stdout.on("data", (chunk) => {
-      if (stdout.length < 64_000) stdout += chunk.toString("utf8");
-      else truncated = true;
+      if (stdout.length >= 64_000) {
+        truncated = true;
+        return;
+      }
+      stdout += chunk.toString("utf8").slice(0, 64_000 - stdout.length);
     });
     child.stderr.on("data", (chunk) => {
-      if (stderr.length < 64_000) stderr += chunk.toString("utf8");
-      else truncated = true;
+      if (stderr.length >= 64_000) {
+        truncated = true;
+        return;
+      }
+      stderr += chunk.toString("utf8").slice(0, 64_000 - stderr.length);
     });
     child.on("error", (error) => finish(reject, error));
     child.on("close", (code) => {
@@ -99,6 +120,7 @@ export function runCommand(command, { cwd, timeoutMs = 120_000, signal } = {}) {
       });
     });
     signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
   });
 }
 
