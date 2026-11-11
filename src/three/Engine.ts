@@ -36,6 +36,7 @@ import {
 import { REV_SHIFTS } from "../lib/sound";
 
 const ACID = 0xc8ff16;
+const TUNNEL_DIVE_DURATION = 1.2;
 const UP_AXIS = new THREE.Vector3(0, 1, 0);
 const RIGHT_AXIS = new THREE.Vector3(1, 0, 0);
 
@@ -828,7 +829,11 @@ export class ApexEngine {
 
   private updateTunnelDive(dt: number): void {
     this.tunnelDive += dt;
-    const raw = THREE.MathUtils.clamp(this.tunnelDive / 1.5, 0, 1);
+    const raw = THREE.MathUtils.clamp(
+      this.tunnelDive / TUNNEL_DIVE_DURATION,
+      0,
+      1,
+    );
     const t = Math.pow(raw, 2.4);
     this.camera.position.lerpVectors(this.tunnelDiveFrom, this.tunnelDiveTarget, t);
     const shake = (1 - t) * 0.16;
@@ -2330,7 +2335,14 @@ export class ApexEngine {
     this.crt.uniforms.uTime.value = this.clockTime;
     const diveSurge =
       this.tunnelDive >= 0
-        ? Math.pow(THREE.MathUtils.clamp(this.tunnelDive / 1.5, 0, 1), 3) * 13
+        ? Math.pow(
+            THREE.MathUtils.clamp(
+              this.tunnelDive / TUNNEL_DIVE_DURATION,
+              0,
+              1,
+            ),
+            3,
+          ) * 13
         : 0;
     this.crt.uniforms.uAberration.value = THREE.MathUtils.lerp(
       this.crt.uniforms.uAberration.value,
