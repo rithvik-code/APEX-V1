@@ -749,7 +749,9 @@ export default function App() {
 
   const toggleAudio = () => {
     audioLockedRef.current = true;
-    setAudioOn(sound.toggle());
+    const on = sound.toggle();
+    setAudioOn(on);
+    if (!on) engineRef.current?.endRev();
   };
 
   const revHoldProps = (vehicle: "car" | "bike") => ({
