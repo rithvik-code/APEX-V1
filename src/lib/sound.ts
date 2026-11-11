@@ -1,3 +1,10 @@
+// Gear-change timetable in seconds from ignition. Engine.ts reads the same
+// table so the flame/glow pops land on the audible shift cracks.
+export const REV_SHIFTS: Record<"car" | "bike", number[]> = {
+  car: [0.46, 1.0, 1.56, 2.16, 2.8, 3.5, 4.24],
+  bike: [0.38, 0.88, 1.4, 1.96, 2.56, 3.2],
+};
+
 class SoundEngine {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -11,6 +18,12 @@ class SoundEngine {
   private engineFilter: BiquadFilterNode | null = null;
   private rainGain: GainNode | null = null;
   private rainFilter: BiquadFilterNode | null = null;
+  private rev: {
+    kind: "car" | "bike";
+    bus: GainNode;
+    oscs: OscillatorNode[];
+    pops: AudioScheduledSourceNode[];
+  } | null = null;
 
   private init(): AudioContext {
     if (this.ctx) return this.ctx;
@@ -133,6 +146,7 @@ class SoundEngine {
     const ctx = this.init();
     if (ctx.state === "suspended") void ctx.resume();
     this.enabled = !this.enabled;
+    if (!this.enabled) this.releaseRev(0.1);
     this.master?.gain.setTargetAtTime(
       this.enabled ? 0.5 : 0,
       ctx.currentTime,
@@ -194,6 +208,45 @@ class SoundEngine {
     src.stop(now + 0.22);
   }
 
+  // Crossing the tunnel ring: a long rising rush that bottoms out into a sub
+  // thump as the flash takes the screen.
+  warp(): void {
+    if (!this.enabled || !this.ctx || !this.master || !this.noiseBuffer) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    src.loop = true;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.Q.value = 1.1;
+    filter.frequency.setValueAtTime(260, now);
+    filter.frequency.exponentialRampToValueAtTime(5200, now + 1.15);
+    filter.frequency.exponentialRampToValueAtTime(220, now + 1.5);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.3, now + 0.9);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.55);
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.master);
+    src.start(now);
+    src.stop(now + 1.6);
+
+    const thump = ctx.createOscillator();
+    thump.type = "sine";
+    thump.frequency.setValueAtTime(120, now + 1.06);
+    thump.frequency.exponentialRampToValueAtTime(34, now + 1.42);
+    const thumpGain = ctx.createGain();
+    thumpGain.gain.setValueAtTime(0.0001, now + 1.06);
+    thumpGain.gain.exponentialRampToValueAtTime(0.34, now + 1.1);
+    thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 1.5);
+    thump.connect(thumpGain);
+    thumpGain.connect(this.master);
+    thump.start(now + 1.06);
+    thump.stop(now + 1.52);
+  }
+
   whoosh(): void {
     if (!this.enabled || !this.ctx || !this.master || !this.noiseBuffer) return;
     const ctx = this.ctx;
@@ -216,32 +269,38 @@ class SoundEngine {
     src.stop(now + 0.6);
   }
 
-  // A full throttle blip: layered oscillators swept from idle to redline and
-  // back, with exhaust overrun crackle on the way down. The V12 is low, wide
-  // and harmonic; the inline-four is tighter, brighter and more metallic.
-  revEngine(kind: "car" | "bike"): void {
-    if (!this.enabled || !this.ctx || !this.master || !this.noiseBuffer) return;
-    const ctx = this.ctx;
-    const now = ctx.currentTime;
+  // Hold-to-rev: a continuous engine note that climbs a gearbox instead of a
+  // one-shot blip. Each shift cuts ignition for ~10 ms, cracks the exhaust and
+  // snaps the pitch back down. Hold past the top gear and it bounces off the
+  // limiter; release and the overrun burbles out. The V12 is low, wide and
+  // harmonic; the inline-four is tighter, brighter and more metallic.
+  startRev(kind: "car" | "bike"): void {
+    if (!this.enabled) return;
+    const ctx = this.init();
+    if (ctx.state === "suspended") void ctx.resume();
+    if (!this.master || !this.noiseBuffer) return;
+    this.releaseRev(0.03);
+
+    const now = ctx.currentTime + 0.01;
     const car = kind === "car";
-    const duration = car ? 2.25 : 1.7;
     const base = car ? 42 : 66;
     const peak = car ? 5.4 : 6.1;
     const idle = 0.52;
+    const shifts = REV_SHIFTS[kind];
 
     const bus = ctx.createGain();
     bus.gain.setValueAtTime(0.0001, now);
-    bus.gain.exponentialRampToValueAtTime(car ? 0.34 : 0.24, now + 0.07);
-    bus.gain.setValueAtTime(car ? 0.3 : 0.21, now + duration * 0.52);
-    bus.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    bus.gain.exponentialRampToValueAtTime(car ? 0.32 : 0.23, now + 0.06);
     bus.connect(this.master);
 
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
     filter.Q.value = car ? 6.5 : 3.6;
     filter.frequency.setValueAtTime(car ? 300 : 420, now);
-    filter.frequency.exponentialRampToValueAtTime(car ? 2600 : 3400, now + duration * 0.36);
-    filter.frequency.exponentialRampToValueAtTime(car ? 520 : 760, now + duration * 0.96);
+    filter.frequency.exponentialRampToValueAtTime(
+      car ? 2300 : 3300,
+      now + shifts[Math.min(2, shifts.length - 1)],
+    );
 
     const drive = ctx.createWaveShaper();
     const curve = new Float32Array(1024);
@@ -250,8 +309,8 @@ class SoundEngine {
       curve[i] = Math.tanh(x * (car ? 2.6 : 3.4));
     }
     drive.curve = curve;
-    drive.connect(bus);
     filter.connect(drive);
+    drive.connect(bus);
 
     const voices = car
       ? [
@@ -271,49 +330,146 @@ class SoundEngine {
           { ratio: 4.04, type: "sawtooth" as OscillatorType, detune: -7, gain: 0.14 },
         ];
 
-    const upAt = now + duration * 0.34;
-    const holdAt = now + duration * 0.48;
-    const downAt = now + duration * 0.92;
-
+    const oscs: OscillatorNode[] = [];
+    const pops: AudioScheduledSourceNode[] = [];
     for (const voice of voices) {
       const osc = ctx.createOscillator();
       osc.type = voice.type;
       osc.detune.value = voice.detune;
       const voiceGain = ctx.createGain();
       voiceGain.gain.value = voice.gain;
-      const fIdle = base * voice.ratio * idle;
-      const fPeak = base * voice.ratio * peak;
-      osc.frequency.setValueAtTime(fIdle, now);
-      osc.frequency.exponentialRampToValueAtTime(fPeak, upAt);
-      osc.frequency.setValueAtTime(fPeak, holdAt);
-      osc.frequency.exponentialRampToValueAtTime(fIdle * 0.88, downAt);
+      const ratio = base * voice.ratio;
+      let segStart = now;
+      osc.frequency.setValueAtTime(ratio * idle, segStart);
+      for (let gear = 0; gear < shifts.length; gear++) {
+        const segEnd = now + shifts[gear];
+        // The drop to a lower ratio at each boundary is the gear change.
+        if (gear > 0) osc.frequency.setValueAtTime(ratio * 0.42, segStart);
+        osc.frequency.exponentialRampToValueAtTime(ratio * peak, segEnd - 0.012);
+        segStart = segEnd;
+      }
+      // Limiter: chop the last 6% of the redline every few tenths.
+      const limiterAt = now + shifts[shifts.length - 1];
+      for (let i = 0; i < 20; i++) {
+        const at = limiterAt + i * 0.34;
+        osc.frequency.setValueAtTime(ratio * peak, at);
+        osc.frequency.setValueAtTime(ratio * peak * 0.93, at + 0.05);
+        osc.frequency.setValueAtTime(ratio * peak, at + 0.12);
+      }
       osc.connect(voiceGain);
       voiceGain.connect(filter);
       osc.start(now);
-      osc.stop(now + duration + 0.05);
+      oscs.push(osc);
     }
 
-    // Ignition thump plus exhaust pops on the overrun.
-    const pop = (at: number, loudness: number) => {
+    // Mechanical shift: noise crack + selector clack + ignition-cut duck.
+    const shiftCrack = (at: number, loudness: number) => {
       const src = ctx.createBufferSource();
-      src.buffer = this.noiseBuffer;
+      src.buffer = this.noiseBuffer!;
       const band = ctx.createBiquadFilter();
       band.type = "bandpass";
-      band.frequency.value = car ? 900 : 1400;
-      band.Q.value = 0.8;
+      band.frequency.value = car ? 860 : 1500;
+      band.Q.value = 1.2;
       const gain = ctx.createGain();
       gain.gain.setValueAtTime(0.0001, at);
-      gain.gain.exponentialRampToValueAtTime(loudness, at + 0.012);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.07);
+      gain.gain.exponentialRampToValueAtTime(loudness, at + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.055);
       src.connect(band);
       band.connect(gain);
       gain.connect(this.master!);
       src.start(at);
-      src.stop(at + 0.09);
+      src.stop(at + 0.07);
+      pops.push(src);
+
+      const clack = ctx.createOscillator();
+      clack.type = "square";
+      clack.frequency.setValueAtTime(car ? 118 : 158, at);
+      const clackGain = ctx.createGain();
+      clackGain.gain.setValueAtTime(loudness * 0.55, at);
+      clackGain.gain.exponentialRampToValueAtTime(0.0001, at + 0.045);
+      clack.connect(clackGain);
+      clackGain.connect(this.master!);
+      clack.start(at);
+      clack.stop(at + 0.06);
+      pops.push(clack);
+
+      const level = car ? 0.32 : 0.23;
+      bus.gain.setValueAtTime(level, at - 0.012);
+      bus.gain.linearRampToValueAtTime(level * 0.42, at + 0.012);
+      bus.gain.linearRampToValueAtTime(level * 0.94, at + 0.13);
     };
-    pop(now + 0.01, car ? 0.22 : 0.14);
+
+    for (let i = 0; i < shifts.length; i++) {
+      shiftCrack(now + shifts[i] - 0.015, (car ? 0.26 : 0.2) * (1 - i * 0.05));
+    }
+    // Limiter crackle keeps the held rev alive once the gearbox runs out.
+    const limiterAt = shifts[shifts.length - 1];
+    for (let i = 0; i < 24; i++) {
+      shiftCrack(now + limiterAt + 0.12 + i * 0.34, i % 2 === 0 ? 0.14 : 0.08);
+    }
+
+    this.rev = { kind, bus, oscs, pops };
+  }
+
+  endRev(): void {
+    const rev = this.rev;
+    if (!rev || !this.ctx || !this.master || !this.noiseBuffer) {
+      this.rev = null;
+      return;
+    }
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const car = rev.kind === "car";
+    // Overrun burble as the throttle snaps shut.
     for (let i = 0; i < 5; i++) {
-      pop(now + duration * (0.52 + i * 0.075), (car ? 0.16 : 0.11) * (1 - i * 0.12));
+      const at = now + 0.03 + i * 0.075 + Math.random() * 0.02;
+      this.revPop(car, at, (car ? 0.15 : 0.1) * (1 - i * 0.16));
+    }
+    this.releaseRev(0.16);
+  }
+
+  private revPop(car: boolean, at: number, loudness: number): void {
+    if (!this.ctx || !this.master || !this.noiseBuffer) return;
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    const band = ctx.createBiquadFilter();
+    band.type = "bandpass";
+    band.frequency.value = car ? 900 : 1400;
+    band.Q.value = 0.8;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.exponentialRampToValueAtTime(loudness, at + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.07);
+    src.connect(band);
+    band.connect(gain);
+    gain.connect(this.master);
+    src.start(at);
+    src.stop(at + 0.09);
+  }
+
+  private releaseRev(fade: number): void {
+    const rev = this.rev;
+    if (!rev || !this.ctx) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    this.rev = null;
+    rev.bus.gain.cancelScheduledValues(now);
+    rev.bus.gain.setValueAtTime(Math.max(0.0001, rev.bus.gain.value), now);
+    rev.bus.gain.exponentialRampToValueAtTime(0.0001, now + Math.max(0.02, fade));
+    for (const osc of rev.oscs) {
+      try {
+        osc.stop(now + fade + 0.03);
+      } catch {
+        // Already stopped.
+      }
+    }
+    for (const pop of rev.pops) {
+      try {
+        pop.stop(now + 0.02);
+      } catch {
+        // Already stopped.
+      }
     }
   }
 
