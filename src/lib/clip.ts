@@ -1,4 +1,4 @@
-import type { SceneConfig } from "./scene";
+import { sanitizeSceneConfig, type SceneConfig } from "./scene";
 
 /* -------------------------------------------------------------------------- */
 /* Ghost laps — a recorded camera flight plus the setup it was captured with.  */
@@ -27,14 +27,69 @@ export function loadLaps(): LapRecording[] {
   try {
     const raw = localStorage.getItem(LAP_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw) as LapRecording[];
+    const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (lap) => lap && typeof lap.id === "string" && Array.isArray(lap.samples),
-    );
+    const laps: LapRecording[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const value = item as Record<string, unknown>;
+      if (typeof value.id !== "string" || !value.id) continue;
+      // sampleLap indexes pos/tgt every frame, so one bad sample would throw
+      // inside the render loop and freeze the showroom.
+      const samples = (Array.isArray(value.samples) ? value.samples : [])
+        .map(sanitizeSample)
+        .filter((sample): sample is CameraSample => sample !== null)
+        .sort((a, b) => a.t - b.t);
+      if (samples.length < 2) continue;
+      const config = sanitizeSceneConfig(value.config);
+      if (!config) continue;
+      const duration = finite(value.duration);
+      laps.push({
+        id: value.id,
+        name:
+          typeof value.name === "string" && value.name.trim()
+            ? value.name.trim().slice(0, 40)
+            : "SAVED LAP",
+        createdAt: finite(value.createdAt) ?? Date.now(),
+        duration:
+          duration !== null && duration > 0
+            ? duration
+            : samples[samples.length - 1].t,
+        samples,
+        config,
+      });
+    }
+    return laps.slice(0, LAP_LIMIT);
   } catch {
     return [];
   }
+}
+
+function finite(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function sanitizeSample(raw: unknown): CameraSample | null {
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as Record<string, unknown>;
+  const t = finite(value.t);
+  if (t === null || t < 0) return null;
+  const triple = (input: unknown): [number, number, number] | null => {
+    if (!Array.isArray(input) || input.length !== 3) return null;
+    const nums = input.map(finite);
+    if (nums.some((n) => n === null)) return null;
+    return nums as [number, number, number];
+  };
+  const pos = triple(value.pos);
+  const tgt = triple(value.tgt);
+  if (!pos || !tgt) return null;
+  const fov = finite(value.fov);
+  return {
+    t,
+    pos,
+    tgt,
+    fov: fov !== null && fov > 1 && fov < 170 ? fov : 40,
+  };
 }
 
 function persistLaps(laps: LapRecording[]): void {

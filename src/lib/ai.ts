@@ -47,12 +47,32 @@ export const DEFAULT_SETTINGS: AiSettings = {
 
 const STORAGE_KEY = "apex.settings.v1";
 
+const PROVIDERS: ReadonlySet<Provider> = new Set<Provider>(["demo", "ollama", "openai"]);
+
 export function loadSettings(): AiSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
-    const parsed = JSON.parse(raw) as Partial<AiSettings>;
-    return { ...DEFAULT_SETTINGS, ...parsed };
+    const parsed = JSON.parse(raw) as unknown;
+    const value =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    // Settings are rendered straight into inputs; an object where a string is
+    // expected would break the form before the user can fix it.
+    return {
+      provider: PROVIDERS.has(value.provider as Provider)
+        ? (value.provider as Provider)
+        : DEFAULT_SETTINGS.provider,
+      endpoint:
+        typeof value.endpoint === "string" ? value.endpoint : DEFAULT_SETTINGS.endpoint,
+      model: typeof value.model === "string" ? value.model : DEFAULT_SETTINGS.model,
+      systemPrompt:
+        typeof value.systemPrompt === "string"
+          ? value.systemPrompt
+          : DEFAULT_SETTINGS.systemPrompt,
+      apiKey: typeof value.apiKey === "string" ? value.apiKey : DEFAULT_SETTINGS.apiKey,
+    };
   } catch {
     return { ...DEFAULT_SETTINGS };
   }

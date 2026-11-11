@@ -97,7 +97,7 @@ async function applyHarnessEnv(page) {
     if (msg.type() === "error") errors.push(msg.text());
   });
 
-  await page.goto("http://127.0.0.1:5173/", { waitUntil: "networkidle2" });
+  await page.goto("http://127.0.0.1:5173/", { waitUntil: "load" });
   await page.waitForSelector("#terminal-widget .term__input input", {
     timeout: 60000,
   });
@@ -259,7 +259,7 @@ async function applyHarnessEnv(page) {
   const mobErrors = [];
   mob.on("pageerror", (e) => mobErrors.push(e.message));
   await applyHarnessEnv(mob);
-  await mob.goto("http://127.0.0.1:5173/", { waitUntil: "networkidle2" });
+  await mob.goto("http://127.0.0.1:5173/", { waitUntil: "load" });
   await mob.waitForSelector("#terminal-widget .term__input input", {
     timeout: 60000,
   });

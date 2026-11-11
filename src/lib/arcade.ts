@@ -74,13 +74,17 @@ export function loadArcadeStats(): ArcadeStats {
   try {
     const raw = localStorage.getItem(STATS_KEY);
     if (!raw) return { ...EMPTY_STATS };
-    const parsed = JSON.parse(raw) as Partial<ArcadeStats>;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const count = (value: unknown): number => {
+      const n = Number(value);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+    };
     return {
-      xp: Number(parsed.xp) || 0,
-      streak: Number(parsed.streak) || 0,
-      bestStreak: Number(parsed.bestStreak) || 0,
-      quizzes: Number(parsed.quizzes) || 0,
-      correct: Number(parsed.correct) || 0,
+      xp: count(parsed?.xp),
+      streak: count(parsed?.streak),
+      bestStreak: count(parsed?.bestStreak),
+      quizzes: count(parsed?.quizzes),
+      correct: count(parsed?.correct),
     };
   } catch {
     return { ...EMPTY_STATS };
