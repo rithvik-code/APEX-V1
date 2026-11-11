@@ -33,8 +33,26 @@ const candidates = {
     [-8, -172], [-32, -176],
     [-56, -166], [-70, -148], [-82, -142], [-94, -150], [-104, -164], [-120, -172],
     [-142, -176], [-160, -168], [-176, -152], [-188, -132],
-    [-198, -110], [-206, -86], [-210, -62], [-206, -40], [-196, -22], [-184, -10],
-    [-170, 0], [-148, 0],
+    [-198, -110], [-206, -86], [-212, -62], [-214, -40], [-210, -22], [-202, -8], [-194, 0], [-180, 0],
+  ],
+  longH: [
+    [-160, 0], [-120, 0], [-80, 0], [-40, 0], [0, 0], [40, 0], [80, 0], [115, 0],
+    [140, -6], [158, -20], [166, -42],
+    [170, -70], [172, -98], [166, -126], [152, -148],
+    [130, -166], [142, -186],
+    [150, -210], [152, -240], [150, -270], [144, -298],
+    [132, -314], [114, -320], [100, -308],
+    [104, -280], [108, -252], [110, -226], [112, -206], [114, -192],
+    [96, -186], [84, -190], [62, -176],
+    [50, -160], [46, -140], [50, -120], [52, -100], [48, -80], [40, -66],
+    [28, -56], [18, -60], [14, -74], [16, -92],
+    [18, -110], [22, -128], [18, -146], [12, -160],
+    [-8, -172], [-32, -176],
+    [-52, -192], [-62, -216], [-68, -244], [-70, -272], [-72, -300],
+    [-84, -320], [-104, -326], [-124, -318],
+    [-138, -298], [-146, -274], [-148, -248], [-152, -222], [-158, -200], [-164, -184],
+    [-180, -176], [-192, -160], [-202, -140],
+    [-212, -118], [-220, -92], [-222, -64], [-218, -40], [-210, -22], [-202, -8], [-194, 0], [-180, 0],
   ],
 };
 function chaikin(points, passes) {
@@ -107,16 +125,17 @@ function measure(pts2, label) {
     return t > 0.001 && t < 0.999 && u > 0.001 && u < 0.999;
   }
   let hits = 0;
+  const hitAt = [];
   for (let i = 0; i < N; i++) for (let j = i + 2; j < N; j++) {
     if (i === 0 && j === N - 1) continue;
-    if (si(s[i], s[(i + 1) % N], s[j], s[(j + 1) % N])) hits++;
+    if (si(s[i], s[(i + 1) % N], s[j], s[(j + 1) % N])) { hits++; if (hitAt.length < 8) hitAt.push(`${(i / N).toFixed(2)}x${(j / N).toFixed(2)}@(${s[i].x.toFixed(0)},${s[i].z.toFixed(0)})-(${s[j].x.toFixed(0)},${s[j].z.toFixed(0)})`); }
   }
   let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
   for (const p of s) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); }
   const len = curve.getLength();
   const car = lapEstimate(s.map((p) => p.clone()), N, 69, 20, 46, 2.2);
   const bike = lapEstimate(s.map((p) => p.clone()), N, 78, 26, 58, 2.7);
-  console.log(label, "len", len.toFixed(1), "minR", minR.toFixed(2), "@", minAt.toFixed(3), "xings", hits, "bounds", minX.toFixed(0), maxX.toFixed(0), minZ.toFixed(0), maxZ.toFixed(0));
+  console.log(label, "len", len.toFixed(1), "minR", minR.toFixed(2), "@", minAt.toFixed(3), "xings", hits, hitAt.join(","), "bounds", minX.toFixed(0), maxX.toFixed(0), minZ.toFixed(0), maxZ.toFixed(0));
   console.log("  est car", car.toFixed(1) + "s", "bike", bike.toFixed(1) + "s");
 }
 for (const [name, base] of Object.entries(candidates)) measure(chaikin(base, 3), name);

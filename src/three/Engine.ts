@@ -352,7 +352,7 @@ export class ApexEngine {
       40,
       window.innerWidth / window.innerHeight,
       0.1,
-      300,
+      900,
     );
     this.camera.position.set(7.4, 2, 9.2);
 
@@ -1169,7 +1169,7 @@ export class ApexEngine {
     this.drive = new DriveSession(this.track, this.scene, vehicle, setup, options);
     this.driveWheelSpin = 0;
     this.applyDriveVisibility();
-    (this.scene.fog as THREE.FogExp2).density = 0.006;
+    (this.scene.fog as THREE.FogExp2).density = 0.0042;
     // The showroom environment is a bright studio; the circuit needs a night
     // mood so the tarmac reads against the run-off.
     this.scene.environmentIntensity = 0.32;

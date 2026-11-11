@@ -3,19 +3,31 @@ import * as THREE from "three";
 const ACID = 0xc8ff16;
 const HALF_WIDTH = 3;
 const RUNOFF = 2.4;
-const RIBBON = 720;
+const RIBBON = 3600;
 
-// A technical circuit: long main straight, a fast opening right, a tight
-// hairpin peninsula, a flowing esses section and a high-speed left sweeper
-// back onto the straight. The control polygon is rounded with three Chaikin
-// passes so the hairpin stays a hard-but-drivable ~6 unit radius and the
-// ribbon never folds back on itself.
+// A 1.7 km technical circuit: a long main straight, a fast right-hand
+// descent, a deep southern spur, an infield hairpin, a second spur and a
+// sweeping return. The control polygon is rounded with three Chaikin passes
+// so every corner stays drivable (~6.4 unit minimum radius) and the ribbon
+// never folds back on itself.
 const BASE: Array<[number, number]> = [
-  [-30, 0], [-6, 0], [18, 0], [32, -2],
-  [41, -9], [43, -20],
-  [44, -32], [40, -44], [30, -48], [22, -42],
-  [12, -37], [2, -40], [-8, -37], [-18, -41],
-  [-28, -38], [-36, -30], [-42, -20], [-43, -9], [-38, -2],
+  [-160, 0], [-120, 0], [-80, 0], [-40, 0], [0, 0], [40, 0], [80, 0], [115, 0],
+  [140, -6], [158, -20], [166, -42],
+  [170, -70], [172, -98], [166, -126], [152, -148],
+  [130, -166], [142, -186],
+  [150, -210], [152, -240], [150, -270], [144, -298],
+  [132, -314], [114, -320], [100, -308],
+  [104, -280], [108, -252], [110, -226], [112, -206], [114, -192],
+  [96, -186], [84, -190], [62, -176],
+  [50, -160], [46, -140], [50, -120], [52, -100], [48, -80], [40, -66],
+  [28, -56], [18, -60], [14, -74], [16, -92],
+  [18, -110], [22, -128], [18, -146], [12, -160],
+  [-8, -172], [-32, -176],
+  [-52, -192], [-62, -216], [-68, -244], [-70, -272], [-72, -300],
+  [-84, -320], [-104, -326], [-124, -318],
+  [-138, -298], [-146, -274], [-148, -248], [-152, -222], [-158, -200], [-164, -184],
+  [-180, -176], [-192, -160], [-202, -140],
+  [-212, -118], [-220, -92], [-222, -64], [-218, -40], [-210, -22], [-202, -8], [-194, 0], [-180, 0],
 ];
 
 function chaikin(points: Array<[number, number]>, passes: number): Array<[number, number]> {
@@ -269,13 +281,13 @@ export function buildTrack(): Track {
     metalness: 0,
     envMapIntensity: 0.1,
   }));
-  const ground = new THREE.Mesh(track(new THREE.CircleGeometry(150, 72)), groundMat);
+  const ground = new THREE.Mesh(track(new THREE.CircleGeometry(330, 96)), groundMat);
   ground.rotation.x = -Math.PI / 2;
-  ground.position.set(0, -0.03, -22);
+  ground.position.set(-25, -0.03, -162);
   group.add(ground);
 
-  const grid = new THREE.GridHelper(300, 150, 0x16201a, 0x0e1410);
-  grid.position.set(0, -0.02, -22);
+  const grid = new THREE.GridHelper(720, 240, 0x16201a, 0x0e1410);
+  grid.position.set(-25, -0.02, -162);
   const gridMat = grid.material as THREE.LineBasicMaterial;
   gridMat.transparent = true;
   gridMat.opacity = 0.35;

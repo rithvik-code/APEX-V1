@@ -45,6 +45,22 @@ export function numberTexture(number: string, accent: string): THREE.CanvasTextu
   return texture;
 }
 
+function glowTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d")!;
+  const gradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gradient.addColorStop(0, "rgba(200,255,22,0.7)");
+  gradient.addColorStop(0.5, "rgba(200,255,22,0.16)");
+  gradient.addColorStop(1, "rgba(200,255,22,0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 128, 128);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
 export function createSupercar(): {
   group: THREE.Group;
   wheels: THREE.Group[];
@@ -441,13 +457,15 @@ export function createSupercar(): {
     shell.add(mirror);
   }
 
-  // Underbody glow
+  // Underbody glow — a soft radial falloff so it never reads as a hard
+  // rectangle of light on the tarmac.
   const glowPlane = new THREE.Mesh(
-    new THREE.PlaneGeometry(3.6, 5.6),
+    new THREE.PlaneGeometry(4.6, 7.2),
     new THREE.MeshBasicMaterial({
+      map: glowTexture(),
       color: ACID,
       transparent: true,
-      opacity: 0.05,
+      opacity: 0.5,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     }),
