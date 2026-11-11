@@ -95,6 +95,7 @@ export class DriveSession {
   slip = 0;
   offTrack = false;
   accelPitch = 0;
+  throttleLevel = 0;
 
   private scene: THREE.Scene;
   private velDir = 0;
@@ -276,6 +277,10 @@ export class DriveSession {
     this.ghostEnabled = enabled;
   }
 
+  get countingDown(): boolean {
+    return this.phase === "countdown";
+  }
+
   reset(): void {
     this.pos.copy(this.track.start.pos);
     this.heading = this.track.start.heading;
@@ -352,6 +357,7 @@ export class DriveSession {
 
     const throttle = this.keys.throttle || this.touch.throttle ? 1 : 0;
     const brake = this.keys.brake || this.touch.brake ? 1 : 0;
+    this.throttleLevel = throttle;
     const handbrake = this.keys.handbrake || this.touch.handbrake;
     const steerInput = clamp(
       this.touch.steer + (this.keys.right ? 1 : 0) - (this.keys.left ? 1 : 0),

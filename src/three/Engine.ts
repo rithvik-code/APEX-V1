@@ -1137,6 +1137,210 @@ export class ApexEngine {
     this.ghostLine = null;
   }
 
+  /* ---- Time attack ------------------------------------------------------ */
+
+  get driveActive(): boolean {
+    return this.drive !== null;
+  }
+
+  enterDrive(vehicle: DriveVehicle, setup: DriveSetup, options: DriveOptions): void {
+    const wasDriving = this.drive !== null;
+    if (!wasDriving) {
+      this.savedCarPos.copy(this.carGroup.position);
+      this.savedCarRot.copy(this.carGroup.rotation);
+      this.savedBikePos.copy(this.bikeGroup.position);
+      this.savedBikeRot.copy(this.bikeGroup.rotation);
+    }
+    this.drive?.dispose();
+    if (!this.track) {
+      this.track = buildTrack();
+      this.scene.add(this.track.group);
+    }
+    this.track.group.visible = true;
+    this.driveVehicle = vehicle;
+
+    this.explodeTarget = 0;
+    this.explodeCurrent = 0;
+    for (const assembly of this.car.assemblies) assembly.group.position.set(0, 0, 0);
+    this.stopLapReplay();
+
+    this.drive = new DriveSession(this.track, this.scene, vehicle, setup, options);
+    this.driveWheelSpin = 0;
+    this.applyDriveVisibility();
+    (this.scene.fog as THREE.FogExp2).density = 0.006;
+
+    const start = this.track.start;
+    this.driveForward.set(Math.sin(start.heading), 0, Math.cos(start.heading));
+    this.driveCamPos.copy(start.pos).addScaledVector(this.driveForward, -8);
+    this.driveCamPos.y += 3.2;
+    this.driveCamTgt.copy(start.pos);
+    this.driveCamTgt.y += 1;
+    this.camera.position.copy(this.driveCamPos);
+    this.camera.lookAt(this.driveCamTgt);
+  }
+
+  exitDrive(): void {
+    if (!this.drive) return;
+    this.drive.dispose();
+    this.drive = null;
+    if (this.track) this.track.group.visible = false;
+
+    this.carGroup.position.copy(this.savedCarPos);
+    this.carGroup.rotation.copy(this.savedCarRot);
+    this.bikeGroup.position.copy(this.savedBikePos);
+    this.bikeGroup.rotation.copy(this.savedBikeRot);
+    for (const wheel of this.car.wheels) {
+      wheel.rotation.y = 0;
+      wheel.position.x = wheel.userData.baseX as number;
+    }
+    this.applyShowroomVisibility();
+    (this.scene.fog as THREE.FogExp2).density = 0.017;
+    if (this.lastConfig) this.configure(this.lastConfig);
+  }
+
+  private applyDriveVisibility(): void {
+    this.aeroCar.setEnabled(false);
+    this.aeroBike.setEnabled(false);
+    this.tunnel.visible = false;
+    this.shafts.visible = false;
+    this.streaks.visible = false;
+    this.dust.visible = false;
+    this.gridHelper.visible = false;
+    this.groundDecor.visible = false;
+    this.bike.scan.visible = false;
+    this.labelsEl.style.opacity = "0";
+    this.carGroup.visible = this.driveVehicle === "car";
+    this.bikeGroup.visible = this.driveVehicle === "bike";
+  }
+
+  private applyShowroomVisibility(): void {
+    this.shafts.visible = true;
+    this.streaks.visible = true;
+    this.dust.visible = true;
+    this.groundDecor.visible = true;
+    this.labelsEl.style.opacity = "";
+    this.carGroup.visible = true;
+    this.bikeGroup.visible = true;
+  }
+
+  private updateLighting(dt: number): void {
+    const lightEase = Math.min(1, dt * 3.4);
+    const targets = this.lightTargets;
+    const nightDim = 1 - this.weather.night * 0.66;
+    (Object.keys(this.lights) as Array<keyof LightRig>).forEach((name) => {
+      const light = this.lights[name];
+      const target = targets.lights[name];
+      const dim = name === "hemi" || name === "key" || name === "cool" ? nightDim : 1;
+      light.intensity += (target.intensity * dim - light.intensity) * lightEase;
+      if (target.color) light.color.lerp(target.color, lightEase);
+    });
+    const exposureTarget = targets.exposure * (1 - this.weather.night * 0.16);
+    this.renderer.toneMappingExposure +=
+      (exposureTarget - this.renderer.toneMappingExposure) * lightEase;
+  }
+
+  private updateDrive(dt: number, adt: number): void {
+    const drive = this.drive!;
+    drive.update(dt);
+    const bike = this.driveVehicle === "bike";
+    const group = bike ? this.bikeGroup : this.carGroup;
+
+    group.position.set(drive.pos.x, 0, drive.pos.z);
+    group.rotation.y = drive.heading;
+    group.rotation.z = drive.lean;
+    group.rotation.x = drive.accelPitch;
+
+    if (bike) {
+      this.bike.engine.update(this.clockTime * 2 + Math.abs(drive.speed) * 0.04);
+    } else {
+      this.driveWheelSpin += (adt * drive.speed) / 0.47;
+      for (let i = 0; i < this.car.wheels.length; i++) {
+        const wheel = this.car.wheels[i];
+        wheel.rotation.x = this.driveWheelSpin;
+        wheel.rotation.y = i < 2 ? drive.steer * 0.42 : 0;
+        wheel.position.x = wheel.userData.baseX as number;
+      }
+      this.car.engine.update(this.clockTime * 2 + Math.abs(drive.speed) * 0.04);
+      const glow = drive.throttleLevel * (0.2 + Math.min(0.4, Math.abs(drive.speed) / 160));
+      this.car.exhaustGlow.opacity += (glow - this.car.exhaustGlow.opacity) * (1 - Math.exp(-dt * 8));
+    }
+
+    const sn = Math.min(1, Math.abs(drive.speed) / 72);
+    this.driveForward.set(Math.sin(drive.heading), 0, Math.cos(drive.heading));
+    const mobile = this.camera.aspect < 0.9;
+
+    if (drive.countingDown) {
+      const angle = this.clockTime * 0.6;
+      this.driveCamPos.lerp(
+        new THREE.Vector3(
+          drive.pos.x + Math.sin(angle) * 8,
+          3.2,
+          drive.pos.z + Math.cos(angle) * 8,
+        ),
+        1 - Math.exp(-dt * 3),
+      );
+      this.driveCamTgt.lerp(
+        new THREE.Vector3(drive.pos.x, 1.1, drive.pos.z),
+        1 - Math.exp(-dt * 3),
+      );
+    } else {
+      const dist = bike ? 5.8 : 7;
+      const height = bike ? 2.5 : 3;
+      const desired = new THREE.Vector3(
+        drive.pos.x - this.driveForward.x * dist,
+        height,
+        drive.pos.z - this.driveForward.z * dist,
+      );
+      this.driveCamPos.lerp(desired, 1 - Math.exp(-dt * 6));
+      this.driveCamTgt.lerp(
+        new THREE.Vector3(
+          drive.pos.x + this.driveForward.x * 5,
+          1.15,
+          drive.pos.z + this.driveForward.z * 5,
+        ),
+        1 - Math.exp(-dt * 7),
+      );
+    }
+
+    this.camera.position.copy(this.driveCamPos);
+    this.camera.lookAt(this.driveCamTgt);
+    const targetFov = (drive.countingDown ? 50 : 55 + sn * 17) + (mobile ? 9 : 0);
+    this.camera.fov += (targetFov - this.camera.fov) * (1 - Math.exp(-dt * 4));
+    this.camera.updateProjectionMatrix();
+    if (!this.reducedMotion) this.camera.rotateZ(-drive.lean * 0.12);
+
+    this.crt.uniforms.uTime.value = this.clockTime;
+    this.crt.uniforms.uAberration.value = THREE.MathUtils.lerp(
+      this.crt.uniforms.uAberration.value,
+      1 + sn * 4,
+      0.1,
+    );
+  }
+
+  getDriveState(): DriveHudState | null {
+    return this.drive ? this.drive.getState() : null;
+  }
+
+  setDriveTouch(touch: DriveTouch): void {
+    this.drive?.setTouch(touch);
+  }
+
+  setDriveSetup(setup: DriveSetup): void {
+    this.drive?.setSetup(setup);
+  }
+
+  setDriveGhost(enabled: boolean): void {
+    this.drive?.setGhostEnabled(enabled);
+  }
+
+  restartDrive(): void {
+    this.drive?.reset();
+  }
+
+  recoverDrive(): void {
+    this.drive?.recover();
+  }
+
   private tick = (): void => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.tick);
@@ -1144,6 +1348,20 @@ export class ApexEngine {
     const dt = Math.min(0.05, this.clock.getDelta());
     const adt = dt * this.timeScale;
     this.clockTime += adt;
+
+    if (this.drive) {
+      this.updateDrive(dt, adt);
+      this.updateLighting(dt);
+      this.weather.update(dt);
+      this.composer.render();
+      this.clip?.frame(this.renderer.domElement);
+      if (!this.readySent) {
+        this.readySent = true;
+        this.onReady?.();
+      }
+      return;
+    }
+
     this.pointer.lerp(this.pointerTarget, 0.05);
     this.progress += (this.targetProgress - this.progress) * Math.min(1, dt * 6);
     const p = this.progress;
@@ -1306,19 +1524,7 @@ export class ApexEngine {
 
     // Lighting presets cross-fade instead of cutting. Night race dims the
     // ambient rig so the headlights and neon carry the scene.
-    const lightEase = Math.min(1, dt * 3.4);
-    const targets = this.lightTargets;
-    const nightDim = 1 - this.weather.night * 0.66;
-    (Object.keys(this.lights) as Array<keyof LightRig>).forEach((name) => {
-      const light = this.lights[name];
-      const target = targets.lights[name];
-      const dim = name === "hemi" || name === "key" || name === "cool" ? nightDim : 1;
-      light.intensity += (target.intensity * dim - light.intensity) * lightEase;
-      if (target.color) light.color.lerp(target.color, lightEase);
-    });
-    const exposureTarget = targets.exposure * (1 - this.weather.night * 0.16);
-    this.renderer.toneMappingExposure +=
-      (exposureTarget - this.renderer.toneMappingExposure) * lightEase;
+    this.updateLighting(dt);
 
     this.shafts.children.forEach((child, index) => {
       const mesh = child as THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
