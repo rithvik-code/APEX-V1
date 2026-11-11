@@ -329,15 +329,15 @@ export class DriveSession {
     const bike = this.vehicle === "bike";
     const baseTop = bike ? 82 : 72;
     const baseAccel = bike ? 30 : 23;
-    const baseGrip = bike ? 5 : 6.6;
-    const baseSteer = bike ? 2.7 : 2.2;
+    const baseGrip = bike ? 6.1 : 7.7;
+    const baseSteer = bike ? 3.0 : 2.6;
     const power = this.setup.power;
     const down = this.setup.downforce;
     const tire = TIRE_GRIP[this.setup.tires];
     const topSpeed = baseTop * (0.74 + power * 0.5) * (1 - down * 0.16);
     const accel = baseAccel * (0.66 + power * 0.7);
-    const grip = baseGrip * (0.62 + tire * 0.42 + down * 0.5) * (this.wet ? 0.6 : 1);
-    const steerAuth = baseSteer * (0.85 + tire * 0.2);
+    const grip = baseGrip * (0.62 + tire * 0.42 + down * 0.5) * (this.wet ? 0.66 : 1);
+    const steerAuth = baseSteer * (0.9 + tire * 0.16);
     return { topSpeed, accel, grip, steerAuth, brake: accel * 1.7 + 8 };
   }
 
@@ -374,7 +374,11 @@ export class DriveSession {
       -1,
       1,
     );
-    this.steer += (steerInput - this.steer) * (1 - Math.exp(-dt * 9));
+    // Ramp into a turn over ~0.13 s but let go over ~0.08 s, so held keys still
+    // arc smoothly while the car straightens the moment you release.
+    const steerRate =
+      Math.abs(steerInput) > Math.abs(this.steer) ? 7.5 : 13;
+    this.steer += (steerInput - this.steer) * (1 - Math.exp(-dt * steerRate));
 
     // Longitudinal.
     const drag = 0.0011 * this.speed * Math.abs(this.speed) + 0.7;
@@ -395,15 +399,20 @@ export class DriveSession {
 
     // Steering + grip. Positive steer is "screen right"; because the chase
     // camera looks along +Z, screen right is world -X, hence the negation.
-    const speedFactor = clamp(Math.abs(this.speed) / 10, 0, 1);
+    const speedAbs = Math.abs(this.speed);
+    // Authority comes in earlier and stays strong at speed, then tapers just
+    // enough that a held key arcs into a corner instead of snapping into a
+    // spin. Grip does the rest of the work.
+    const speedFactor = clamp(speedAbs / 8, 0, 1);
+    const taper = 1 / (1 + speedAbs * (this.vehicle === "bike" ? 0.0032 : 0.0042));
     const dirSign = this.speed >= 0 ? 1 : -1;
-    const turn = -this.steer * d.steerAuth * speedFactor * dirSign;
+    const turn = -this.steer * d.steerAuth * speedFactor * taper * dirSign;
     this.heading += turn * dt;
-    let gripEff = d.grip * (handbrake ? 0.22 : 1) * (this.offTrack ? 0.5 : 1);
-    gripEff *= 1 / (1 + Math.abs(turn) * Math.abs(this.speed) * 0.012);
+    let gripEff = d.grip * (handbrake ? 0.22 : 1) * (this.offTrack ? 0.55 : 1);
+    gripEff *= 1 / (1 + Math.abs(turn) * speedAbs * 0.008);
     this.slip = angleDelta(this.heading, this.velDir);
     this.velDir += this.slip * (1 - Math.exp(-gripEff * dt));
-    this.speed -= Math.abs(this.slip) * Math.abs(this.speed) * 0.35 * dt;
+    this.speed -= Math.abs(this.slip) * speedAbs * 0.26 * dt;
 
     this.pos.x += Math.sin(this.velDir) * this.speed * dt;
     this.pos.z += Math.cos(this.velDir) * this.speed * dt;
