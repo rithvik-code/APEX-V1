@@ -139,6 +139,7 @@ export function Takeover({ control, onRelease, initialGoal }: Props) {
     active && state ? state.permissions : armed;
 
   const releaseRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const goalRef = useRef<HTMLTextAreaElement>(null);
   const approveRef = useRef<HTMLButtonElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -240,8 +241,38 @@ export function Takeover({ control, onRelease, initialGoal }: Props) {
   }, [minimized]);
 
   useEffect(() => {
+    const focusable = (root: HTMLElement): HTMLElement[] =>
+      Array.from(
+        root.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((el) => !el.hasAttribute("aria-hidden"));
     const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Tab") {
+        const root = dialogRef.current;
+        if (!root) return;
+        const items = focusable(root);
+        if (!items.length) return;
+        const first = items[0];
+        const last = items[items.length - 1];
+        const current = document.activeElement as HTMLElement | null;
+        if (!event.shiftKey && (current === last || !root.contains(current))) {
+          event.preventDefault();
+          first.focus();
+        } else if (event.shiftKey && (current === first || !root.contains(current))) {
+          event.preventDefault();
+          last.focus();
+        }
+        return;
+      }
       if (event.key !== "Escape") return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+      ) {
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       if (isActiveStatus(stateRef.current?.status)) {
@@ -580,6 +611,7 @@ export function Takeover({ control, onRelease, initialGoal }: Props) {
 
   return (
     <div
+      ref={dialogRef}
       className="takeover ctl"
       role="dialog"
       aria-modal="true"

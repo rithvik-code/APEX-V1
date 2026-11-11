@@ -241,8 +241,19 @@ export class DriveSession {
   }
 
   private onKeyDown = (event: KeyboardEvent): void => {
-    const tag = (event.target as HTMLElement | null)?.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    const target = event.target as HTMLElement | null;
+    const tag = target?.tagName;
+    // A focused HUD button must keep its native Space/Enter activation.
+    if (
+      tag === "INPUT" ||
+      tag === "TEXTAREA" ||
+      tag === "SELECT" ||
+      tag === "BUTTON" ||
+      tag === "A" ||
+      target?.isContentEditable
+    ) {
+      return;
+    }
     const k = event.key.toLowerCase();
     if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(k)) {
       event.preventDefault();

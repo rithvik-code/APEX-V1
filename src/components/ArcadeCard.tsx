@@ -204,8 +204,12 @@ function IntelCard({
       const link = document.createElement("a");
       link.href = url;
       link.download = `apex-intel-${Date.now().toString(36)}.png`;
+      // The anchor has to be in the document for Safari/Firefox to honour the
+      // download, and the URL must outlive the click.
+      document.body.appendChild(link);
       link.click();
-      URL.revokeObjectURL(url);
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     }, "image/png");
   };
 

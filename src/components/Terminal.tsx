@@ -330,6 +330,7 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
   const bodyRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const searchRef = useRef<AbortController | null>(null);
   const mounted = useRef(true);
   const voxRef = useRef(false);
   const recognizerRef = useRef<Recognizer | null>(null);
@@ -456,6 +457,7 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
+      searchRef.current?.abort();
       stopRadio();
       recognizerRef.current?.stop();
     };
@@ -626,9 +628,11 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
           break;
         }
         addEntry("meta", `WEB // SEARCHING FOR "${arg.slice(0, 90)}"...`);
+        searchRef.current?.abort();
         const searchController = new AbortController();
+        searchRef.current = searchController;
         void retrieveGrounding(arg, searchController.signal).then((result) => {
-          if (!mounted.current) return;
+          if (!mounted.current || searchController.signal.aborted) return;
           if (!result) {
             addEntry(
               "meta",
@@ -640,6 +644,9 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
             "assistant",
             `LIVE RETRIEVAL // ${result.fetchedAt.slice(0, 10)}\n\n${result.summary}\n\n${result.sourceLine}`,
           );
+        }).catch(() => {
+          if (!mounted.current || searchController.signal.aborted) return;
+          addEntry("meta", "WEB // RETRIEVAL FAILED. CHECK THE CONNECTION AND TRY AGAIN.");
         });
         break;
       }

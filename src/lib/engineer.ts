@@ -18,14 +18,15 @@ const clamp = (value: number, min: number, max: number) =>
 
 const round5 = (value: number) => Math.round(value / 5) * 5;
 
-// A tuning request needs both a car topic and an action word so ordinary
-// questions ("who won the race in the rain?") still go to the model.
+// A tuning request needs a topic plus an actual imperative. Weak helpers like
+// "can", "please" or "want" are deliberately absent: "can you explain
+// wet-weather downforce?" is a question and belongs to the model, not the tuner.
 const TOPIC_RE =
   /\b(downforce|drag|grip|wet|rain|storm|drizzle|night|dark|daylight|dyno|rev|redline|throttle|power curve|torque|horsepower|explode|exploded|apart|assemble|paint|livery|colou?r|stripe|wind|faster|slower|camera|overhead|neon|studio|midnight|grid|superbike|motorcycle|reset|stock|factory|random|shuffle|pressure|velocity|orbit)\b/i;
 const ACTION_RE =
-  /\b(make|set|switch|turn|give|want|need|more|less|add|drop|raise|lower|increase|decrease|run|go|put|paint|show|enable|disable|start|stop|kill|reset|full|flat|max|change|try|let's|lets|can|could|please|setup|mode|roll|trim|load)\b/i;
+  /\b(set|setup|switch|turn|make|give|add|drop|raise|lower|increase|decrease|run|go|put|paint|show|enable|disable|start|stop|kill|reset|change|trim|load|apply|fit|arm|engage|launch|crank|rev|clear|hide|explode|assemble|roll|bring)\b/i;
 const STRONG_RE =
-  /\b(more downforce|less drag|wet setup|night race|rain mode|run the dyno|redline it|rev it|explode the car|paint it|top speed|flat out|surprise me|show me the engine|take it apart|put it back)\b/i;
+  /\b(more downforce|less drag|more grip|less grip|more wing|less wing|wet setup|night race|rain mode|run the dyno|redline it|rev it|explode the car|paint it|top speed|flat out|surprise me|show me the engine|take it apart|put it back)\b/i;
 
 export function engineerIntent(text: string): boolean {
   return STRONG_RE.test(text) || (TOPIC_RE.test(text) && ACTION_RE.test(text));

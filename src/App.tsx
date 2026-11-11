@@ -362,7 +362,7 @@ export default function App() {
     const read = () => {
       const engine = engineRef.current;
       if (!engine) return;
-      setDockStatus({
+      const next: DockStatus = {
         isClipping: engine.isClipping,
         isRecordingLap: engine.isRecordingLap,
         lapElapsed: engine.lapElapsed,
@@ -370,7 +370,20 @@ export default function App() {
         replayPaused: engine.replayPaused,
         replayTime: engine.currentReplayTime,
         replayDuration: engine.replayDuration,
-      });
+      };
+      // The tick is 10 Hz; skip the state write when nothing actually changed
+      // so idle tunnels do not re-render the whole app ten times a second.
+      setDockStatus((current) =>
+        current.isClipping === next.isClipping &&
+        current.isRecordingLap === next.isRecordingLap &&
+        current.lapElapsed === next.lapElapsed &&
+        current.isReplaying === next.isReplaying &&
+        current.replayPaused === next.replayPaused &&
+        current.replayTime === next.replayTime &&
+        current.replayDuration === next.replayDuration
+          ? current
+          : next,
+      );
     };
     read();
     const id = window.setInterval(read, 100);

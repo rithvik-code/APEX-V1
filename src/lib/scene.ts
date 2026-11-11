@@ -186,8 +186,8 @@ export function encodeSetup(config: SceneConfig): string {
 const COLOR_MODES = new Set<FlowColorMode>(["velocity", "pressure", "acid"]);
 const FOCUS_VALUES = new Set<AeroFocus>(["both", "car", "bike"]);
 const WEATHER_VALUES = new Set<Weather>(["clear", "rain"]);
-const CAMERA_IDS = new Set<string>(CAMERA_PRESETS.map((preset) => preset.id));
-const LIGHTING_IDS = new Set<string>(LIGHTING_PRESETS.map((preset) => preset.id));
+const CAMERA_IDS = new Set<CameraPreset>(CAMERA_PRESETS.map((preset) => preset.id));
+const LIGHTING_IDS = new Set<LightingPreset>(LIGHTING_PRESETS.map((preset) => preset.id));
 const LIVERY_IDS = new Set<string>(LIVERIES.map((livery) => livery.id));
 
 function boundedNumber(value: unknown, fallback: number, min: number, max: number): number {

@@ -304,6 +304,7 @@ export class ApexEngine {
   private carRoundels: THREE.Object3D[] = [];
   private assemblyLabels: Array<{ el: HTMLElement; assembly: Assembly }> = [];
   private clip: ClipRecorder | null = null;
+  private envTarget: THREE.WebGLRenderTarget | null = null;
   private lapSamples: CameraSample[] = [];
   private lapStart = 0;
   private lapConfig: SceneConfig | null = null;
@@ -358,7 +359,9 @@ export class ApexEngine {
 
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     const env = new RoomEnvironment();
-    this.scene.environment = pmrem.fromScene(env, 0.04).texture;
+    const envTarget = pmrem.fromScene(env, 0.04);
+    this.envTarget = envTarget;
+    this.scene.environment = envTarget.texture;
     env.dispose();
     pmrem.dispose();
 
@@ -1154,6 +1157,9 @@ export class ApexEngine {
       this.savedBikeRot.copy(this.bikeGroup.rotation);
     }
     this.drive?.dispose();
+    // A lap started in the showroom would otherwise keep sampling through the
+    // whole drive and save a replay with a huge camera jump.
+    this.stopLap();
     if (!this.track) {
       this.track = buildTrack();
       this.scene.add(this.track.group);
@@ -1664,6 +1670,9 @@ export class ApexEngine {
         });
       }
     });
+    this.envTarget?.dispose();
+    this.envTarget = null;
+    this.scene.environment = null;
     this.renderer.dispose();
     this.composer.dispose();
   }
