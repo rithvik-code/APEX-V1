@@ -15,7 +15,7 @@ import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 const CONFIG_DIR = path.join(os.homedir(), ".apex");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
 const SHADOW_DIR = path.join(CONFIG_DIR, "shadow");

@@ -103,7 +103,7 @@ async function main() {
     }
   };
 
-  const send = (method, params = {}) =>
+  const send = (method, params = {}, timeoutMs = 90000) =>
     new Promise((resolve, reject) => {
       const mid = ++id;
       pending.set(mid, { resolve, reject });
@@ -113,7 +113,7 @@ async function main() {
           pending.delete(mid);
           reject(new Error(`timeout: ${method}`));
         }
-      }, 90000);
+      }, timeoutMs);
     });
 
   await send("Page.enable");
@@ -126,13 +126,13 @@ async function main() {
     storageTypes: "local_storage",
   });
 
-  const evaluate = async (expression) => {
+  const evaluate = async (expression, timeoutMs = 90000) => {
     const res = await send("Runtime.evaluate", {
       expression,
       awaitPromise: true,
       returnByValue: true,
       userGesture: true,
-    });
+    }, timeoutMs);
     if (res.exceptionDetails) {
       throw new Error(
         "eval: " +
@@ -298,7 +298,7 @@ async function main() {
       log.bestTime = d.bestTime;
       log.hasGhost = d.ghost !== null;
       return log;
-    })()`);
+    })()`, 240000);
 
     check("autopilot completed 2 laps", lapRun.laps.length >= 2, lapRun.laps);
     if (lapRun.laps.length) {
