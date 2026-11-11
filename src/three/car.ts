@@ -183,6 +183,23 @@ export function createSupercar(): {
     metalness: 0.1,
     roughness: 0.92,
   });
+  const sootMat = new THREE.MeshStandardMaterial({
+    color: 0x0c0d0e,
+    metalness: 0.35,
+    roughness: 0.96,
+  });
+  const gold = new THREE.MeshStandardMaterial({
+    color: 0xd7b25c,
+    metalness: 1,
+    roughness: 0.16,
+  });
+  const flameMat = new THREE.MeshBasicMaterial({
+    color: 0xffa54a,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
 
   // ---------------------------------------------------------------------------
   // Body — extruded side profile, width on X, length on Z, nose facing +Z.
@@ -257,6 +274,21 @@ export function createSupercar(): {
     frontAero.add(canard);
   }
 
+  // Career unlock: extended dive planes stacked above the stock canards.
+  const careerCanards: THREE.Object3D[] = [];
+  for (const side of [-1, 1]) {
+    const dive = new THREE.Mesh(
+      new RoundedBoxGeometry(0.52, 0.03, 0.22, 2, 0.01),
+      carbon,
+    );
+    dive.position.set(side * 0.88, 0.29, 2.02);
+    dive.rotation.z = side * 0.16;
+    dive.rotation.y = side * 0.18;
+    dive.visible = false;
+    frontAero.add(dive);
+    careerCanards.push(dive);
+  }
+
   // Side skirts with the single acid accent line
   for (const side of [-1, 1]) {
     const skirt = new THREE.Mesh(
@@ -299,6 +331,28 @@ export function createSupercar(): {
   const wingGlow = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.008, 0.02), acidSoft);
   wingGlow.position.set(0, 1.04, -2.24);
   rearWing.add(wingGlow);
+
+  // Career unlock: gurney lip on the wing trailing edge.
+  const careerGurney: THREE.Object3D[] = [];
+  const gurney = new THREE.Mesh(new THREE.BoxGeometry(1.44, 0.055, 0.012), acidSoft);
+  gurney.position.set(0, 1.125, -2.25);
+  gurney.rotation.x = 0.38;
+  gurney.visible = false;
+  rearWing.add(gurney);
+  careerGurney.push(gurney);
+
+  // Career unlock: constructor badge across the wing face.
+  const badgeMat = new THREE.MeshBasicMaterial({
+    map: badgeTexture("APEX"),
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const wingBadge = new THREE.Mesh(new THREE.PlaneGeometry(0.86, 0.21), badgeMat);
+  wingBadge.position.set(0, 1.088, -2.258);
+  wingBadge.rotation.y = Math.PI;
+  wingBadge.visible = false;
+  rearWing.add(wingBadge);
 
   // Rear light bar and exhaust
   const tail = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.035, 0.02), acid);
