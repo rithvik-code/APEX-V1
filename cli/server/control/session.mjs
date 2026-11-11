@@ -282,10 +282,13 @@ export class ControlSession {
     }
     while (this.step < this.maxSteps) {
       await this.waitIfPaused();
-      if (this.status !== "running" || this.abort.signal.aborted) return;
+      if (!this.runningNow()) return;
 
       const observation = await this.observe();
-      if (this.status !== "running") return;
+      // Pause can land while observation or planning is in flight. Wait for the
+      // user instead of falling out of the loop, or resume would have no driver.
+      await this.waitIfPaused();
+      if (!this.runningNow()) return;
       this.observation = observation;
       this.publish();
 
@@ -304,7 +307,8 @@ export class ControlSession {
         maxSteps: this.maxSteps,
         signal: this.abort.signal,
       });
-      if (this.status !== "running") return;
+      await this.waitIfPaused();
+      if (!this.runningNow()) return;
 
       this.currentAction = decision;
       this.lastVerify = decision.verify;
@@ -339,14 +343,18 @@ export class ControlSession {
             endpoint: this.endpoint,
             signal: this.abort.signal,
           });
-          if (this.status === "running") {
+          await this.waitIfPaused();
+          if (this.runningNow()) {
             this.complete(summary || this.lastResult || "Task closed after repeated actions");
           }
         } catch (error) {
-          if (error?.name === "AbortError" || this.status !== "running") return;
-          this.fail(
-            `Planner kept repeating ${decision.action} with identical arguments. Last result: ${clip(this.lastResult, 900)}`,
-          );
+          if (error?.name === "AbortError") return;
+          await this.waitIfPaused();
+          if (this.runningNow()) {
+            this.fail(
+              `Planner kept repeating ${decision.action} with identical arguments. Last result: ${clip(this.lastResult, 900)}`,
+            );
+          }
         }
         return;
       }
@@ -375,9 +383,9 @@ export class ControlSession {
         this.recordSuccess(decision, result);
         this.consecutiveErrors = 0;
       } catch (error) {
-        if (error?.name === "AbortError" || this.status !== "running") {
-          return;
-        }
+        if (error?.name === "AbortError") return;
+        await this.waitIfPaused();
+        if (!this.runningNow()) return;
         this.recordError(decision, error.message);
         this.consecutiveErrors += 1;
         if (this.consecutiveErrors >= 3) {
@@ -392,6 +400,10 @@ export class ControlSession {
     this.error = this.error || "Step budget exhausted";
     this.endedAt = Date.now();
     this.log("halt", "BUDGET EXHAUSTED", `${this.maxSteps} steps used`, "medium");
+  }
+
+  runningNow() {
+    return this.status === "running" && !this.abort.signal.aborted;
   }
 
   async waitIfPaused() {
@@ -882,7 +894,7 @@ export class ControlSession {
     const gate = checkAction(name, this.permissions, { autoApprove: true });
     if (!gate.allowed) throw new Error(gate.reason);
     if (
-      this.status === "running" &&
+      (this.status === "running" || this.status === "awaiting") &&
       !["screenshot", "ocr_screen", "browser_tabs", "list_windows"].includes(name)
     ) {
       throw new Error("Pause APEX before taking manual control");

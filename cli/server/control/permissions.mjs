@@ -55,14 +55,6 @@ const ACTION_DOCS = {
   press_keys: 'press_keys {keys} — e.g. "ctrl+s", "enter", "alt+tab"',
   clipboard_get: "clipboard_get {} — read the clipboard text",
   clipboard_set: "clipboard_set {text} — stage text on the clipboard, then paste it with ctrl+v for fast reliable input",
-  focus_window: "focus_window {pid} — bring an application forward",
-  launch_app: "launch_app {app, args?, cwd?} — start an application",
-  move_mouse: "move_mouse {x,y} — move the pointer",
-  click: "click {x,y,button?,count?} — click at screen coordinates",
-  drag: "drag {fromX,fromY,toX,toY} — drag with the left button",
-  scroll: "scroll {x,y,amount} — scroll at a point; negative scrolls down",
-  type_text: "type_text {text} — type into the focused control",
-  press_keys: 'press_keys {keys} — e.g. "ctrl+s", "enter", "alt+tab"',
   browser_tabs: "browser_tabs {} — list open browser tabs",
   browser_open: "browser_open {url} — open a tab",
   browser_activate: "browser_activate {id} — focus a tab",
@@ -97,9 +89,12 @@ export function actionHelp(permissions = {}) {
   return `Available actions (one per turn):\n${lines.join("\n")}`;
 }
 
+// Capabilities are armed explicitly. A missing key means "not granted", so a
+// client cannot obtain terminal or file access by omitting the permissions map.
 export function normalizePermissions(input = {}) {
+  const source = input && typeof input === "object" ? input : {};
   const permissions = {};
-  for (const [key] of CAPABILITIES) permissions[key] = input[key] !== false;
+  for (const [key] of CAPABILITIES) permissions[key] = source[key] === true;
   return permissions;
 }
 

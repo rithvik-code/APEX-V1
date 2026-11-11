@@ -45,11 +45,31 @@ const healthCache = { at: 0, value: null };
 
 const MODEL_NAME_OK = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$/;
 
+function validateModelName(value, field = "model") {
+  const model = String(value ?? "").trim();
+  if (!MODEL_NAME_OK.test(model)) {
+    throw new Error(`Invalid ${field} name`);
+  }
+  return model;
+}
+
+// The daemon only ever answers on loopback. Checking Host as well as Origin
+// closes the DNS-rebinding gap, because a rebound name still arrives as Host.
+function hostAllowed(req) {
+  const raw = String(req.headers.host || "").toLowerCase();
+  const name = raw.startsWith("[")
+    ? raw.slice(0, raw.indexOf("]") + 1)
+    : raw.replace(/:\d+$/, "");
+  return name === "127.0.0.1" || name === "localhost" || name === "[::1]";
+}
+
 function pushFrame() {
   const frame = getLiveFrame();
   if (!frame?.buffer?.length) return;
   const head = `--apexframe\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.buffer.length}\r\n\r\n`;
   for (const res of screenSubs) {
+    // A stalled viewer must not grow the daemon's write buffer without bound.
+    if (res.writableLength > 1_500_000) continue;
     try {
       res.write(head);
       res.write(frame.buffer);
@@ -87,6 +107,16 @@ function cors(req, res) {
 function broadcast(state) {
   const payload = `event: state\ndata: ${JSON.stringify(state)}\n\n`;
   for (const client of clients) {
+    // Drop a client that cannot keep up; EventSource reconnects automatically.
+    if (client.writableLength > 1_000_000) {
+      clients.delete(client);
+      try {
+        client.end();
+      } catch {
+        // Already gone.
+      }
+      continue;
+    }
     try {
       client.write(payload);
     } catch {
@@ -140,6 +170,13 @@ function publicPull(entry) {
 }
 
 function startPull(model) {
+  // Finished pulls are only kept for status reads; prune old ones so the map
+  // cannot grow for the lifetime of the daemon.
+  if (pulls.size > 24) {
+    for (const [key, item] of pulls) {
+      if (item.done) pulls.delete(key);
+    }
+  }
   const entry = { model, status: "starting", pct: 0, error: "", done: false };
   pulls.set(model, entry);
   const controller = new AbortController();
@@ -181,12 +218,14 @@ function startPull(model) {
       entry.done = true;
       entry.pct = 100;
       entry.status = entry.error ? "error" : "ready";
+      entry.controller = null;
       healthCache.at = 0;
     })
     .catch((error) => {
       entry.done = true;
       entry.status = "error";
-      entry.error = error?.message || "Pull failed";
+      entry.error = String(error?.message || "Pull failed").slice(0, 200);
+      entry.controller = null;
     });
   return entry;
 }
@@ -196,6 +235,10 @@ function activeLike(state) {
 }
 
 async function route(req, res) {
+  if (!hostAllowed(req)) {
+    json(res, 403, { error: "Host is not allowed" });
+    return;
+  }
   if (!cors(req, res)) {
     json(res, 403, { error: "Origin is not allowed" });
     return;
@@ -340,9 +383,11 @@ async function route(req, res) {
     const next = {
       ...current,
       ...(body.fileRoots ? { fileRoots: current.fileRoots } : {}),
-      ...(body.plannerModel ? { plannerModel: String(body.plannerModel) } : {}),
-      ...(body.visionModel ? { visionModel: String(body.visionModel) } : {}),
-      ...(body.maxSteps ? { maxSteps: Math.max(1, Math.min(60, Number(body.maxSteps))) } : {}),
+      ...(body.plannerModel ? { plannerModel: validateModelName(body.plannerModel, "planner model") } : {}),
+      ...(body.visionModel ? { visionModel: validateModelName(body.visionModel, "vision model") } : {}),
+      ...(body.maxSteps !== undefined
+        ? { maxSteps: Math.max(1, Math.min(60, Number(body.maxSteps) || 1)) }
+        : {}),
       ...(typeof body.autoApprove === "boolean" ? { autoApprove: body.autoApprove } : {}),
       ...(typeof body.vision === "boolean" ? { vision: body.vision } : {}),
       ...(typeof body.ocr === "boolean" ? { ocr: body.ocr } : {}),
@@ -397,8 +442,14 @@ async function route(req, res) {
         vision:
           typeof body.vision === "boolean" ? body.vision : Boolean(config.vision),
         ocr: typeof body.ocr === "boolean" ? body.ocr : config.ocr !== false,
-        plannerModel: body.plannerModel || config.plannerModel || DEFAULT_PLANNER,
-        visionModel: body.visionModel || config.visionModel || DEFAULT_VISION,
+        plannerModel: validateModelName(
+          body.plannerModel || config.plannerModel || DEFAULT_PLANNER,
+          "planner model",
+        ),
+        visionModel: validateModelName(
+          body.visionModel || config.visionModel || DEFAULT_VISION,
+          "vision model",
+        ),
         endpoint: config.endpoint || DEFAULT_ENDPOINT,
         maxSteps: READ_ONLY
           ? Math.min(3, Number(body.maxSteps) || 3)
@@ -537,6 +588,7 @@ async function route(req, res) {
 
 const server = http.createServer((req, res) => {
   route(req, res).catch((error) => {
+    if (res.destroyed) return;
     if (!res.headersSent) {
       json(res, error.message.includes("No control session") ? 409 : 400, {
         error: error.message,
@@ -546,6 +598,9 @@ const server = http.createServer((req, res) => {
     }
   });
 });
+server.requestTimeout = 60_000;
+server.headersTimeout = 20_000;
+server.keepAliveTimeout = 65_000;
 
 server.listen(PORT, HOST, () => {
   setLiveFrameHandler(pushFrame);
@@ -600,6 +655,14 @@ function shutdown() {
     }
   }
   clients.clear();
+  for (const res of screenSubs) {
+    try {
+      res.end();
+    } catch {
+      // Ignore.
+    }
+  }
+  screenSubs.clear();
   killAllPowerShell();
   stopCommands();
   stopBrowser();

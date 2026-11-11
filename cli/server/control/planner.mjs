@@ -19,6 +19,9 @@ export async function chat({
   signal,
   timeoutMs = 120000,
 }) {
+  if (signal?.aborted) {
+    throw new DOMException("Control stopped", "AbortError");
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const onAbort = () => controller.abort();
