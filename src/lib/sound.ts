@@ -216,6 +216,107 @@ class SoundEngine {
     src.stop(now + 0.6);
   }
 
+  // A full throttle blip: layered oscillators swept from idle to redline and
+  // back, with exhaust overrun crackle on the way down. The V12 is low, wide
+  // and harmonic; the inline-four is tighter, brighter and more metallic.
+  revEngine(kind: "car" | "bike"): void {
+    if (!this.enabled || !this.ctx || !this.master || !this.noiseBuffer) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const car = kind === "car";
+    const duration = car ? 2.25 : 1.7;
+    const base = car ? 42 : 66;
+    const peak = car ? 5.4 : 6.1;
+    const idle = 0.52;
+
+    const bus = ctx.createGain();
+    bus.gain.setValueAtTime(0.0001, now);
+    bus.gain.exponentialRampToValueAtTime(car ? 0.34 : 0.24, now + 0.07);
+    bus.gain.setValueAtTime(car ? 0.3 : 0.21, now + duration * 0.52);
+    bus.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    bus.connect(this.master);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.Q.value = car ? 6.5 : 3.6;
+    filter.frequency.setValueAtTime(car ? 300 : 420, now);
+    filter.frequency.exponentialRampToValueAtTime(car ? 2600 : 3400, now + duration * 0.36);
+    filter.frequency.exponentialRampToValueAtTime(car ? 520 : 760, now + duration * 0.96);
+
+    const drive = ctx.createWaveShaper();
+    const curve = new Float32Array(1024);
+    for (let i = 0; i < curve.length; i++) {
+      const x = (i / (curve.length - 1)) * 2 - 1;
+      curve[i] = Math.tanh(x * (car ? 2.6 : 3.4));
+    }
+    drive.curve = curve;
+    drive.connect(bus);
+    filter.connect(drive);
+
+    const voices = car
+      ? [
+          { ratio: 0.5, type: "sine" as OscillatorType, detune: 0, gain: 0.9 },
+          { ratio: 0.5, type: "sawtooth" as OscillatorType, detune: -4, gain: 0.55 },
+          { ratio: 1, type: "sawtooth" as OscillatorType, detune: 5, gain: 0.5 },
+          { ratio: 1.5, type: "sawtooth" as OscillatorType, detune: -6, gain: 0.34 },
+          { ratio: 2, type: "sawtooth" as OscillatorType, detune: 3, gain: 0.3 },
+          { ratio: 3, type: "square" as OscillatorType, detune: -3, gain: 0.16 },
+          { ratio: 4.5, type: "sawtooth" as OscillatorType, detune: 7, gain: 0.11 },
+        ]
+      : [
+          { ratio: 1, type: "sawtooth" as OscillatorType, detune: 0, gain: 0.6 },
+          { ratio: 1.01, type: "square" as OscillatorType, detune: 6, gain: 0.36 },
+          { ratio: 2, type: "sawtooth" as OscillatorType, detune: -5, gain: 0.4 },
+          { ratio: 3.02, type: "square" as OscillatorType, detune: 4, gain: 0.22 },
+          { ratio: 4.04, type: "sawtooth" as OscillatorType, detune: -7, gain: 0.14 },
+        ];
+
+    const upAt = now + duration * 0.34;
+    const holdAt = now + duration * 0.48;
+    const downAt = now + duration * 0.92;
+
+    for (const voice of voices) {
+      const osc = ctx.createOscillator();
+      osc.type = voice.type;
+      osc.detune.value = voice.detune;
+      const voiceGain = ctx.createGain();
+      voiceGain.gain.value = voice.gain;
+      const fIdle = base * voice.ratio * idle;
+      const fPeak = base * voice.ratio * peak;
+      osc.frequency.setValueAtTime(fIdle, now);
+      osc.frequency.exponentialRampToValueAtTime(fPeak, upAt);
+      osc.frequency.setValueAtTime(fPeak, holdAt);
+      osc.frequency.exponentialRampToValueAtTime(fIdle * 0.88, downAt);
+      osc.connect(voiceGain);
+      voiceGain.connect(filter);
+      osc.start(now);
+      osc.stop(now + duration + 0.05);
+    }
+
+    // Ignition thump plus exhaust pops on the overrun.
+    const pop = (at: number, loudness: number) => {
+      const src = ctx.createBufferSource();
+      src.buffer = this.noiseBuffer;
+      const band = ctx.createBiquadFilter();
+      band.type = "bandpass";
+      band.frequency.value = car ? 900 : 1400;
+      band.Q.value = 0.8;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(loudness, at + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.07);
+      src.connect(band);
+      band.connect(gain);
+      gain.connect(this.master!);
+      src.start(at);
+      src.stop(at + 0.09);
+    };
+    pop(now + 0.01, car ? 0.22 : 0.14);
+    for (let i = 0; i < 5; i++) {
+      pop(now + duration * (0.52 + i * 0.075), (car ? 0.16 : 0.11) * (1 - i * 0.12));
+    }
+  }
+
   tick(kind: "start" | "click" | "hover" | "key" = "click"): void {
     if (!this.enabled || !this.ctx || !this.master) return;
     const ctx = this.ctx;

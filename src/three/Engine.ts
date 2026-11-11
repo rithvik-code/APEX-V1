@@ -7,6 +7,7 @@ import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { createSupercar, badgeTexture, numberTexture, type Assembly, type VehicleAnchor } from "./car";
 import { createSuperbike } from "./bike";
+import { createGarage, type GarageStage, type GarageView } from "./garage";
 import { AeroFlow, buildBikeStreamlines, buildCarStreamlines } from "./aero";
 import { WeatherSystem } from "./weather";
 import { buildTrack, type Track } from "./track";
@@ -36,6 +37,24 @@ import {
 const ACID = 0xc8ff16;
 const UP_AXIS = new THREE.Vector3(0, 1, 0);
 const RIGHT_AXIS = new THREE.Vector3(1, 0, 0);
+
+const GARAGE_ENTRY_DURATION = 3.9;
+const GARAGE_CAR_LIFT_Y = 0.36;
+const GARAGE_CAR_HOVER_Y = 1.22;
+const GARAGE_THIRD_FOV = 46;
+const GARAGE_FIRST_FOV = 58;
+const GARAGE_WALK_KEYS = new Set([
+  "KeyW",
+  "KeyA",
+  "KeyS",
+  "KeyD",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "ShiftLeft",
+  "ShiftRight",
+]);
 
 // Retina-crisp output, but cap the fill cost on low-core machines.
 function renderPixelRatio(): number {
@@ -334,6 +353,37 @@ export class ApexEngine {
   private careerBadgeLabel = "";
   private onDriveLap: ((lap: DriveLapEvent) => void) | null = null;
 
+  /* ---- Garage mode -------------------------------------------------------- */
+
+  private garageStage: GarageStage | null = null;
+  private garageOn = false;
+  private garageViewMode: GarageView = "third";
+  private garageEntryT = GARAGE_ENTRY_DURATION;
+  private garageYaw = 0.62;
+  private garageYawT = 0.62;
+  private garagePitch = 0.28;
+  private garagePitchT = 0.28;
+  private garageDist = 8.6;
+  private garageDistT = 8.6;
+  private garageWalk = new THREE.Vector3(0, 0, 6.3);
+  private garageBob = 0;
+  private garageLookYaw = 0;
+  private garageLookPitch = -0.02;
+  private garageMoving = false;
+  private garageKeys = new Set<string>();
+  private garageSavedCarPos = new THREE.Vector3();
+  private garageSavedCarRot = new THREE.Euler();
+  private garageSavedBikePos = new THREE.Vector3();
+  private garageSavedBikeRot = new THREE.Euler();
+  private garageTarget = new THREE.Vector3();
+  private garageStartPos = new THREE.Vector3();
+  private garageStartTgt = new THREE.Vector3();
+  private revving = false;
+  private revWasActive = false;
+  private revT = 0;
+  private revKind: "car" | "bike" = "car";
+  private revRpm = 0;
+
   constructor(canvas: HTMLCanvasElement, labelsEl: HTMLElement, onReady?: () => void) {
     this.labelsEl = labelsEl;
     this.onReady = onReady;
@@ -478,7 +528,9 @@ export class ApexEngine {
     window.addEventListener("pointerup", this.onDragEnd);
     window.addEventListener("pointercancel", this.onDragEnd);
     window.addEventListener("dblclick", this.onResetView);
-
+    window.addEventListener("wheel", this.onGarageWheel, { passive: true });
+    window.addEventListener("keydown", this.onGarageKeyDown);
+    window.addEventListener("keyup", this.onGarageKeyUp);
     this.onScroll();
     this.progress = this.targetProgress;
     this.lastCameraPos.copy(this.camera.position);
@@ -779,6 +831,15 @@ export class ApexEngine {
 
   private onDragStart = (event: PointerEvent): void => {
     if (this.paused || this.drive || event.button !== 0 || event.pointerType === "touch") return;
+    if (this.garageOn) {
+      if (!this.orbitTarget(event)) return;
+      this.dragging = true;
+      this.dragX = event.clientX;
+      this.dragY = event.clientY;
+      this.lastOrbitInput = performance.now();
+      document.body.classList.add("is-orbiting");
+      return;
+    }
     if (!this.heroVisible() || !this.orbitTarget(event)) return;
     this.dragging = true;
     this.dragX = event.clientX;
@@ -795,6 +856,24 @@ export class ApexEngine {
     const dy = event.clientY - this.dragY;
     this.dragX = event.clientX;
     this.dragY = event.clientY;
+    if (this.garageOn) {
+      if (this.garageViewMode === "third") {
+        this.garageYawT -= dx * 0.005;
+        this.garagePitchT = THREE.MathUtils.clamp(
+          this.garagePitchT + dy * 0.004,
+          0.05,
+          1.02,
+        );
+      } else {
+        this.garageLookYaw -= dx * 0.004;
+        this.garageLookPitch = THREE.MathUtils.clamp(
+          this.garageLookPitch - dy * 0.003,
+          -1.15,
+          1.15,
+        );
+      }
+      return;
+    }
     this.userYawT -= dx * 0.004;
     this.userPitchT = THREE.MathUtils.clamp(
       this.userPitchT + dy * 0.003,
@@ -814,12 +893,48 @@ export class ApexEngine {
   };
 
   private onResetView = (event: MouseEvent): void => {
-    if (this.paused || this.drive || !this.heroVisible() || !this.orbitTarget(event)) return;
+    if (this.paused || this.drive) return;
+    if (this.garageOn) {
+      if (!this.orbitTarget(event)) return;
+      if (this.garageViewMode === "third") {
+        this.garageYawT = 0.62;
+        this.garagePitchT = 0.28;
+        this.garageDistT = 8.6;
+      } else {
+        this.garageLookYaw = 0;
+        this.garageLookPitch = -0.02;
+        this.garageWalk.set(0, 0, 6.3);
+      }
+      return;
+    }
+    if (!this.heroVisible() || !this.orbitTarget(event)) return;
     this.userYawT = 0;
     this.userPitchT = 0;
     this.yawVel = 0;
     this.pitchVel = 0;
     this.lastOrbitInput = performance.now();
+  };
+
+  private onGarageWheel = (event: WheelEvent): void => {
+    if (!this.garageOn || this.garageViewMode !== "third") return;
+    this.garageDistT = THREE.MathUtils.clamp(
+      this.garageDistT + event.deltaY * 0.004,
+      5.2,
+      13.6,
+    );
+  };
+
+  private onGarageKeyDown = (event: KeyboardEvent): void => {
+    if (!this.garageOn || this.garageViewMode !== "first") return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("input, textarea, select, [contenteditable]")) return;
+    if (!GARAGE_WALK_KEYS.has(event.code)) return;
+    event.preventDefault();
+    this.garageKeys.add(event.code);
+  };
+
+  private onGarageKeyUp = (event: KeyboardEvent): void => {
+    this.garageKeys.delete(event.code);
   };
 
   private onResize(): void {
@@ -1009,6 +1124,14 @@ export class ApexEngine {
     }
     this.applyCareerVisuals();
     if (this.drive) this.applyDriveVisibility();
+    if (this.garageOn) {
+      this.aeroCar.setEnabled(false);
+      this.aeroBike.setEnabled(false);
+      this.gridHelper.visible = false;
+      this.labelsEl.style.opacity = "0";
+      this.carGroup.visible = true;
+      this.bikeGroup.visible = true;
+    }
   }
 
   /* ---- Constructor Series cosmetic unlocks -------------------------------- */
@@ -1095,6 +1218,49 @@ export class ApexEngine {
       this.bike.accent.opacity = 0.55 + wave * 0.4;
       this.bike.career.tailStripMat.opacity = 0.35 + wave * 0.35;
     }
+  }
+
+  private animateRev(dt: number): void {
+    const car = this.car;
+    if (!this.revving) {
+      if (!this.revWasActive) return;
+      this.revWasActive = false;
+      this.revRpm = 0;
+      if (!this.dynoOn) car.exhaustGlow.opacity = 0;
+      for (const flame of car.career.flames) flame.scale.set(1, 1, 1);
+      this.applyCareerVisuals();
+      return;
+    }
+
+    this.revT += dt;
+    const duration = this.revKind === "bike" ? 1.7 : 2.25;
+    const p = Math.min(1, this.revT / duration);
+    let rpm: number;
+    if (p < 0.34) rpm = 0.2 + (p / 0.34) * 0.8;
+    else if (p < 0.5) rpm = 1;
+    else if (p < 0.92) rpm = 1 - ((p - 0.5) / 0.42) * 0.92;
+    else rpm = Math.max(0, 0.08 - ((p - 0.92) / 0.08) * 0.08);
+    const overrun = p > 0.55 ? 0.07 * (1 - p) * Math.random() : 0;
+    this.revRpm = Math.min(1.15, rpm + overrun);
+    this.engineTime += dt * this.revRpm * 12;
+
+    if (this.revKind === "car") {
+      car.exhaustGlow.opacity = 0.16 + this.revRpm * 0.8;
+      for (const flame of car.career.flames) {
+        const s = 0.75 + this.revRpm * 1.7 + Math.random() * 0.25 * this.revRpm;
+        flame.scale.set(s, s * (0.7 + this.revRpm * 1.1), s);
+      }
+      if (this.careerUnlocks.has("flame")) {
+        car.career.flameMat.opacity = 0.3 + this.revRpm * 0.5;
+      }
+    } else {
+      this.bike.accent.opacity = 0.5 + this.revRpm * 0.5;
+      if (this.careerUnlocks.has("tailStrip")) {
+        this.bike.career.tailStripMat.opacity = 0.25 + this.revRpm * 0.55;
+      }
+    }
+
+    if (p >= 1) this.revving = false;
   }
 
   exportPNG(): string {
@@ -1240,6 +1406,158 @@ export class ApexEngine {
     return this.drive !== null;
   }
 
+  /* ---- Garage mode -------------------------------------------------------- */
+
+  get garageActive(): boolean {
+    return this.garageOn;
+  }
+
+  enterGarage(view: GarageView = "third"): void {
+    if (this.drive) this.exitDrive();
+    this.stopLap();
+    this.stopLapReplay();
+
+    this.garageSavedCarPos.copy(this.carGroup.position);
+    this.garageSavedCarRot.copy(this.carGroup.rotation);
+    this.garageSavedBikePos.copy(this.bikeGroup.position);
+    this.garageSavedBikeRot.copy(this.bikeGroup.rotation);
+
+    if (!this.garageStage) {
+      this.garageStage = createGarage();
+      this.scene.add(this.garageStage.group);
+    }
+    const stage = this.garageStage;
+    stage.group.visible = true;
+    stage.setDoor(0);
+    stage.setLights(0);
+
+    this.garageOn = true;
+    this.garageViewMode = view;
+    this.garageEntryT = 0;
+    this.garageYaw = 0.62;
+    this.garageYawT = 0.62;
+    this.garagePitch = 0.24;
+    this.garagePitchT = 0.24;
+    this.garageDist = 8.6;
+    this.garageDistT = 8.6;
+    this.garageWalk.set(0, 0, 6.3);
+    this.garageBob = 0;
+    this.garageLookYaw = 0;
+    this.garageLookPitch = -0.02;
+    this.garageKeys.clear();
+    this.dragging = false;
+    this.revving = false;
+    this.revWasActive = false;
+    this.revRpm = 0;
+
+    this.carGroup.position.set(0, GARAGE_CAR_HOVER_Y, 0.2);
+    this.carGroup.rotation.set(0, 0, 0);
+    this.bikeGroup.position.set(5.5, 0, 3.4);
+    this.bikeGroup.rotation.set(0, -0.35, 0);
+    for (const wheel of this.car.wheels) {
+      wheel.rotation.y = 0;
+      wheel.position.x = wheel.userData.baseX as number;
+    }
+
+    this.tunnel.visible = false;
+    this.shafts.visible = false;
+    this.streaks.visible = false;
+    this.dust.visible = false;
+    this.gridHelper.visible = false;
+    this.groundDecor.visible = false;
+    this.bike.scan.visible = false;
+    this.labelsEl.style.opacity = "0";
+    this.aeroCar.setEnabled(false);
+    this.aeroBike.setEnabled(false);
+    this.applyCareerVisuals();
+
+    // The studio rig is omnidirectional and would shine straight through the
+    // garage walls; dim it and let the bay fixtures carry the room.
+    (Object.keys(this.lights) as Array<keyof LightRig>).forEach((name) => {
+      this.lights[name].intensity *= 0.05;
+    });
+
+    (this.scene.fog as THREE.FogExp2).density = 0.022;
+    this.scene.environmentIntensity = 0.6;
+    if (this.lastConfig) this.weather.configure({ ...this.lastConfig, weather: "clear" });
+
+    this.camera.rotation.order = "XYZ";
+    this.camera.fov = 56;
+    this.camera.updateProjectionMatrix();
+    this.camera.position.set(0, 2.1, 14.6);
+    this.camera.lookAt(0, 1.15, 0.2);
+  }
+
+  exitGarage(): void {
+    if (!this.garageOn) return;
+    this.garageOn = false;
+    this.garageKeys.clear();
+    this.dragging = false;
+    this.revving = false;
+    this.revWasActive = false;
+    this.revRpm = 0;
+    document.body.classList.remove("is-orbiting");
+
+    if (this.garageStage) {
+      this.garageStage.setDoor(0);
+      this.garageStage.setLights(0);
+      this.garageStage.group.visible = false;
+    }
+
+    this.carGroup.position.copy(this.garageSavedCarPos);
+    this.carGroup.rotation.copy(this.garageSavedCarRot);
+    this.bikeGroup.position.copy(this.garageSavedBikePos);
+    this.bikeGroup.rotation.copy(this.garageSavedBikeRot);
+    for (const wheel of this.car.wheels) {
+      wheel.rotation.y = 0;
+      wheel.position.x = wheel.userData.baseX as number;
+    }
+
+    this.applyShowroomVisibility();
+    this.car.exhaustGlow.opacity = 0;
+    this.car.career.flameMat.opacity = this.careerUnlocks.has("flame") ? 0.5 : 0;
+    for (const flame of this.car.career.flames) flame.scale.set(1, 1, 1);
+
+    this.camera.rotation.order = "XYZ";
+    this.camera.fov = 40;
+    this.camera.updateProjectionMatrix();
+    (this.scene.fog as THREE.FogExp2).density = 0.017;
+    this.scene.environmentIntensity = 1;
+    if (this.lastConfig) this.configure(this.lastConfig);
+  }
+
+  replayGarageEntry(): void {
+    if (!this.garageOn) return;
+    this.garageEntryT = 0;
+    this.garageStage?.setDoor(0);
+    this.garageStage?.setLights(0);
+    this.carGroup.position.set(0, GARAGE_CAR_HOVER_Y, 0.2);
+    this.carGroup.rotation.set(0, 0, 0);
+    this.revving = false;
+    this.revWasActive = false;
+    this.revRpm = 0;
+  }
+
+  setGarageView(view: GarageView): void {
+    if (!this.garageOn || this.garageViewMode === view) return;
+    this.garageViewMode = view;
+    this.garageKeys.clear();
+    if (view === "first") {
+      this.garageWalk.set(0, 0, 6.3);
+      this.garageBob = 0;
+      this.garageLookYaw = 0;
+      this.garageLookPitch = -0.02;
+    }
+  }
+
+  revVehicle(vehicle: "car" | "bike"): void {
+    if (this.drive) return;
+    this.revving = true;
+    this.revWasActive = true;
+    this.revT = 0;
+    this.revKind = vehicle;
+  }
+
   enterDrive(vehicle: DriveVehicle, setup: DriveSetup, options: DriveOptions): void {
     const wasDriving = this.drive !== null;
     if (!wasDriving) {
@@ -1327,6 +1645,131 @@ export class ApexEngine {
     this.labelsEl.style.opacity = "";
     this.carGroup.visible = true;
     this.bikeGroup.visible = true;
+  }
+
+  private updateGarage(dt: number): void {
+    const stage = this.garageStage;
+    if (!stage) return;
+    stage.update(dt, this.clockTime);
+    this.weather.update(dt);
+
+    if (this.garageEntryT < GARAGE_ENTRY_DURATION) {
+      this.garageEntryT = Math.min(GARAGE_ENTRY_DURATION, this.garageEntryT + dt);
+    }
+    const e = this.garageEntryT;
+    const door = smoothstep((e - 0.15) / 1.4);
+    const lightsRaw = smoothstep((e - 1.0) / 1.15);
+    const flicker = e < 2.2 ? 0.5 + 0.5 * Math.abs(Math.sin(e * 47)) : 1;
+    stage.setDoor(door);
+    stage.setLights(lightsRaw * flicker);
+
+    const drop = smoothstep((e - 1.9) / 1.45);
+    const bounceT = e - 3.35;
+    const bounce =
+      bounceT > 0 ? Math.sin(bounceT * 10) * Math.exp(-bounceT * 4.5) * 0.045 : 0;
+    this.carGroup.position.y =
+      GARAGE_CAR_HOVER_Y +
+      (GARAGE_CAR_LIFT_Y - GARAGE_CAR_HOVER_Y) * drop +
+      bounce;
+    this.carGroup.rotation.y = 0;
+
+    this.engineTime += dt * (1 + this.revRpm * 30);
+    this.car.engine.update(this.engineTime);
+    this.bike.engine.update(this.clockTime);
+
+    if (e < GARAGE_ENTRY_DURATION) {
+      const d = smoothstep(e / 3.4);
+      this.garageStartPos.set(0, 2.1, 14.6);
+      this.garageStartTgt.set(0, 1.15, 0.2).lerp(this.garageTarget.set(0, 0.78, 0.2), d);
+      const endCos = Math.cos(0.24);
+      const endPos = new THREE.Vector3(
+        Math.sin(0.62) * endCos * 8.6,
+        0.78 + Math.sin(0.24) * 8.6,
+        0.2 + Math.cos(0.62) * endCos * 8.6,
+      );
+      this.camera.position.lerpVectors(this.garageStartPos, endPos, d);
+      this.camera.position.x += Math.sin(e * 0.9) * 0.25 * (1 - d);
+      this.camera.lookAt(this.garageStartTgt);
+      this.camera.fov = THREE.MathUtils.lerp(56, GARAGE_THIRD_FOV, d);
+      this.camera.updateProjectionMatrix();
+      return;
+    }
+
+    if (this.garageViewMode === "first") {
+      this.updateGarageWalk(dt);
+      this.camera.fov +=
+        (GARAGE_FIRST_FOV - this.camera.fov) * (1 - Math.exp(-dt * 6));
+      this.camera.updateProjectionMatrix();
+    } else {
+      this.garageYaw += (this.garageYawT - this.garageYaw) * (1 - Math.exp(-dt * 12));
+      this.garagePitch +=
+        (this.garagePitchT - this.garagePitch) * (1 - Math.exp(-dt * 12));
+      this.garageDist += (this.garageDistT - this.garageDist) * (1 - Math.exp(-dt * 8));
+      const cosP = Math.cos(this.garagePitch);
+      this.garageTarget.set(0, 0.78, 0.2);
+      this.camera.position.set(
+        this.garageTarget.x + Math.sin(this.garageYaw) * cosP * this.garageDist,
+        this.garageTarget.y + Math.sin(this.garagePitch) * this.garageDist,
+        this.garageTarget.z + Math.cos(this.garageYaw) * cosP * this.garageDist,
+      );
+      this.camera.lookAt(this.garageTarget);
+      this.camera.fov +=
+        (GARAGE_THIRD_FOV - this.camera.fov) * (1 - Math.exp(-dt * 6));
+      this.camera.updateProjectionMatrix();
+    }
+
+    if (this.revRpm > 0.02) {
+      const amp = this.revRpm * (this.revKind === "car" ? 0.01 : 0.007);
+      this.camera.position.x += Math.sin(this.clockTime * 73) * amp;
+      this.camera.position.y += Math.cos(this.clockTime * 91) * amp;
+      this.camera.rotateZ(Math.sin(this.clockTime * 57) * amp * 0.6);
+    }
+  }
+
+  private updateGarageWalk(dt: number): void {
+    const keys = this.garageKeys;
+    const forward =
+      (keys.has("KeyW") || keys.has("ArrowUp") ? 1 : 0) -
+      (keys.has("KeyS") || keys.has("ArrowDown") ? 1 : 0);
+    const strafe =
+      (keys.has("KeyD") || keys.has("ArrowRight") ? 1 : 0) -
+      (keys.has("KeyA") || keys.has("ArrowLeft") ? 1 : 0);
+    const sprint = keys.has("ShiftLeft") || keys.has("ShiftRight");
+    const speed = sprint ? 4.8 : 2.7;
+    const sin = Math.sin(this.garageLookYaw);
+    const cos = Math.cos(this.garageLookYaw);
+
+    this.garageMoving = forward !== 0 || strafe !== 0;
+    if (this.garageMoving) {
+      this.garageWalk.x += (-sin * forward + cos * strafe) * speed * dt;
+      this.garageWalk.z += (-cos * forward - sin * strafe) * speed * dt;
+      this.garageBob += dt * (sprint ? 11 : 7.5);
+    }
+    this.garageWalk.x = THREE.MathUtils.clamp(this.garageWalk.x, -6.7, 6.7);
+    this.garageWalk.z = THREE.MathUtils.clamp(this.garageWalk.z, -6.8, 7.4);
+
+    // Stay clear of the lift runways and the parked bike.
+    this.pushOut(0, 0.2, 2.6);
+    this.pushOut(5.5, 3.4, 1.7);
+
+    const bob = this.garageMoving ? Math.sin(this.garageBob) * 0.028 : 0;
+    const sway = this.garageMoving ? Math.cos(this.garageBob * 0.5) * 0.014 : 0;
+    this.camera.position.set(this.garageWalk.x + sway, 1.62 + bob, this.garageWalk.z);
+    this.camera.rotation.order = "YXZ";
+    this.camera.rotation.set(this.garageLookPitch, this.garageLookYaw, 0);
+  }
+
+  private pushOut(cx: number, cz: number, radius: number): void {
+    const dx = this.garageWalk.x - cx;
+    const dz = this.garageWalk.z - cz;
+    const dist = Math.hypot(dx, dz);
+    if (dist >= radius) return;
+    if (dist < 1e-4) {
+      this.garageWalk.x = cx + radius;
+      return;
+    }
+    this.garageWalk.x = cx + (dx / dist) * radius;
+    this.garageWalk.z = cz + (dz / dist) * radius;
   }
 
   private updateLighting(dt: number): void {
@@ -1473,6 +1916,19 @@ export class ApexEngine {
     const dt = Math.min(0.05, this.clock.getDelta());
     const adt = dt * this.timeScale;
     this.clockTime += adt;
+
+    if (this.garageOn) {
+      this.updateGarage(dt);
+      this.animateCareer();
+      this.animateRev(dt);
+      this.composer.render();
+      this.clip?.frame(this.renderer.domElement);
+      if (!this.readySent) {
+        this.readySent = true;
+        this.onReady?.();
+      }
+      return;
+    }
 
     if (this.drive) {
       this.updateDrive(dt, adt);
@@ -1637,6 +2093,7 @@ export class ApexEngine {
     this.car.exhaustGlow.opacity +=
       (glowTarget - this.car.exhaustGlow.opacity) * (1 - Math.exp(-dt * 8));
     this.animateCareer();
+    this.animateRev(dt);
 
     this.weather.update(dt);
     this.updateAssemblyLabels();
@@ -1736,12 +2193,20 @@ export class ApexEngine {
     window.removeEventListener("pointerup", this.onDragEnd);
     window.removeEventListener("pointercancel", this.onDragEnd);
     window.removeEventListener("dblclick", this.onResetView);
+    window.removeEventListener("wheel", this.onGarageWheel);
+    window.removeEventListener("keydown", this.onGarageKeyDown);
+    window.removeEventListener("keyup", this.onGarageKeyUp);
     document.body.classList.remove("is-orbiting");
     for (const { el } of this.assemblyLabels) el.remove();
     this.weather.dispose();
     this.clearGhostLine();
     this.drive?.dispose();
     this.drive = null;
+    if (this.garageStage) {
+      this.scene.remove(this.garageStage.group);
+      this.garageStage.dispose();
+      this.garageStage = null;
+    }
     if (this.track) {
       this.scene.remove(this.track.group);
       this.track.dispose();
