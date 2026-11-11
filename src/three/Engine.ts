@@ -818,15 +818,16 @@ export class ApexEngine {
   }
 
   private orbitTarget(event: Event): HTMLElement | null {
-    const target = event.target as HTMLElement | null;
+    const target = event.target;
+    if (!(target instanceof Element)) return null;
     if (
-      target?.closest(
+      target.closest(
         "a, button, input, textarea, select, label, [contenteditable], .terminal, .grid, .corelab, .ctl-shell, .aero-dock, .aero-launch, .drive-hud, nav, header, footer",
       )
     ) {
       return null;
     }
-    return target;
+    return target as HTMLElement;
   }
 
   private onDragStart = (event: PointerEvent): void => {
@@ -901,9 +902,9 @@ export class ApexEngine {
         this.garagePitchT = 0.28;
         this.garageDistT = 8.6;
       } else {
-        this.garageLookYaw = 0;
-        this.garageLookPitch = -0.02;
-        this.garageWalk.set(0, 0, 6.3);
+        this.garageLookYaw = 0.7;
+        this.garageLookPitch = -0.04;
+        this.garageWalk.set(4.4, 0, 5.6);
       }
       return;
     }
@@ -920,14 +921,19 @@ export class ApexEngine {
     this.garageDistT = THREE.MathUtils.clamp(
       this.garageDistT + event.deltaY * 0.004,
       5.2,
-      13.6,
+      9.2,
     );
   };
 
   private onGarageKeyDown = (event: KeyboardEvent): void => {
     if (!this.garageOn || this.garageViewMode !== "first") return;
-    const target = event.target as HTMLElement | null;
-    if (target?.closest("input, textarea, select, [contenteditable]")) return;
+    const target = event.target;
+    if (
+      target instanceof HTMLElement &&
+      target.closest("input, textarea, select, [contenteditable]")
+    ) {
+      return;
+    }
     if (!GARAGE_WALK_KEYS.has(event.code)) return;
     event.preventDefault();
     this.garageKeys.add(event.code);
@@ -1440,10 +1446,10 @@ export class ApexEngine {
     this.garagePitchT = 0.24;
     this.garageDist = 8.6;
     this.garageDistT = 8.6;
-    this.garageWalk.set(0, 0, 6.3);
+    this.garageWalk.set(4.4, 0, 5.6);
     this.garageBob = 0;
-    this.garageLookYaw = 0;
-    this.garageLookPitch = -0.02;
+    this.garageLookYaw = 0.7;
+    this.garageLookPitch = -0.04;
     this.garageKeys.clear();
     this.dragging = false;
     this.revving = false;
@@ -1543,10 +1549,10 @@ export class ApexEngine {
     this.garageViewMode = view;
     this.garageKeys.clear();
     if (view === "first") {
-      this.garageWalk.set(0, 0, 6.3);
+      this.garageWalk.set(4.4, 0, 5.6);
       this.garageBob = 0;
-      this.garageLookYaw = 0;
-      this.garageLookPitch = -0.02;
+      this.garageLookYaw = 0.7;
+      this.garageLookPitch = -0.04;
     }
   }
 
@@ -1679,26 +1685,27 @@ export class ApexEngine {
 
     if (e < GARAGE_ENTRY_DURATION) {
       const d = smoothstep(e / 3.4);
+      const thirdFov = this.garageThirdFov();
       this.garageStartPos.set(0, 2.1, 14.6);
-      this.garageStartTgt.set(0, 1.15, 0.2).lerp(this.garageTarget.set(0, 0.78, 0.2), d);
+      this.garageStartTgt.set(0, 1.15, 0.2).lerp(this.garageTarget.set(0, 0.85, 0.2), d);
       const endCos = Math.cos(0.24);
       const endPos = new THREE.Vector3(
         Math.sin(0.62) * endCos * 8.6,
-        0.78 + Math.sin(0.24) * 8.6,
+        0.85 + Math.sin(0.24) * 8.6,
         0.2 + Math.cos(0.62) * endCos * 8.6,
       );
       this.camera.position.lerpVectors(this.garageStartPos, endPos, d);
       this.camera.position.x += Math.sin(e * 0.9) * 0.25 * (1 - d);
       this.camera.lookAt(this.garageStartTgt);
-      this.camera.fov = THREE.MathUtils.lerp(56, GARAGE_THIRD_FOV, d);
+      this.camera.fov = THREE.MathUtils.lerp(56, thirdFov, d);
       this.camera.updateProjectionMatrix();
       return;
     }
 
     if (this.garageViewMode === "first") {
       this.updateGarageWalk(dt);
-      this.camera.fov +=
-        (GARAGE_FIRST_FOV - this.camera.fov) * (1 - Math.exp(-dt * 6));
+      const firstFov = this.camera.aspect < 0.9 ? GARAGE_FIRST_FOV + 9 : GARAGE_FIRST_FOV;
+      this.camera.fov += (firstFov - this.camera.fov) * (1 - Math.exp(-dt * 6));
       this.camera.updateProjectionMatrix();
     } else {
       this.garageYaw += (this.garageYawT - this.garageYaw) * (1 - Math.exp(-dt * 12));
@@ -1706,15 +1713,16 @@ export class ApexEngine {
         (this.garagePitchT - this.garagePitch) * (1 - Math.exp(-dt * 12));
       this.garageDist += (this.garageDistT - this.garageDist) * (1 - Math.exp(-dt * 8));
       const cosP = Math.cos(this.garagePitch);
-      this.garageTarget.set(0, 0.78, 0.2);
+      this.garageTarget.set(0, 0.85, 0.2);
       this.camera.position.set(
         this.garageTarget.x + Math.sin(this.garageYaw) * cosP * this.garageDist,
         this.garageTarget.y + Math.sin(this.garagePitch) * this.garageDist,
         this.garageTarget.z + Math.cos(this.garageYaw) * cosP * this.garageDist,
       );
+      this.garageClampCam();
       this.camera.lookAt(this.garageTarget);
-      this.camera.fov +=
-        (GARAGE_THIRD_FOV - this.camera.fov) * (1 - Math.exp(-dt * 6));
+      const thirdFov = this.garageThirdFov();
+      this.camera.fov += (thirdFov - this.camera.fov) * (1 - Math.exp(-dt * 6));
       this.camera.updateProjectionMatrix();
     }
 
@@ -1724,6 +1732,19 @@ export class ApexEngine {
       this.camera.position.y += Math.cos(this.clockTime * 91) * amp;
       this.camera.rotateZ(Math.sin(this.clockTime * 57) * amp * 0.6);
     }
+  }
+
+  private garageThirdFov(): number {
+    return this.camera.aspect < 0.9 ? GARAGE_THIRD_FOV + 13 : GARAGE_THIRD_FOV;
+  }
+
+  // The orbit target sits inside an 18 m room; keep the eye off the walls and
+  // ceiling so it can never clip through the front door plane.
+  private garageClampCam(): void {
+    const p = this.camera.position;
+    p.x = THREE.MathUtils.clamp(p.x, -7.35, 7.35);
+    p.y = THREE.MathUtils.clamp(p.y, 0.5, 4.2);
+    p.z = THREE.MathUtils.clamp(p.z, -7.5, 8.3);
   }
 
   private updateGarageWalk(dt: number): void {
