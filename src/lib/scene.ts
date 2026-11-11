@@ -75,6 +75,8 @@ export const LIVERIES = [
   { id: "magenta", name: "MAGENTA", hex: 0xff2fb3, css: "#ff2fb3" },
   { id: "ember", name: "EMBER", hex: 0xff5a1f, css: "#ff5a1f" },
   { id: "azure", name: "AZURE", hex: 0x2f7bff, css: "#2f7bff" },
+  { id: "titanium", name: "TITANIUM", hex: 0x7c8792, css: "#7c8792" },
+  { id: "sector", name: "SECTOR", hex: 0xff4d2e, css: "#ff4d2e" },
 ] as const;
 
 export const CAMERA_PRESETS: Array<{ id: CameraPreset; name: string }> = [
