@@ -206,7 +206,9 @@ export class DriveSession {
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
     window.addEventListener("blur", this.onBlur);
-    (window as unknown as { __apexDrive?: DriveSession }).__apexDrive = this;
+    if (import.meta.env.DEV) {
+      (window as unknown as { __apexDrive?: DriveSession }).__apexDrive = this;
+    }
   }
 
   private buildGhostBody(): THREE.Group {

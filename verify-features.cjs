@@ -81,17 +81,21 @@ async function captureDownload(page, filename, timeoutMs = 30000) {
     const b64 = await page.evaluate(async (name) => {
       const entry = (window.__downloads || []).find((d) => d.name === name && !d.read);
       if (!entry) return null;
-      entry.read = true;
-      if (entry.href.startsWith("data:")) return entry.href.split(",")[1];
+      if (entry.href.startsWith("data:")) {
+        entry.read = true;
+        return entry.href.split(",")[1];
+      }
       try {
         const blob = await (await fetch(entry.href)).blob();
-        return await new Promise((resolve) => {
+        const data = await new Promise((resolve) => {
           const reader = new FileReader();
           reader.onload = () => resolve(String(reader.result).split(",")[1]);
           reader.readAsDataURL(blob);
         });
+        entry.read = true;
+        return data;
       } catch {
-        return "";
+        return null;
       }
     }, filename);
     if (b64) {
@@ -373,7 +377,7 @@ async function captureDownload(page, filename, timeoutMs = 30000) {
   await mob.goto(URL, { waitUntil: "domcontentloaded", timeout: 60000 });
   await mob.waitForSelector(".site.is-ready", { timeout: 60000 });
   await sleep(3000);
-  await mob.click(".aero-launch");
+  await mob.evaluate(() => document.querySelector(".aero-launch")?.click());
   await mob.waitForSelector(".aero-dock", { timeout: 10000 });
   await sleep(800);
   const mobBox = await mob.evaluate(() => {
