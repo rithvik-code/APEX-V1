@@ -8,7 +8,7 @@ import { Preloader } from "./components/Preloader";
 import { Cursor } from "./components/Cursor";
 import { AeroDock, AeroLaunch, type DockBridge, type DockStatus } from "./components/AeroDock";
 import { DriveHUD, type TrackOutline } from "./components/DriveHUD";
-import type { DriveHudState, DriveTouch, DriveVehicle } from "./three/drive";
+import type { DriveHudState, DriveVehicle } from "./three/drive";
 import { DEFAULT_DRIVE_SETUP, type DriveSetup } from "./lib/driveStore";
 import { useControl } from "./hooks/useControl";
 import { sound } from "./lib/sound";

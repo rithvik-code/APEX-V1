@@ -203,17 +203,6 @@ export function DriveHUD({
             </li>
           ))}
         </ol>
-        <div className="dhud__ghost">
-          <button
-            type="button"
-            className={`dhud__toggle${state.ghostEnabled ? " is-on" : ""}`}
-            onClick={() => onGhost(!state.ghostEnabled)}
-            aria-pressed={state.ghostEnabled}
-          >
-            GHOST {state.ghostEnabled ? "ON" : "OFF"}
-            {!state.hasGhost && <em>NO BEST LAP</em>}
-          </button>
-        </div>
       </div>
 
       <div className="dhud__setup">
@@ -277,6 +266,18 @@ export function DriveHUD({
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="dhud__ghost">
+          <button
+            type="button"
+            className={`dhud__toggle${state.ghostEnabled ? " is-on" : ""}`}
+            onClick={() => onGhost(!state.ghostEnabled)}
+            aria-pressed={state.ghostEnabled}
+          >
+            GHOST {state.ghostEnabled ? "ON" : "OFF"}
+            {!state.hasGhost && <em>NO BEST LAP</em>}
+          </button>
         </div>
       </div>
 
