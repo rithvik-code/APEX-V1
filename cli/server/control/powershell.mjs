@@ -98,6 +98,7 @@ export function runPowerShell(script, { timeoutMs = 30000, signal } = {}) {
     });
 
     signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) onAbort();
   });
 }
 
@@ -116,11 +117,7 @@ export async function runPowerShellJson(script, options) {
 
 export function killAllPowerShell() {
   for (const child of active) {
-    try {
-      child.kill();
-    } catch {
-      // The process already exited.
-    }
+    killTree(child);
   }
   active.clear();
 }

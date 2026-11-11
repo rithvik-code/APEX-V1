@@ -20,7 +20,10 @@ const PROTECTED_SEGMENTS = [
 ];
 
 function normalize(target) {
-  return path.resolve(target).replace(/[\\/]+$/, "");
+  const resolved = path.resolve(target);
+  const root = path.parse(resolved).root;
+  // Keep the drive/UNC root intact; stripping it turns "C:\" into "C:".
+  return resolved.length > root.length ? resolved.replace(/[\\/]+$/, "") : resolved;
 }
 
 function inside(target, root) {
@@ -40,9 +43,11 @@ function nearestExisting(target) {
 }
 
 function isProtected(target) {
-  const clean = target.replace(/\\/g, "/");
+  const fold = (value) =>
+    (process.platform === "win32" ? value.toLowerCase() : value).replace(/\\/g, "/");
+  const clean = fold(target);
   return PROTECTED_SEGMENTS.some((segment) => {
-    const needle = segment.replace(/\\/g, "/");
+    const needle = fold(segment);
     return clean.includes(`/${needle}/`) || clean.endsWith(`/${needle}`);
   });
 }
@@ -196,11 +201,24 @@ export class FileEngine {
     for (const line of lines.reverse()) {
       try {
         const entry = JSON.parse(line);
-        if (entry.snapshot && fs.existsSync(entry.snapshot)) {
-          fs.copyFileSync(entry.snapshot, entry.path);
+        if (!entry?.path) continue;
+        const target = normalize(entry.path);
+        // Re-validate even though we wrote the manifest: a tampered manifest
+        // must not turn undo into an arbitrary file restore.
+        if (isProtected(target) || !this.roots.some((root) => inside(target, root))) {
+          errors.push(`Skipped ${target}: outside authorized roots`);
+          continue;
+        }
+        if (entry.snapshot) {
+          const snapshot = normalize(entry.snapshot);
+          if (!inside(snapshot, this.shadowDir) || !fs.existsSync(snapshot)) {
+            errors.push(`Skipped ${target}: snapshot is unavailable`);
+            continue;
+          }
+          fs.copyFileSync(snapshot, target);
           restored += 1;
-        } else if (!entry.snapshot && fs.existsSync(entry.path)) {
-          fs.unlinkSync(entry.path);
+        } else if (fs.existsSync(target)) {
+          fs.unlinkSync(target);
           removed += 1;
         }
       } catch (error) {

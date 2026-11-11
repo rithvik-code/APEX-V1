@@ -111,6 +111,10 @@ class CdpConnection {
       entry.reject(new Error("CDP connection closed"));
     }
     this.pending.clear();
+    for (const waiter of this.waiters) {
+      waiter.reject(new Error("CDP connection closed"));
+    }
+    this.waiters.clear();
     try {
       this.ws.close();
     } catch {
@@ -180,7 +184,7 @@ export async function ensureBrowser() {
     "--no-first-run",
     "--no-default-browser-check",
     "--disable-features=Translate",
-    "--remote-allow-origins=*",
+    "--remote-allow-origins=http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:4173,http://localhost:4173",
     "--window-size=1440,900",
   ];
   if (config.headless) args.push("--headless=new", "--disable-gpu");
@@ -229,20 +233,24 @@ export async function listTabs({ ensure = true } = {}) {
     }));
 }
 
+function targetUrl(url) {
+  const value = String(url ?? "").trim();
+  if (value === "about:blank" || /^https?:\/\/[^\s]+$/i.test(value)) return value;
+  throw new Error("Browser URLs must start with http://, https:// or be about:blank");
+}
+
 export async function newTab(url = "about:blank") {
-  if (!/^(https?:|about:blank)/i.test(url)) {
-    throw new Error("Browser URLs must start with http://, https:// or about:blank");
-  }
+  const nextUrl = targetUrl(url);
   const { origin } = await ensureBrowser();
   let tab;
   try {
-    tab = await httpJson(origin, `/json/new?${encodeURIComponent(url)}`, "PUT");
+    tab = await httpJson(origin, `/json/new?${encodeURIComponent(nextUrl)}`, "PUT");
   } catch {
-    tab = await httpJson(origin, `/json/new?${encodeURIComponent(url)}`, "GET");
+    tab = await httpJson(origin, `/json/new?${encodeURIComponent(nextUrl)}`, "GET");
   }
   if (!tab?.id) throw new Error("Browser refused to open a tab");
   await activateTab(tab.id);
-  return { id: tab.id, url: tab.url ?? url };
+  return { id: tab.id, url: tab.url ?? nextUrl };
 }
 
 export async function activateTab(tabId) {
@@ -272,13 +280,11 @@ async function pageConnection(tabId) {
 }
 
 export async function navigate(tabId, url) {
-  if (!/^(https?:|about:blank)/i.test(url)) {
-    throw new Error("Browser URLs must start with http://, https:// or about:blank");
-  }
+  const nextUrl = targetUrl(url);
   const { cdp, tab } = await pageConnection(tabId);
   try {
     const loaded = cdp.waitFor("Page.loadEventFired", 12000).catch(() => null);
-    await cdp.send("Page.navigate", { url }, 15000);
+    await cdp.send("Page.navigate", { url: nextUrl }, 15000);
     await loaded;
     await new Promise((resolve) => setTimeout(resolve, 350));
     const result = await cdp.send("Runtime.evaluate", {
@@ -413,12 +419,19 @@ export async function screenshot(tabId, { quality = 70 } = {}) {
 }
 
 export function stopBrowser() {
-  if (browserProcess) {
-    try {
-      browserProcess.kill();
-    } catch {
-      // Already gone.
+  const child = browserProcess;
+  if (!child) return;
+  browserProcess = null;
+  try {
+    if (process.platform === "win32" && child.pid) {
+      spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+        windowsHide: true,
+        stdio: "ignore",
+      });
+    } else {
+      child.kill();
     }
-    browserProcess = null;
+  } catch {
+    // Already gone.
   }
 }
