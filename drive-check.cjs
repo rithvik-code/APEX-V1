@@ -260,7 +260,7 @@ async function main() {
       const log = { laps: [], maxSpeed: 0, offTrackFrames: 0, frames: 0, stuck: 0, ghostSeen: false, midSectors: null, activeRow: 0 };
       let lastLap = d.lapCount;
       const start = performance.now();
-      while (performance.now() - start < 46000) {
+      while (performance.now() - start < 90000) {
         const t = d.track.nearestT(d.pos.x, d.pos.z);
         const speed = Math.abs(d.speed);
         const aheadT = (t + 0.01 + speed * 0.00042) % 1;
@@ -275,9 +275,12 @@ async function main() {
         d.touch.throttle = speed < targetSpeed;
         d.touch.brake = speed > targetSpeed + 3.5;
         if (d.ghostHasPos) log.ghostSeen = true;
-        if (!log.midSectors && d.sectors[0] !== null && d.sectors[1] === null) {
-          log.midSectors = [...document.querySelectorAll('.dhud__sector b')].map((e) => e.textContent);
-          log.activeRow = document.querySelectorAll('.dhud__sector.is-active').length;
+        if (d.sectors[0] !== null && d.sectors[1] === null) {
+          const shown = [...document.querySelectorAll('.dhud__sector b')].map((e) => e.textContent);
+          if (shown[0] !== "--:--.---") {
+            log.midSectors = shown;
+            log.activeRow = document.querySelectorAll('.dhud__sector.is-active').length;
+          }
         }
         log.maxSpeed = Math.max(log.maxSpeed, speed);
         if (d.offTrack) log.offTrackFrames++;
