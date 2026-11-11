@@ -489,6 +489,26 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
     setWebMode(!web);
   };
 
+  const setArcadeMode = (next: boolean) => {
+    setArcade(next);
+    saveArcadeMode(next);
+    addEntry(
+      "meta",
+      next
+        ? "ARCADE MODE ON — REPLIES ARRIVE AS QUIZ, MISSION OR INTEL CARDS. THE FULL TEXT IS ONE CLICK AWAY."
+        : "ARCADE MODE OFF — PLAIN TERMINAL REPLIES.",
+    );
+  };
+
+  const toggleArcade = () => {
+    sound.tick("click");
+    setArcadeMode(!arcade);
+  };
+
+  const handleXp = useCallback((kind: XpKind) => {
+    setArcadeStats((prev) => awardArcade(kind, prev));
+  }, []);
+
   const setVoxMode = (next: boolean) => {
     setVox(next);
     addEntry(
@@ -579,6 +599,13 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
           break;
         }
         setWebMode(arg ? /^on$/i.test(arg) : !web);
+        break;
+      case "/arcade":
+        if (arg && !/^(on|off)$/i.test(arg)) {
+          addEntry("meta", "USAGE: /arcade [on|off]");
+          break;
+        }
+        setArcadeMode(arg ? /^on$/i.test(arg) : !arcade);
         break;
       case "/search": {
         if (!arg) {
@@ -738,6 +765,7 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
     }
 
     const intentGoal = controlIntentGoal(text);
+    const arcadeKind = arcade ? classifyArcade(text, Boolean(intentGoal)) : null;
     const userEntry: Entry = { id: uid(), role: "user", content: text };
     const metaId = uid();
     // Only recent turns matter for the answer, and a shorter transcript means
