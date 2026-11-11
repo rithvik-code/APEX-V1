@@ -759,7 +759,7 @@ export class ApexEngine {
     const target = event.target as HTMLElement | null;
     if (
       target?.closest(
-        "a, button, input, textarea, select, label, [contenteditable], .terminal, .grid, .corelab, .ctl-shell, .aero-dock, .aero-launch, nav, header, footer",
+        "a, button, input, textarea, select, label, [contenteditable], .terminal, .grid, .corelab, .ctl-shell, .aero-dock, .aero-launch, .drive-hud, nav, header, footer",
       )
     ) {
       return null;
@@ -768,7 +768,7 @@ export class ApexEngine {
   }
 
   private onDragStart = (event: PointerEvent): void => {
-    if (this.paused || event.button !== 0 || event.pointerType === "touch") return;
+    if (this.paused || this.drive || event.button !== 0 || event.pointerType === "touch") return;
     if (!this.heroVisible() || !this.orbitTarget(event)) return;
     this.dragging = true;
     this.dragX = event.clientX;
@@ -804,7 +804,7 @@ export class ApexEngine {
   };
 
   private onResetView = (event: MouseEvent): void => {
-    if (this.paused || !this.heroVisible() || !this.orbitTarget(event)) return;
+    if (this.paused || this.drive || !this.heroVisible() || !this.orbitTarget(event)) return;
     this.userYawT = 0;
     this.userPitchT = 0;
     this.yawVel = 0;
@@ -1321,6 +1321,23 @@ export class ApexEngine {
     return this.drive ? this.drive.getState() : null;
   }
 
+  getTrackOutline(): {
+    points: Array<[number, number]>;
+    bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
+    start: { x: number; z: number; heading: number };
+  } | null {
+    if (!this.track) return null;
+    return {
+      points: this.track.minimap.map((p) => [p[0], p[1]]),
+      bounds: { ...this.track.bounds },
+      start: {
+        x: this.track.start.pos.x,
+        z: this.track.start.pos.z,
+        heading: this.track.start.heading,
+      },
+    };
+  }
+
   setDriveTouch(touch: DriveTouch): void {
     this.drive?.setTouch(touch);
   }
@@ -1613,6 +1630,13 @@ export class ApexEngine {
     for (const { el } of this.assemblyLabels) el.remove();
     this.weather.dispose();
     this.clearGhostLine();
+    this.drive?.dispose();
+    this.drive = null;
+    if (this.track) {
+      this.scene.remove(this.track.group);
+      this.track.dispose();
+      this.track = null;
+    }
     this.recordingLap = false;
     if (this.clip) {
       void this.clip.stop();

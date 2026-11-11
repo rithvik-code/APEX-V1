@@ -17,6 +17,13 @@ import {
 
 const ACID = 0xc8ff16;
 
+export type {
+  DriveEntry,
+  DriveSetup,
+  DriveVehicle,
+  SectorTimes,
+} from "../lib/driveStore";
+
 export type DrivePhase = "countdown" | "racing";
 
 export type DriveTouch = {
