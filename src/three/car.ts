@@ -465,7 +465,7 @@ export function createSupercar(): {
       map: glowTexture(),
       color: ACID,
       transparent: true,
-      opacity: 0.5,
+      opacity: 0.1,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     }),
