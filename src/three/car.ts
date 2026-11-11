@@ -45,6 +45,50 @@ export function numberTexture(number: string, accent: string): THREE.CanvasTextu
   return texture;
 }
 
+// Career badge for the rear wing: plain text on transparent, generated once.
+export function badgeTexture(label: string): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d")!;
+  ctx.clearRect(0, 0, 512, 128);
+  ctx.fillStyle = "#c8ff16";
+  ctx.font = "700 62px 'Archivo','Arial Black',sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label.slice(0, 12), 256, 70);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  return texture;
+}
+
+function numberFrameTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d")!;
+  ctx.clearRect(0, 0, 256, 256);
+  ctx.strokeStyle = "#c8ff16";
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.arc(128, 128, 124, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 12; i++) {
+    const angle = (i / 12) * Math.PI * 2;
+    const inner = i % 3 === 0 ? 108 : 116;
+    ctx.beginPath();
+    ctx.moveTo(128 + Math.cos(angle) * inner, 128 + Math.sin(angle) * inner);
+    ctx.lineTo(128 + Math.cos(angle) * 124, 128 + Math.sin(angle) * 124);
+    ctx.stroke();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  return texture;
+}
+
 function glowTexture(): THREE.CanvasTexture {
   const canvas = document.createElement("canvas");
   canvas.width = 128;
@@ -508,6 +552,7 @@ export function createSupercar(): {
     [-1, -1.42],
     [1, -1.42],
   ];
+  const careerWheelCovers: THREE.Object3D[] = [];
 
   for (const [side, z] of wheelPositions) {
     const wheel = new THREE.Group();
@@ -550,6 +595,20 @@ export function createSupercar(): {
       spoke.position.x = side * 0.15;
       wheel.add(spoke);
     }
+
+    // Career unlock: aero wheel covers over the spokes.
+    const coverGeo = new THREE.CylinderGeometry(0.315, 0.315, 0.012, 40);
+    coverGeo.rotateZ(Math.PI / 2);
+    const cover = new THREE.Mesh(coverGeo, metal);
+    cover.position.x = side * 0.2;
+    cover.visible = false;
+    wheel.add(cover);
+    const coverRing = new THREE.Mesh(new THREE.TorusGeometry(0.315, 0.006, 6, 44), acid);
+    coverRing.rotation.y = (side * Math.PI) / 2;
+    coverRing.position.x = side * 0.208;
+    coverRing.visible = false;
+    wheel.add(coverRing);
+    careerWheelCovers.push(cover, coverRing);
 
     wheel.userData.side = side;
     wheel.userData.baseX = side * 0.93;
