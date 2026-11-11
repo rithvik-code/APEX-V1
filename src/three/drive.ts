@@ -39,6 +39,13 @@ export type DriveFlash = {
   at: number;
 };
 
+export type DriveLapEvent = {
+  vehicle: DriveVehicle;
+  time: number;
+  best: boolean;
+  lapCount: number;
+};
+
 export type DriveHudState = {
   phase: DrivePhase;
   countdown: number;
@@ -93,6 +100,8 @@ export class DriveSession {
   readonly vehicle: DriveVehicle;
   setup: DriveSetup;
   wet: boolean;
+  distanceM = 0;
+  onLap: ((lap: DriveLapEvent) => void) | null = null;
 
   pos = new THREE.Vector3();
   heading = 0;
@@ -299,6 +308,12 @@ export class DriveSession {
     this.ghostEnabled = enabled;
   }
 
+  setGhostTrail(enabled: boolean): void {
+    const material = this.trail.material as THREE.LineBasicMaterial;
+    material.color.setHex(enabled ? 0x6ff9ff : ACID);
+    material.opacity = enabled ? 0.42 : 0.24;
+  }
+
   get countingDown(): boolean {
     return this.phase === "countdown";
   }
@@ -435,6 +450,7 @@ export class DriveSession {
 
     this.pos.x += Math.sin(this.velDir) * this.speed * dt;
     this.pos.z += Math.cos(this.velDir) * this.speed * dt;
+    this.distanceM += Math.abs(this.speed) * dt;
 
     // Barrier at the runoff limit: kill the outward velocity component and
     // let the car scrape along the wall instead of gluing to it.
@@ -542,6 +558,12 @@ export class DriveSession {
     this.lastGhostSample = 0;
     this.trailCount = 0;
     this.trail.geometry.setDrawRange(0, 0);
+    this.onLap?.({
+      vehicle: this.vehicle,
+      time,
+      best: result.isBest,
+      lapCount: this.lapCount,
+    });
   }
 
   private updateGhost(): void {
@@ -628,6 +650,7 @@ export class DriveSession {
       lapCount: this.lapCount,
       offTrack: this.offTrack,
       drift: clamp(Math.abs(this.slip) / 0.6, 0, 1),
+      distanceM: this.distanceM,
       pos: { x: this.pos.x, z: this.pos.z },
       heading: this.heading,
       ghostPos: this.ghostHasPos ? { x: this.ghostPos.x, z: this.ghostPos.z } : null,

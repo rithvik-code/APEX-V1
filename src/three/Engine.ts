@@ -1033,7 +1033,7 @@ export class ApexEngine {
 
     const badgeOn = u.has("wingBadge") || u.has("veteran");
     c.badgeMesh.visible = badgeOn;
-    if (badgeOn || c.badgeMat.map) {
+    if (badgeOn) {
       c.badgeMat.map?.dispose();
       c.badgeMat.map = badgeTexture(
         u.has("veteran") ? "VETERAN" : this.careerLicence,
@@ -1069,8 +1069,8 @@ export class ApexEngine {
     this.bike.career.tailStripMat.opacity = u.has("tailStrip") ? 0.5 : 0;
 
     // Pulsing accent is animated in animateCareer; reset baselines here.
-    this.car.accentMats[1].opacity = u.has("pulse") ? 0.55 : 0.55;
-    this.bike.accent.opacity = u.has("pulse") ? 0.85 : 0.85;
+    this.car.accentMats[1].opacity = 0.55;
+    this.bike.accent.opacity = 0.85;
   }
 
   private animateCareer(): void {
@@ -1466,6 +1466,7 @@ export class ApexEngine {
 
     if (this.drive) {
       this.updateDrive(dt, adt);
+      this.animateCareer();
       this.updateLighting(dt);
       this.weather.update(dt);
       this.composer.render();
@@ -1625,6 +1626,7 @@ export class ApexEngine {
       : 0;
     this.car.exhaustGlow.opacity +=
       (glowTarget - this.car.exhaustGlow.opacity) * (1 - Math.exp(-dt * 8));
+    this.animateCareer();
 
     this.weather.update(dt);
     this.updateAssemblyLabels();
