@@ -132,8 +132,12 @@ export function DriveHUD({
   const hold = (flag: "throttle" | "brake" | "handbrake") => ({
     onPointerDown: (event: ReactPointerEvent) => {
       event.preventDefault();
-      (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
       onTouch({ [flag]: true } as DriveTouch);
+      try {
+        (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+      } catch {
+        // Synthetic or already-released pointers cannot be captured.
+      }
     },
     onPointerUp: () => onTouch({ [flag]: false } as DriveTouch),
     onPointerCancel: () => onTouch({ [flag]: false } as DriveTouch),
@@ -143,8 +147,12 @@ export function DriveHUD({
   const steerHold = (dir: -1 | 1) => ({
     onPointerDown: (event: ReactPointerEvent) => {
       event.preventDefault();
-      (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
       onTouch({ steer: dir });
+      try {
+        (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+      } catch {
+        // Synthetic or already-released pointers cannot be captured.
+      }
     },
     onPointerUp: () => onTouch({ steer: 0 }),
     onPointerCancel: () => onTouch({ steer: 0 }),

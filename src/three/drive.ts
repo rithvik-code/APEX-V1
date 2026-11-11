@@ -405,7 +405,8 @@ export class DriveSession {
     this.pos.x += Math.sin(this.velDir) * this.speed * dt;
     this.pos.z += Math.cos(this.velDir) * this.speed * dt;
 
-    // Barrier at the runoff limit.
+    // Barrier at the runoff limit: kill the outward velocity component and
+    // let the car scrape along the wall instead of gluing to it.
     const dist2 = this.track.distanceFromCenter(this.pos.x, this.pos.z);
     const limit = this.track.halfWidth + this.track.runoff;
     if (dist2 > limit) {
@@ -414,11 +415,29 @@ export class DriveSession {
       const nx = this.pos.x - this.tmp.x;
       const nz = this.pos.z - this.tmp.z;
       const len = Math.hypot(nx, nz) || 1;
-      this.pos.x = this.tmp.x + (nx / len) * limit;
-      this.pos.z = this.tmp.z + (nz / len) * limit;
-      if (Math.abs(this.speed) > 6) sound.tick("key");
-      this.speed *= 0.4;
-      this.velDir = this.heading;
+      const ux = nx / len;
+      const uz = nz / len;
+      this.pos.x = this.tmp.x + ux * limit;
+      this.pos.z = this.tmp.z + uz * limit;
+
+      let vx = Math.sin(this.velDir) * this.speed;
+      let vz = Math.cos(this.velDir) * this.speed;
+      const vn = vx * ux + vz * uz;
+      if (vn > 0) {
+        if (vn > 5) sound.tick("key");
+        vx -= ux * vn * 1.15;
+        vz -= uz * vn * 1.15;
+        const scrub = Math.max(0.55, 1 - vn * 0.02);
+        vx *= scrub;
+        vz *= scrub;
+      } else {
+        const scrape = 1 - 0.8 * dt;
+        vx *= scrape;
+        vz *= scrape;
+      }
+      this.speed = Math.hypot(vx, vz) * (this.speed < 0 ? -1 : 1);
+      this.velDir = Math.atan2(vx, vz);
+      this.lean *= 0.9;
     }
 
     // Body attitude.
