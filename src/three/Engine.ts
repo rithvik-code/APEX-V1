@@ -1004,7 +1004,89 @@ export class ApexEngine {
         livery.id === "silver" || livery.id === "graphite" ? ACID : livery.hex,
       );
     }
+    this.applyCareerVisuals();
     if (this.drive) this.applyDriveVisibility();
+  }
+
+  /* ---- Constructor Series cosmetic unlocks -------------------------------- */
+
+  setCareer(unlocks: ReadonlySet<string>, licence: string): void {
+    this.careerUnlocks = new Set(unlocks);
+    this.careerLicence = licence;
+    this.applyCareerVisuals();
+  }
+
+  private applyCareerVisuals(): void {
+    const u = this.careerUnlocks;
+    const c = this.car.career;
+    const show = (objects: THREE.Object3D[], on: boolean) => {
+      for (const object of objects) object.visible = on;
+    };
+
+    show(c.wheelCovers, u.has("wheelCovers"));
+    show(c.canards, u.has("canards"));
+    show(c.gurney, u.has("gurney"));
+    show(c.plateFrames, u.has("plateFrame") && this.carRoundels.some((r) => r.visible));
+    show(c.soot, u.has("soot"));
+    show(c.veteran, u.has("veteran"));
+    show(c.fullKit, u.has("fullKit"));
+
+    const badgeOn = u.has("wingBadge") || u.has("veteran");
+    c.badgeMesh.visible = badgeOn;
+    if (badgeOn || c.badgeMat.map) {
+      c.badgeMat.map?.dispose();
+      c.badgeMat.map = badgeTexture(
+        u.has("veteran") ? "VETERAN" : this.careerLicence,
+      );
+      c.badgeMat.needsUpdate = true;
+    }
+
+    show(c.flames, u.has("flame"));
+    c.flameMat.opacity = u.has("flame") ? 0.5 : 0;
+    c.cockpitGlow.opacity = u.has("cockpitGlow") ? 0.5 : 0;
+
+    this.car.headlamp.color.setHex(u.has("headlamp") ? 0xd8f4ff : 0xf2ffe0);
+
+    if (u.has("chrome")) {
+      this.car.paint.color.setHex(0xd7dee4);
+      this.car.paint.metalness = 1;
+      this.car.paint.roughness = 0.05;
+      this.car.paint.clearcoat = 1;
+    } else if (u.has("wear")) {
+      this.car.paint.roughness = 0.34;
+      this.car.paint.clearcoat = 0.45;
+    } else {
+      this.car.paint.roughness = 0.17;
+      this.car.paint.clearcoat = 1;
+    }
+
+    const bikeBody = this.bike.career.bodyMat;
+    bikeBody.color.setHex(u.has("chrome") ? 0xcfd6dc : 0x121518);
+    bikeBody.metalness = u.has("chrome") ? 1 : 0.9;
+    bikeBody.roughness = u.has("chrome") ? 0.06 : u.has("wear") ? 0.38 : 0.26;
+
+    this.bike.career.tailStrip.visible = u.has("tailStrip");
+    this.bike.career.tailStripMat.opacity = u.has("tailStrip") ? 0.5 : 0;
+
+    // Pulsing accent is animated in animateCareer; reset baselines here.
+    this.car.accentMats[1].opacity = u.has("pulse") ? 0.55 : 0.55;
+    this.bike.accent.opacity = u.has("pulse") ? 0.85 : 0.85;
+  }
+
+  private animateCareer(): void {
+    if (this.careerUnlocks.has("flame")) {
+      const flick = 0.55 + 0.45 * Math.abs(Math.sin(this.clockTime * 31));
+      this.car.career.flameMat.opacity = 0.28 + flick * 0.34;
+      for (const flame of this.car.career.flames) {
+        flame.scale.set(0.85 + flick * 0.4, 0.7 + flick * 0.7, 0.85 + flick * 0.4);
+      }
+    }
+    if (this.careerUnlocks.has("pulse")) {
+      const wave = 0.5 + 0.5 * Math.sin(this.clockTime * 5.2);
+      this.car.accentMats[1].opacity = 0.35 + wave * 0.4;
+      this.bike.accent.opacity = 0.55 + wave * 0.4;
+      this.bike.career.tailStripMat.opacity = 0.35 + wave * 0.35;
+    }
   }
 
   exportPNG(): string {
