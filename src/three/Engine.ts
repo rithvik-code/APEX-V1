@@ -1168,6 +1168,9 @@ export class ApexEngine {
     this.driveWheelSpin = 0;
     this.applyDriveVisibility();
     (this.scene.fog as THREE.FogExp2).density = 0.006;
+    // The showroom environment is a bright studio; the circuit needs a night
+    // mood so the tarmac reads against the run-off.
+    this.scene.environmentIntensity = 0.32;
 
     const start = this.track.start;
     this.driveForward.set(Math.sin(start.heading), 0, Math.cos(start.heading));
@@ -1195,6 +1198,7 @@ export class ApexEngine {
     }
     this.applyShowroomVisibility();
     (this.scene.fog as THREE.FogExp2).density = 0.017;
+    this.scene.environmentIntensity = 1;
     if (this.lastConfig) this.configure(this.lastConfig);
   }
 
@@ -1271,11 +1275,12 @@ export class ApexEngine {
 
     if (drive.countingDown) {
       const angle = this.clockTime * 0.6;
+      const orbit = mobile ? 10.5 : 8;
       this.driveCamPos.lerp(
         new THREE.Vector3(
-          drive.pos.x + Math.sin(angle) * 8,
-          3.2,
-          drive.pos.z + Math.cos(angle) * 8,
+          drive.pos.x + Math.sin(angle) * orbit,
+          mobile ? 4 : 3.4,
+          drive.pos.z + Math.cos(angle) * orbit,
         ),
         1 - Math.exp(-dt * 3),
       );
@@ -1284,19 +1289,20 @@ export class ApexEngine {
         1 - Math.exp(-dt * 3),
       );
     } else {
-      const dist = bike ? 5.8 : 7;
-      const height = bike ? 2.5 : 3;
+      const dist = (bike ? 6.3 : 7.8) + (mobile ? 2.8 : 0);
+      const height = (bike ? 3 : 3.7) + (mobile ? 1.4 : 0);
       const desired = new THREE.Vector3(
         drive.pos.x - this.driveForward.x * dist,
         height,
         drive.pos.z - this.driveForward.z * dist,
       );
       this.driveCamPos.lerp(desired, 1 - Math.exp(-dt * 6));
+      const ahead = mobile ? 8 : 6;
       this.driveCamTgt.lerp(
         new THREE.Vector3(
-          drive.pos.x + this.driveForward.x * 5,
-          1.15,
-          drive.pos.z + this.driveForward.z * 5,
+          drive.pos.x + this.driveForward.x * ahead,
+          1.35,
+          drive.pos.z + this.driveForward.z * ahead,
         ),
         1 - Math.exp(-dt * 7),
       );
@@ -1304,7 +1310,7 @@ export class ApexEngine {
 
     this.camera.position.copy(this.driveCamPos);
     this.camera.lookAt(this.driveCamTgt);
-    const targetFov = (drive.countingDown ? 50 : 55 + sn * 17) + (mobile ? 9 : 0);
+    const targetFov = (drive.countingDown ? 52 : 56 + sn * 16) + (mobile ? 17 : 0);
     this.camera.fov += (targetFov - this.camera.fov) * (1 - Math.exp(-dt * 4));
     this.camera.updateProjectionMatrix();
     if (!this.reducedMotion) this.camera.rotateZ(-drive.lean * 0.12);

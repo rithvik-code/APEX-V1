@@ -144,10 +144,10 @@ export function buildTrack(): Track {
 
   // Asphalt.
   const asphaltMat = track(new THREE.MeshStandardMaterial({
-    color: 0x121517,
-    roughness: 0.94,
-    metalness: 0.08,
-    envMapIntensity: 0.3,
+    color: 0x1b2023,
+    roughness: 0.96,
+    metalness: 0.05,
+    envMapIntensity: 0.22,
   }));
   const asphalt = new THREE.Mesh(track(flatRibbon(HALF_WIDTH, -HALF_WIDTH, 0, false)), asphaltMat);
   group.add(asphalt);
@@ -155,17 +155,20 @@ export function buildTrack(): Track {
   // Rumble strips just outside each edge.
   const curbMat = track(new THREE.MeshStandardMaterial({
     vertexColors: true,
-    roughness: 0.7,
-    metalness: 0.1,
+    roughness: 0.72,
+    metalness: 0.05,
+    envMapIntensity: 0.4,
+    emissive: 0x0d1202,
+    emissiveIntensity: 0.7,
   }));
-  group.add(new THREE.Mesh(track(flatRibbon(HALF_WIDTH + 0.6, HALF_WIDTH, 0.012, true)), curbMat));
-  group.add(new THREE.Mesh(track(flatRibbon(-HALF_WIDTH, -HALF_WIDTH - 0.6, 0.012, true)), curbMat));
+  group.add(new THREE.Mesh(track(flatRibbon(HALF_WIDTH + 0.8, HALF_WIDTH, 0.012, true)), curbMat));
+  group.add(new THREE.Mesh(track(flatRibbon(-HALF_WIDTH, -HALF_WIDTH - 0.8, 0.012, true)), curbMat));
 
   // Glowing edge lines.
   const edgeMat = track(new THREE.LineBasicMaterial({
-    color: 0xa9d915,
+    color: 0xc8ff16,
     transparent: true,
-    opacity: 0.5,
+    opacity: 0.72,
   }));
   for (const side of [1, -1]) {
     const pts: THREE.Vector3[] = [];
@@ -224,9 +227,10 @@ export function buildTrack(): Track {
 
   // Barriers: low walls at the runoff limit, both sides, with an acid cap.
   const wallMat = track(new THREE.MeshStandardMaterial({
-    color: 0x0c0f11,
-    roughness: 0.6,
-    metalness: 0.3,
+    color: 0x11161a,
+    roughness: 0.62,
+    metalness: 0.2,
+    envMapIntensity: 0.25,
     side: THREE.DoubleSide,
   }));
   const capMat = track(new THREE.LineBasicMaterial({ color: 0x8fbf12, transparent: true, opacity: 0.55 }));
@@ -260,9 +264,10 @@ export function buildTrack(): Track {
 
   // Ground + subtle grid surrounding the circuit.
   const groundMat = track(new THREE.MeshStandardMaterial({
-    color: 0x080b09,
+    color: 0x040605,
     roughness: 1,
     metalness: 0,
+    envMapIntensity: 0.1,
   }));
   const ground = new THREE.Mesh(track(new THREE.CircleGeometry(150, 72)), groundMat);
   ground.rotation.x = -Math.PI / 2;
