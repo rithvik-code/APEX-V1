@@ -25,6 +25,21 @@ import {
   saveLap,
   type LapRecording,
 } from "../lib/clip";
+import { loadBoard } from "../lib/driveStore";
+import {
+  currentLicence,
+  formatKm,
+  licenceProgress,
+  nextLicence,
+  paintCareerCard,
+  setPaddock,
+  UNLOCK_LABELS,
+  unlockCount,
+  unlockSet,
+  type CareerState,
+  type PaddockProject,
+  type UnlockId,
+} from "../lib/career";
 import { sound } from "../lib/sound";
 
 export type DockBridge = {
@@ -50,6 +65,11 @@ export type DockStatus = {
 };
 
 type Tab = "flow" | "style" | "dyno" | "garage" | "replay";
+
+const LIVERY_UNLOCKS: Record<string, UnlockId> = {
+  titanium: "titaniumLivery",
+  sector: "sectorLivery",
+};
 
 const TABS: Array<{ id: Tab; name: string }> = [
   { id: "flow", name: "FLOW" },
@@ -341,6 +361,8 @@ export function AeroDock({
   onReset,
   bridge,
   status,
+  career,
+  onCareer,
 }: {
   config: SceneConfig;
   onChange: (patch: Partial<SceneConfig>) => void;
@@ -350,6 +372,8 @@ export function AeroDock({
   onReset: () => void;
   bridge: DockBridge;
   status: DockStatus;
+  career: CareerState;
+  onCareer: (next: CareerState) => void;
 }) {
   const [tab, setTab] = useState<Tab>("flow");
   const [garage, setGarage] = useState<GarageEntry[]>(() => loadGarage());
@@ -364,6 +388,60 @@ export function AeroDock({
   const dyno = dynoPoint(config.rpm);
   const peak = dynoPeak();
   const activeLap = status.isReplaying ? playingLap : null;
+  const unlocks = unlockSet(career);
+  const licence = currentLicence(career.cp);
+  const next = nextLicence(career.cp);
+  const unlockTotal = Object.keys(UNLOCK_LABELS).length;
+  const [scanState, setScanState] = useState<"idle" | "loading" | "ready" | "offline">("idle");
+  const [scanMsg, setScanMsg] = useState("");
+  const [careerMsg, setCareerMsg] = useState("");
+  const scanTried = useRef(false);
+
+  const refreshPaddock = async (force: boolean) => {
+    setScanState("loading");
+    try {
+      const response = await fetch(
+        `/api/workspace/scan${force ? "?refresh=1" : ""}`,
+        { cache: "no-store" },
+      );
+      if (!response.ok) throw new Error(String(response.status));
+      const payload = (await response.json()) as { projects?: PaddockProject[] };
+      const projects = Array.isArray(payload.projects) ? payload.projects : [];
+      onCareer(setPaddock(career, projects));
+      setScanState("ready");
+      setScanMsg(`${projects.length} CONSTRUCTOR${projects.length === 1 ? "" : "S"} LINKED`);
+    } catch {
+      setScanState("offline");
+      setScanMsg("PADDOCK DAEMON OFFLINE · RUN npm run apex");
+    }
+  };
+
+  useEffect(() => {
+    if (tab !== "garage" || career.paddock.length > 0 || scanTried.current) return;
+    scanTried.current = true;
+    void refreshPaddock(false);
+  }, [tab, career.paddock.length]);
+
+  const exportCareerCard = () => {
+    const canvas = document.createElement("canvas");
+    paintCareerCard(canvas, {
+      licence,
+      cp: career.cp,
+      nextCp: next?.cp ?? null,
+      distanceM: career.distanceM,
+      bestCar: loadBoard("car")[0]?.time ?? null,
+      bestBike: loadBoard("bike")[0]?.time ?? null,
+      constructors: career.paddock.length,
+      unlocks: unlockCount(career),
+      unlockTotal,
+    });
+    canvas.toBlob((blob) => {
+      if (blob) downloadBlob(blob, "apex-constructor-series.png");
+    }, "image/png");
+    setCareerMsg("CAREER CARD EXPORTED");
+    window.setTimeout(() => setCareerMsg(""), 2200);
+    sound.tick("start");
+  };
 
   const flashShare = (msg: string) => {
     setShareMsg(msg);
@@ -509,20 +587,28 @@ export function AeroDock({
                   <b>{config.paint.enabled ? "CUSTOM" : livery.name}</b>
                 </span>
                 <div className="aero-swatches" role="group" aria-label="Livery">
-                  {LIVERIES.map((entry) => (
-                    <button
-                      key={entry.id}
-                      type="button"
-                      className={!config.paint.enabled && config.livery === entry.id ? "is-on" : ""}
-                      style={{ ["--swatch" as string]: entry.css }}
-                      onClick={() => {
-                        sound.tick("click");
-                        onChange({ livery: entry.id, paint: { ...config.paint, enabled: false } });
-                      }}
-                      aria-label={`Livery ${entry.name}`}
-                      aria-pressed={!config.paint.enabled && config.livery === entry.id}
-                    />
-                  ))}
+                  {LIVERIES.map((entry) => {
+                    const lock = LIVERY_UNLOCKS[entry.id];
+                    const locked = lock ? !unlocks.has(lock) : false;
+                    return (
+                      <button
+                        key={entry.id}
+                        type="button"
+                        className={`${!config.paint.enabled && config.livery === entry.id ? "is-on" : ""}${locked ? " is-locked" : ""}`}
+                        style={{ ["--swatch" as string]: entry.css }}
+                        disabled={locked}
+                        onClick={() => {
+                          sound.tick("click");
+                          onChange({ livery: entry.id, paint: { ...config.paint, enabled: false } });
+                        }}
+                        aria-label={
+                          locked ? `Livery ${entry.name} locked` : `Livery ${entry.name}`
+                        }
+                        aria-pressed={!config.paint.enabled && config.livery === entry.id}
+                        title={locked ? "UNLOCK IN CONSTRUCTOR SERIES" : entry.name}
+                      />
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -598,6 +684,98 @@ export function AeroDock({
 
         {tab === "garage" && (
           <>
+            <div className="aero-dock__group career-sheet">
+              <div className="career-sheet__head">
+                <div className="career-sheet__licence">
+                  <b style={{ color: licence.color }}>{licence.short}</b>
+                  <div>
+                    <strong>{licence.name}</strong>
+                    <span>LICENCE {String(licence.index).padStart(2, "0")} / 08</span>
+                  </div>
+                </div>
+                <div className="career-sheet__cp">
+                  <b>{career.cp.toLocaleString()}<i>CP</i></b>
+                  <span>{next ? `${(next.cp - career.cp).toLocaleString()} TO ${next.name}` : "TOP LICENCE REACHED"}</span>
+                </div>
+              </div>
+              <div className="career-sheet__bar">
+                <em style={{ width: `${licenceProgress(career.cp) * 100}%` }} />
+              </div>
+              <div className="career-sheet__stats">
+                <div><span>ODOMETER</span><b>{formatKm(career.distanceM)}</b></div>
+                <div><span>CONSTRUCTORS</span><b>{career.paddock.length}</b></div>
+                <div><span>UNLOCKS</span><b>{unlockCount(career)}/{unlockTotal}</b></div>
+              </div>
+              <div className="aero-row">
+                <button type="button" className="aero-btn aero-btn--acid" onClick={exportCareerCard}>
+                  CAREER CARD ↓
+                </button>
+              </div>
+              {careerMsg && <p className="aero-dock__flash">{careerMsg}</p>}
+            </div>
+
+            <div className="aero-dock__group">
+              <div className="aero-ctl__head"><span>CAREER UNLOCKS</span><b>{unlockCount(career)}/{unlockTotal}</b></div>
+              <div className="career-unlocks">
+                {(Object.keys(UNLOCK_LABELS) as UnlockId[]).map((id) => (
+                  <span key={id} className={unlocks.has(id) ? "is-on" : ""}>
+                    <i aria-hidden="true">{unlocks.has(id) ? "●" : "○"}</i>
+                    {UNLOCK_LABELS[id]}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="aero-dock__group">
+              <div className="aero-ctl__head">
+                <span>PADDOCK LINK</span>
+                <b>
+                  {scanState === "loading"
+                    ? "SCANNING"
+                    : scanState === "offline"
+                      ? "OFFLINE"
+                      : "READ-ONLY"}
+                </b>
+              </div>
+              <div className="aero-row">
+                <button
+                  type="button"
+                  className="aero-btn aero-btn--acid"
+                  disabled={scanState === "loading"}
+                  onClick={() => void refreshPaddock(true)}
+                >
+                  {scanState === "loading" ? "SCANNING WORKSPACE…" : "SCAN WORKSPACE"}
+                </button>
+              </div>
+              <p className="aero-dock__note">
+                Links this machine's project folders as constructors. Read-only metadata: name,
+                kind, file count and git branch. No file contents, no paths.
+              </p>
+              {scanMsg && <p className="aero-dock__flash">{scanMsg}</p>}
+              {career.paddock.length === 0 ? (
+                <p className="aero-dock__note">No constructors linked yet.</p>
+              ) : (
+                <ul className="aero-paddock">
+                  {career.paddock.map((project) => {
+                    const entry = career.entries.find((item) => item.id === project.id);
+                    return (
+                      <li key={project.id}>
+                        <div>
+                          <b>{project.name}</b>
+                          <span>
+                            {project.kind}
+                            {project.branch ? ` · ${project.branch}` : ""} ·{" "}
+                            {project.files.toLocaleString()} FILES
+                          </span>
+                        </div>
+                        <em>{entry?.cp ?? 0} CP</em>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+
             <div className="aero-dock__group">
               <div className="aero-ctl__head"><span>SAVE CURRENT BUILD</span></div>
               <div className="aero-row">
@@ -620,7 +798,7 @@ export function AeroDock({
             </div>
 
             <div className="aero-dock__group">
-              <div className="aero-ctl__head"><span>GARAGE</span><b>{garage.length}/24</b></div>
+              <div className="aero-ctl__head"><span>BUILD GARAGE</span><b>{garage.length}/24</b></div>
               {garage.length === 0 && <p className="aero-dock__note">No saved machines yet. Tune a build and save it here.</p>}
               <ul className="aero-list">
                 {garage.map((entry) => (

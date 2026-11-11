@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { defaultRoots, readControlConfig } from "./files.mjs";
 
@@ -15,6 +16,10 @@ const MAX_DIRS = 700;
 const MAX_FILES = 4000;
 const MAX_DEPTH = 3;
 const CACHE_MS = 30_000;
+
+// A container folder (Downloads, Documents) is not itself a constructor even
+// when it happens to contain a stray requirements.txt.
+const GENERIC_ROOTS = new Set(["documents", "downloads", "desktop"]);
 
 const SKIP_DIRS = new Set([
   "node_modules",
@@ -49,11 +54,6 @@ const SKIP_DIRS = new Set([
 
 const PYTHON_MARKERS = ["pyproject.toml", "requirements.txt", "setup.py", "Pipfile"];
 const NODE_MARKERS = ["package.json"];
-const OTHER_MARKERS = [
-  ["Cargo.toml", "RUST"],
-  ["go.mod", "GO"],
-  ["Gemfile", "UNKNOWN"],
-];
 
 let cache = { at: 0, value: null };
 
@@ -96,9 +96,6 @@ function detectKind(dir) {
   for (const marker of NODE_MARKERS) {
     if (!names.has(marker)) continue;
     return names.has("index.html") || names.has("vite.config.ts") ? "WEB" : "NODE";
-  }
-  for (const [marker, kind] of OTHER_MARKERS) {
-    if (names.has(marker)) return kind;
   }
   if (names.has(".git")) return "GIT";
   return null;
@@ -198,8 +195,20 @@ export function scanWorkspace(force = false) {
 
   const config = readControlConfig();
   const configured = Array.isArray(config.fileRoots) ? config.fileRoots : [];
+  const home = os.homedir();
+  const fold = (value) => (process.platform === "win32" ? value.toLowerCase() : value);
+  // The app usually lives one level inside the real workspace (e.g.
+  // Documents/<app> plus sibling projects), so include that parent when it is
+  // still inside the user's home directory.
+  const parent = path.dirname(process.cwd());
+  const parentSafe =
+    parent !== path.parse(parent).root && fold(parent).startsWith(fold(home) + path.sep);
   const roots = [];
-  for (const root of [...configured, ...defaultRoots()]) {
+  for (const root of [
+    ...configured,
+    ...defaultRoots(),
+    ...(parentSafe ? [parent] : []),
+  ]) {
     const resolved = path.resolve(String(root));
     if (isDir(resolved) && !roots.includes(resolved)) roots.push(resolved);
   }
@@ -211,7 +220,9 @@ export function scanWorkspace(force = false) {
   const visit = (dir, depth) => {
     if (projects.length >= MAX_PROJECTS || dirs >= MAX_DIRS) return;
     dirs += 1;
-    const kind = detectKind(dir);
+    const genericRoot =
+      depth === 0 && GENERIC_ROOTS.has(path.basename(dir).toLowerCase());
+    const kind = genericRoot ? null : detectKind(dir);
     if (kind) {
       const project = projectFor(dir, kind);
       if (!seen.has(project.id)) {
@@ -224,7 +235,9 @@ export function scanWorkspace(force = false) {
     if (depth >= MAX_DEPTH) return;
     for (const entry of listDir(dir)) {
       if (entry.isSymbolicLink() || !entry.isDirectory()) continue;
-      if (entry.name.startsWith(".") || SKIP_DIRS.has(entry.name)) continue;
+      if (entry.name.startsWith(".") || SKIP_DIRS.has(entry.name.toLowerCase())) {
+        continue;
+      }
       visit(path.join(dir, entry.name), depth + 1);
       if (projects.length >= MAX_PROJECTS || dirs >= MAX_DIRS) return;
     }

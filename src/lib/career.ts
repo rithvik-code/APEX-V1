@@ -408,11 +408,13 @@ export function awardCareer(state: CareerState, event: CareerEvent): AwardResult
   const effectiveId =
     event.kind === "chat"
       ? `chat-${day}`
-      : event.kind === "lap"
-        ? `lap-${day}-${rawId}`
-        : event.kind === "mission"
-          ? `mission-${day}-${rawId}`
-          : rawId;
+      : event.kind === "quiz"
+        ? `quiz-${day}-${rawId}`
+        : event.kind === "lap"
+          ? `lap-${day}-${rawId}`
+          : event.kind === "mission"
+            ? `mission-${day}-${rawId}`
+            : rawId;
 
   if (!effectiveId || state.eventIds.includes(effectiveId)) {
     return { state, gained: 0, rankUp: null };

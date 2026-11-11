@@ -112,8 +112,8 @@ function QuizCard({ quiz, text, stats, onXp }: QuizCardProps) {
       {done && (
         <p className={`arcade__result${right ? " arcade__result--good" : ""}`}>
           {right
-            ? `CORRECT · +15 XP${stats.streak > 1 ? ` · STREAK ${stats.streak}` : ""}`
-            : "NOT QUITE · +4 XP FOR SHOWING UP"}
+            ? `CORRECT · +15 CP${stats.streak > 1 ? ` · STREAK ${stats.streak}` : ""}`
+            : "NOT QUITE · +4 CP FOR SHOWING UP"}
         </p>
       )}
       <AnswerReveal text={text} />

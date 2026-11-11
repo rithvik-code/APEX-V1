@@ -10,6 +10,15 @@ import { AeroDock, AeroLaunch, type DockBridge, type DockStatus } from "./compon
 import { DriveHUD, type TrackOutline } from "./components/DriveHUD";
 import type { DriveHudState, DriveVehicle } from "./three/drive";
 import { DEFAULT_DRIVE_SETUP, type DriveSetup } from "./lib/driveStore";
+import {
+  addDistance,
+  awardCareer,
+  currentLicence,
+  loadCareer,
+  unlockSet,
+  type CareerEvent,
+  type CareerState,
+} from "./lib/career";
 import { useControl } from "./hooks/useControl";
 import { sound } from "./lib/sound";
 import { downloadBlob } from "./lib/clip";
@@ -132,8 +141,31 @@ export default function App() {
   const [driveTrack, setDriveTrack] = useState<TrackOutline | null>(null);
   const [driveSetup, setDriveSetup] = useState<DriveSetup>(DEFAULT_DRIVE_SETUP);
   const driveSetupRef = useRef(driveSetup);
+  const [career, setCareer] = useState<CareerState>(() => loadCareer());
+  const careerRef = useRef(career);
+  const careerDistanceRef = useRef(0);
+  const pendingDistanceRef = useRef(0);
+  const missionStatusRef = useRef("");
+  const [rankUp, setRankUp] = useState<string | null>(null);
   const control = useControl();
   const { copied, copy } = useCopy();
+
+  const applyCareer = useCallback((next: CareerState) => {
+    careerRef.current = next;
+    setCareer(next);
+  }, []);
+
+  const award = useCallback((event: CareerEvent) => {
+    const result = awardCareer(careerRef.current, event);
+    if (result.gained <= 0 && !result.rankUp) return;
+    careerRef.current = result.state;
+    setCareer(result.state);
+    if (result.rankUp) {
+      setRankUp(`LICENCE ${String(result.rankUp.index).padStart(2, "0")} // ${result.rankUp.name}`);
+      window.setTimeout(() => setRankUp(null), 5200);
+      sound.tick("start");
+    }
+  }, []);
 
   const activeChapter = CHAPTERS.find((c) => c.id === active) ?? CHAPTERS[0];
 
@@ -334,6 +366,23 @@ export default function App() {
       engineRef.current = engine;
       engine.setPaused(pausedRef.current);
       engine.configure(sceneRef.current);
+      engine.setCareer(
+        unlockSet(careerRef.current),
+        currentLicence(careerRef.current.cp).name,
+      );
+      engine.setDriveLapListener((lap) => {
+        award({
+          kind: "lap",
+          id: `${lap.vehicle}-${lap.lapCount}-${Math.round(lap.time * 1000)}`,
+          cp: lap.best ? 40 : 25,
+        });
+        if (lap.best) {
+          award({
+            kind: "ghost",
+            id: `${lap.vehicle}-best-${Math.round(lap.time * 1000)}`,
+          });
+        }
+      });
     });
 
     return () => {
@@ -356,6 +405,13 @@ export default function App() {
     sound.setEngine(scene.aero && scene.dyno ? scene.rpm : 0);
     sound.setRain(scene.aero && scene.weather === "rain" ? scene.rainAmount : 0);
   }, [scene]);
+
+  useEffect(() => {
+    engineRef.current?.setCareer(
+      unlockSet(career),
+      currentLicence(career.cp).name,
+    );
+  }, [career]);
 
   useEffect(() => {
     if (!scene.aero) return;
@@ -396,11 +452,45 @@ export default function App() {
 
   useEffect(() => {
     if (!drive) return;
-    const read = () => setDriveHud(engineRef.current?.getDriveState() ?? null);
+    careerDistanceRef.current = 0;
+    pendingDistanceRef.current = 0;
+    const flush = () => {
+      const meters = pendingDistanceRef.current;
+      if (meters < 1) return;
+      pendingDistanceRef.current = 0;
+      const next = addDistance(careerRef.current, meters);
+      if (next === careerRef.current) return;
+      careerRef.current = next;
+      setCareer(next);
+    };
+    const read = () => {
+      const next = engineRef.current?.getDriveState() ?? null;
+      if (next) {
+        const delta = next.distanceM - careerDistanceRef.current;
+        if (delta > 0) pendingDistanceRef.current += delta;
+        careerDistanceRef.current = next.distanceM;
+      }
+      setDriveHud(next);
+    };
     read();
     const id = window.setInterval(read, 50);
-    return () => window.clearInterval(id);
+    const flushId = window.setInterval(flush, 2000);
+    return () => {
+      window.clearInterval(id);
+      window.clearInterval(flushId);
+      flush();
+    };
   }, [drive]);
+
+  useEffect(() => {
+    const state = control.state;
+    if (!state) return;
+    const previous = missionStatusRef.current;
+    missionStatusRef.current = state.status;
+    if (state.status !== "complete" || previous === "complete") return;
+    if (!state.id) return;
+    award({ kind: "mission", id: state.id });
+  }, [control.state, award]);
 
   useEffect(() => {
     document.body.classList.toggle("driving", drive !== null);
@@ -942,6 +1032,8 @@ export default function App() {
               onDrive={() => launchDrive("car")}
               scene={scene}
               onTune={tuneScene}
+              career={career}
+              onAward={award}
             />
           </div>
         </section>
@@ -1177,7 +1269,17 @@ export default function App() {
           onReset={resetScene}
           bridge={dockBridge}
           status={dockStatus}
+          career={career}
+          onCareer={applyCareer}
         />
+      )}
+
+      {rankUp && (
+        <div className="rankup" role="status" aria-live="polite">
+          <span>CONSTRUCTOR SERIES</span>
+          <b>{rankUp}</b>
+          <i>LICENCE PROMOTION</i>
+        </div>
       )}
 
       {drive && driveHud && (

@@ -28,6 +28,7 @@ import {
   type Recognizer,
 } from "../lib/radio";
 import type { SceneConfig } from "../lib/scene";
+import { currentLicence, type CareerEvent, type CareerState } from "../lib/career";
 import { sound } from "../lib/sound";
 import { ArcadeCard } from "./ArcadeCard";
 import type { XpKind } from "./ArcadeCard";
@@ -60,6 +61,8 @@ type TerminalProps = {
   onDrive?: () => void;
   scene: SceneConfig;
   onTune?: (patch: Partial<SceneConfig>) => void;
+  career?: CareerState;
+  onAward?: (event: CareerEvent) => void;
 };
 
 // Matches an actionable computer task so a handoff is offered even when the
@@ -307,7 +310,14 @@ const INITIAL_ENTRIES: Entry[] = [
   { id: "welcome", role: "assistant", content: WELCOME },
 ];
 
-export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProps) {
+export function Terminal({
+  onTakeControl,
+  onDrive,
+  scene,
+  onTune,
+  career,
+  onAward,
+}: TerminalProps) {
   const [settings, setSettings] = useState<AiSettings>(() => loadSettings());
   const [draft, setDraft] = useState<AiSettings>(() => loadSettings());
   const [entries, setEntries] = useState<Entry[]>(INITIAL_ENTRIES);
@@ -520,9 +530,17 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
     setArcadeMode(!arcade);
   };
 
-  const handleXp = useCallback((kind: XpKind) => {
-    setArcadeStats((prev) => awardArcade(kind, prev));
-  }, []);
+  const handleXp = useCallback(
+    (kind: XpKind) => {
+      setArcadeStats((prev) => awardArcade(kind, prev));
+      if (kind === "quiz-correct") {
+        onAward?.({ kind: "quiz", id: "quiz" });
+      } else if (kind === "mission") {
+        onAward?.({ kind: "mission", id: `arcade-${Date.now().toString(36)}` });
+      }
+    },
+    [onAward],
+  );
 
   const setVoxMode = (next: boolean) => {
     setVox(next);
@@ -765,6 +783,8 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
       handleCommand(text);
       return;
     }
+
+    onAward?.({ kind: "chat", id: "chat" });
 
     const engineerAction = onTune ? tuneFromText(text, scene) : null;
     if (engineerAction && onTune) {
@@ -1424,7 +1444,15 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
           WEB <b>{web ? "ON" : "OFF"}</b>
         </span>
         <span>
-          XP <b>{arcadeStats.xp}</b>
+          {career ? (
+            <>
+              LICENCE <b>{currentLicence(career.cp).short}</b> · CP <b>{career.cp}</b>
+            </>
+          ) : (
+            <>
+              XP <b>{arcadeStats.xp}</b>
+            </>
+          )}
           {arcadeStats.streak > 0 ? ` · S${arcadeStats.streak}` : ""}
         </span>
         <span>

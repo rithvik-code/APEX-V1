@@ -331,6 +331,7 @@ export class ApexEngine {
   private driveForward = new THREE.Vector3();
   private careerUnlocks: ReadonlySet<string> = new Set();
   private careerLicence = "ROOKIE";
+  private careerBadgeLabel = "";
   private onDriveLap: ((lap: DriveLapEvent) => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement, labelsEl: HTMLElement, onReady?: () => void) {
@@ -1040,11 +1041,11 @@ export class ApexEngine {
 
     const badgeOn = u.has("wingBadge") || u.has("veteran");
     c.badgeMesh.visible = badgeOn;
-    if (badgeOn) {
+    const badgeLabel = u.has("veteran") ? "VETERAN" : this.careerLicence;
+    if (badgeOn && badgeLabel !== this.careerBadgeLabel) {
+      this.careerBadgeLabel = badgeLabel;
       c.badgeMat.map?.dispose();
-      c.badgeMat.map = badgeTexture(
-        u.has("veteran") ? "VETERAN" : this.careerLicence,
-      );
+      c.badgeMat.map = badgeTexture(badgeLabel);
       c.badgeMat.needsUpdate = true;
     }
 
