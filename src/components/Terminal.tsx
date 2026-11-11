@@ -841,12 +841,21 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
     const assistantId = uid();
     const quickGrounding = grounding;
     if (quickGrounding?.quick) {
+      const quickText = `${quickGrounding.quick}\n\n${quickGrounding.sourceLine}`;
+      let quickContent = quickText;
+      let quickArcade: ArcadePayload | undefined;
+      if (arcadeKind) {
+        const built = buildArcadePayload(arcadeKind, quickText, text);
+        quickContent = built.text;
+        quickArcade = built.payload;
+      }
       setEntries((prev) => [
         ...prev,
         {
           id: assistantId,
           role: "assistant",
-          content: `${quickGrounding.quick}\n\n${quickGrounding.sourceLine}`,
+          content: quickContent,
+          arcade: quickArcade,
         },
       ]);
       setStreaming(false);
@@ -888,6 +897,7 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
         messages: historyForModel,
         grounding,
         temperature: grounding ? 0.2 : 0.55,
+        extraSystem: arcadeKind === "quiz" ? QUIZ_INSTRUCTION : undefined,
         signal: controller.signal,
         onToken: (token) => {
           pending += token;
@@ -918,29 +928,41 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
     } finally {
       flush();
       const cited = grounding;
-      if (cited && !failed && mounted.current && !controller.signal.aborted) {
-        setEntries((prev) =>
-          prev.map((entry) =>
-            entry.id === assistantId && entry.content.trim()
-              ? {
-                  ...entry,
-                  content: `${entry.content.trimEnd()}\n\n${cited.sourceLine}`,
-                }
-              : entry,
-          ),
-        );
-      }
-      if (mounted.current) setStreaming(false);
-      abortRef.current = null;
-      if (
-        voxRef.current &&
+      const settled =
         !failed &&
         mounted.current &&
         !controller.signal.aborted &&
-        fullText.trim()
-      ) {
-        speakRadio(fullText);
+        fullText.trim().length > 0;
+      let display = fullText.trimEnd();
+      if (settled) {
+        if (arcadeKind) {
+          // The QUIZ tail line is parsed out here; the prose answer stays
+          // available behind the card's FULL ANSWER reveal.
+          const withSources = cited ? `${display}\n\n${cited.sourceLine}` : display;
+          const built = buildArcadePayload(arcadeKind, withSources, text);
+          display = built.text;
+          const payload = built.payload;
+          setEntries((prev) =>
+            prev.map((entry) =>
+              entry.id === assistantId
+                ? { ...entry, content: display, arcade: payload }
+                : entry,
+            ),
+          );
+        } else {
+          if (cited) display = `${display}\n\n${cited.sourceLine}`;
+          setEntries((prev) =>
+            prev.map((entry) =>
+              entry.id === assistantId && entry.content.trim()
+                ? { ...entry, content: display }
+                : entry,
+            ),
+          );
+        }
       }
+      if (mounted.current) setStreaming(false);
+      abortRef.current = null;
+      if (voxRef.current && settled) speakRadio(display);
     }
   };
 
@@ -1055,6 +1077,15 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
         >
           WEB {web ? "ON" : "OFF"}
         </button>
+        <button
+          type="button"
+          className={`term__webbtn${arcade ? " term__webbtn--on" : ""}`}
+          onClick={toggleArcade}
+          aria-pressed={arcade}
+          title="Wrap replies in quiz, mission and intel cards"
+        >
+          ARCADE {arcade ? "ON" : "OFF"}
+        </button>
         {pttSupported() && (
           <button
             type="button"
@@ -1134,13 +1165,26 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
                   >
                     {entry.engineer ? "ENGINEER" : "APEX"}
                   </span>
-                  <p>
-                    {parsed?.text ?? entry.content}
-                    {isStreamingEntry && (
-                      <span className="term__caret" aria-hidden="true" />
-                    )}
-                  </p>
-                  {handoff && onTakeControl && !isStreamingEntry && (
+                  {entry.arcade && !isStreamingEntry ? (
+                    <ArcadeCard
+                      payload={entry.arcade}
+                      text={parsed?.text ?? entry.content}
+                      stats={arcadeStats}
+                      onXp={handleXp}
+                      onHandoff={onTakeControl}
+                    />
+                  ) : (
+                    <p>
+                      {parsed?.text ?? entry.content}
+                      {isStreamingEntry && (
+                        <span className="term__caret" aria-hidden="true" />
+                      )}
+                    </p>
+                  )}
+                  {handoff &&
+                    onTakeControl &&
+                    !isStreamingEntry &&
+                    entry.arcade?.kind !== "mission" && (
                     <button
                       type="button"
                       className="term__handoff"
@@ -1357,6 +1401,10 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
         </span>
         <span>
           WEB <b>{web ? "ON" : "OFF"}</b>
+        </span>
+        <span>
+          XP <b>{arcadeStats.xp}</b>
+          {arcadeStats.streak > 0 ? ` · S${arcadeStats.streak}` : ""}
         </span>
         <span>
           SYSTEM <b>NO METER</b>
