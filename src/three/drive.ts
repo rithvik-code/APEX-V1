@@ -106,6 +106,7 @@ export class DriveSession {
 
   private scene: THREE.Scene;
   private velDir = 0;
+  private yaw = 0;
   private phase: DrivePhase = "countdown";
   private countdown = 3;
   private raceTime = 0;
