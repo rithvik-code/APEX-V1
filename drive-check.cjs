@@ -260,20 +260,23 @@ async function main() {
       const log = { laps: [], maxSpeed: 0, offTrackFrames: 0, frames: 0, stuck: 0, ghostSeen: false, midSectors: null, activeRow: 0 };
       let lastLap = d.lapCount;
       const start = performance.now();
-      while (performance.now() - start < 190000) {
+      while (performance.now() - start < 200000) {
         const t = d.track.nearestT(d.pos.x, d.pos.z);
         const speed = Math.abs(d.speed);
-        const aheadT = (t + 0.01 + speed * 0.00042) % 1;
-        const target = d.track.centerAt(aheadT, d.tmp);
+        const L = d.track.length;
+        const aheadM = 4 + speed * 0.2;
+        const target = d.track.centerAt((t + aheadM / L) % 1, d.tmp);
         const desired = Math.atan2(target.x - d.pos.x, target.z - d.pos.z);
         const err = wrap(desired - d.heading);
-        d.touch.steer = Math.max(-1, Math.min(1, -err * 2.4));
+        d.touch.steer = Math.max(-1, Math.min(1, -err * 3));
+        // Curvature over the next ~5 m drives the corner speed cap.
         const p1 = d.track.curve.getPoint(t);
-        const p2 = d.track.curve.getPoint((t + 0.028) % 1);
-        const turn = Math.abs(wrap(Math.atan2(p2.x - p1.x, p2.z - p1.z) - Math.atan2(target.x - d.pos.x, target.z - d.pos.z)));
-        const targetSpeed = Math.max(9, 24 - turn * 34 - Math.abs(err) * 6);
+        const p2 = d.track.curve.getPoint((t + 5 / L) % 1);
+        const bend = Math.abs(wrap(Math.atan2(p2.x - p1.x, p2.z - p1.z) - d.heading));
+        const cap = 10 / Math.max(0.05, bend);
+        const targetSpeed = Math.max(9, Math.min(d.topSpeed * 0.9, cap));
         d.touch.throttle = speed < targetSpeed;
-        d.touch.brake = speed > targetSpeed + 3.5;
+        d.touch.brake = speed > targetSpeed + 2.5;
         if (d.ghostHasPos) log.ghostSeen = true;
         if (d.sectors[0] !== null && d.sectors[1] === null) {
           const shown = [...document.querySelectorAll('.dhud__sector b')].map((e) => e.textContent);
@@ -310,7 +313,7 @@ async function main() {
       );
       check(
         "lap time plausible",
-        first.time > 8 && first.time < 45,
+        first.time > 25 && first.time < 90,
         first.time,
       );
       check(
@@ -393,6 +396,58 @@ async function main() {
     check("bike switch works", bikeState && bikeState.vehicle === "bike" && bikeState.speed === 0, bikeState);
     await sleep(3400);
     await shot("04-bike-desktop");
+
+    // Same autopilot on the bike: the long circuit must work for it too.
+    const bikeLap = await evaluate(`(async () => {
+      const d = window.__apexDrive;
+      const wrap = (a) => { a = (a + Math.PI) % (2 * Math.PI); if (a < 0) a += 2 * Math.PI; return a - Math.PI; };
+      const log = { time: null, off: 0, frames: 0 };
+      let lastLap = d.lapCount;
+      const start = performance.now();
+      while (performance.now() - start < 150000) {
+        const t = d.track.nearestT(d.pos.x, d.pos.z);
+        const speed = Math.abs(d.speed);
+        const L = d.track.length;
+        const target = d.track.centerAt((t + (4 + speed * 0.2) / L) % 1, d.tmp);
+        const err = wrap(Math.atan2(target.x - d.pos.x, target.z - d.pos.z) - d.heading);
+        d.touch.steer = Math.max(-1, Math.min(1, -err * 3));
+        const p1 = d.track.curve.getPoint(t);
+        const p2 = d.track.curve.getPoint((t + 5 / L) % 1);
+        const bend = Math.abs(wrap(Math.atan2(p2.x - p1.x, p2.z - p1.z) - d.heading));
+        const cap = 10 / Math.max(0.05, bend);
+        const targetSpeed = Math.max(9, Math.min(d.topSpeed * 0.9, cap));
+        d.touch.throttle = speed < targetSpeed;
+        d.touch.brake = speed > targetSpeed + 2.5;
+        if (d.offTrack) log.off++;
+        log.frames++;
+        if (d.lapCount > lastLap) { log.time = d.lastTime; break; }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      d.touch.steer = 0; d.touch.throttle = false; d.touch.brake = false;
+      return log;
+    })()`, 180000);
+    check("bike completes a lap", typeof bikeLap.time === "number" && bikeLap.time > 0, bikeLap);
+    check("bike lap at least 30s", bikeLap.time >= 30, bikeLap.time);
+    check("bike stays mostly on track", bikeLap.frames > 0 && bikeLap.off / bikeLap.frames < 0.35, bikeLap);
+
+    // Steering sign: positive steer must turn screen-right (heading decreases).
+    const steerProbe = await evaluate(`(async () => {
+      const d = window.__apexDrive;
+      d.touch.throttle = true; d.touch.steer = 0;
+      await new Promise((r) => setTimeout(r, 900));
+      const before = { heading: d.heading, speed: d.speed };
+      d.touch.steer = 1;
+      await new Promise((r) => setTimeout(r, 450));
+      const after = { heading: d.heading, lean: d.lean, steer: d.steer };
+      d.touch.throttle = false; d.touch.steer = 0;
+      return { before, after };
+    })()`);
+    check(
+      "right steer turns screen-right",
+      steerProbe.after.heading < steerProbe.before.heading - 0.01,
+      steerProbe,
+    );
+    check("right steer leans right", steerProbe.after.lean > 0.02, steerProbe.after.lean);
 
     // Restart + recover buttons.
     await evaluate(
