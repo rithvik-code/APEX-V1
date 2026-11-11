@@ -109,7 +109,7 @@ type Props = {
 };
 
 export function Takeover({ control, onRelease, initialGoal }: Props) {
-  const { state, health, online, busy, error } = control;
+  const { state, health, online, busy, error, refresh: refreshControl } = control;
   const status = state?.status;
   const statusLabel = status ? STATUS_LABEL[status] : "STANDBY";
   const tone = status ? STATUS_TONE[status] : "is-live";
@@ -183,7 +183,10 @@ export function Takeover({ control, onRelease, initialGoal }: Props) {
   useEffect(() => {
     if (!online) return;
     let stop = false;
+    let inFlight = false;
     const tick = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const { pulls: next } = await getPulls();
         if (stop) return;
@@ -195,9 +198,11 @@ export function Takeover({ control, onRelease, initialGoal }: Props) {
           }
           pullSnapshot.current[pull.model] = pull.done;
         }
-        if (completed) void control.refresh();
+        if (completed) void refreshControl();
       } catch {
         // Daemon hiccup; the next tick retries.
+      } finally {
+        inFlight = false;
       }
     };
     void tick();
@@ -206,7 +211,7 @@ export function Takeover({ control, onRelease, initialGoal }: Props) {
       stop = true;
       window.clearInterval(id);
     };
-  }, [online, control]);
+  }, [online, refreshControl]);
 
   useEffect(() => {
     returnFocus.current =

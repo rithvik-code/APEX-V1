@@ -103,6 +103,159 @@ export type ControlState = {
 
 export type OcrLine = { text: string; x: number; y: number; w: number; h: number };
 
+const EMPTY_PERMISSIONS: Permissions = CAPABILITIES.reduce(
+  (acc, item) => ({ ...acc, [item.key]: false }),
+  {} as Permissions,
+);
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const asText = (value: unknown, fallback = ""): string =>
+  typeof value === "string" ? value : fallback;
+
+const asCount = (value: unknown, fallback = 0): number =>
+  typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+const asList = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+function normalizeObservation(raw: unknown): ControlObservation | null {
+  const value = asRecord(raw);
+  if (!value) return null;
+  const active = asRecord(value.active);
+  const focused = asRecord(value.focused);
+  return {
+    screen: asRecord(value.screen)
+      ? {
+          x: asCount((value.screen as Record<string, unknown>).x),
+          y: asCount((value.screen as Record<string, unknown>).y),
+          w: asCount((value.screen as Record<string, unknown>).w),
+          h: asCount((value.screen as Record<string, unknown>).h),
+        }
+      : null,
+    active: active
+      ? {
+          title: asText(active.title),
+          process: asText(active.process),
+          pid: asCount(active.pid),
+        }
+      : null,
+    focused: focused
+      ? {
+          name: asText(focused.name),
+          type: asText(focused.type),
+          bounds: asText(focused.bounds),
+        }
+      : null,
+    focusedValue: asText(value.focusedValue),
+    windows: asList(value.windows)
+      .map((window) => asRecord(window))
+      .filter((window): window is Record<string, unknown> => Boolean(window))
+      .map((window) => ({
+        title: asText(window.title),
+        process: asText(window.process),
+        pid: asCount(window.pid),
+      })),
+    elements: asList(value.elements)
+      .map((element) => asRecord(element))
+      .filter((element): element is Record<string, unknown> => Boolean(element)),
+    vision: asText(value.vision),
+    capturedAt: asText(value.capturedAt),
+  };
+}
+
+// The render tree dereferences state fields directly, so a frame from a newer
+// or older daemon must be given the right shape before it reaches React.
+export function normalizeControlState(raw: unknown): ControlState | null {
+  if (raw === null || raw === undefined) return null;
+  const value = asRecord(raw);
+  if (!value) return null;
+  const permissionsRaw = asRecord(value.permissions);
+  const permissions: Permissions = { ...EMPTY_PERMISSIONS };
+  for (const item of CAPABILITIES) {
+    permissions[item.key] = permissionsRaw?.[item.key] === true;
+  }
+  const approval = asRecord(value.pendingApproval);
+  const action = asRecord(value.currentAction);
+  return {
+    id: asText(value.id),
+    goal: asText(value.goal),
+    status: typeof value.status === "string" ? (value.status as ControlStatus) : "complete",
+    step: asCount(value.step),
+    maxSteps: asCount(value.maxSteps),
+    startedAt: asCount(value.startedAt),
+    elapsedMs: asCount(value.elapsedMs),
+    doneSummary: asText(value.doneSummary),
+    error: asText(value.error),
+    permissions,
+    autoApprove: value.autoApprove === true,
+    vision: value.vision === true,
+    ocr: value.ocr === true,
+    steering: asList(value.steering)
+      .map((entry) => asRecord(entry))
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+      .map((entry) => ({ text: asText(entry.text), at: asCount(entry.at) })),
+    plannerModel: asText(value.plannerModel),
+    visionModel: asText(value.visionModel),
+    currentAction: action
+      ? {
+          action: asText(action.action),
+          args: asRecord(action.args) ?? {},
+          thought: asText(action.thought),
+          verify: asText(action.verify),
+          description: asText(action.description),
+        }
+      : null,
+    lastResult: asText(value.lastResult),
+    lastVerify: asText(value.lastVerify),
+    pendingApproval: approval
+      ? {
+          id: asText(approval.id),
+          action: asText(approval.action),
+          args: asRecord(approval.args) ?? {},
+          risk: asText(approval.risk),
+          reason: asText(approval.reason),
+          createdAt: asText(approval.createdAt),
+          description: asText(approval.description),
+        }
+      : null,
+    observation: normalizeObservation(value.observation),
+    shotUrl: typeof value.shotUrl === "string" ? value.shotUrl : null,
+    browserTabs: asList(value.browserTabs)
+      .map((tab) => asRecord(tab))
+      .filter((tab): tab is Record<string, unknown> => Boolean(tab))
+      .map((tab) => ({
+        id: asText(tab.id),
+        title: asText(tab.title),
+        url: asText(tab.url),
+        active: tab.active === true,
+      })),
+    browserRunning: value.browserRunning === true,
+    logs: asList(value.logs)
+      .map((entry) => asRecord(entry))
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+      .map((entry) => ({
+        seq: asCount(entry.seq),
+        ts: asText(entry.ts),
+        type: asText(entry.type),
+        title: asText(entry.title),
+        detail: asText(entry.detail),
+        risk: asText(entry.risk, "low"),
+      })),
+    capabilities: asList(value.capabilities)
+      .map((entry) => asRecord(entry))
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+      .map((entry) => ({
+        key: asText(entry.key) as CapabilityKey,
+        label: asText(entry.label),
+        granted: entry.granted === true,
+      }))
+      .filter((entry) => CAPABILITIES.some((item) => item.key === entry.key)),
+  };
+}
+
 export type OcrResult = {
   text: string;
   engine: string;

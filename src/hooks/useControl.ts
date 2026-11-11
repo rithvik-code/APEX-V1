@@ -6,6 +6,7 @@ import {
   getState,
   isActiveStatus,
   manualAction,
+  normalizeControlState,
   pauseMission,
   resumeMission,
   runOcr,
@@ -89,7 +90,7 @@ export function useControl(): ControlApi {
       setOnline(true);
       setConnecting(false);
       setError(null);
-      if (nextState) setState(nextState);
+      if (nextState) setState(normalizeControlState(nextState));
     } catch (err) {
       if (!mounted.current) return;
       setOnline(false);
@@ -139,10 +140,8 @@ export function useControl(): ControlApi {
       source.addEventListener("state", (event) => {
         if (!mounted.current) return;
         try {
-          const parsed = JSON.parse(
-            (event as MessageEvent<string>).data,
-          ) as ControlState | null;
-          setState(parsed);
+          const parsed = JSON.parse((event as MessageEvent<string>).data) as unknown;
+          setState(normalizeControlState(parsed));
           setOnline(true);
           setConnecting(false);
           setStreaming(true);
@@ -176,7 +175,8 @@ export function useControl(): ControlApi {
       try {
         const next = await task();
         if (!mounted.current) return next;
-        if (next) setState(next);
+        const safe = normalizeControlState(next);
+        if (safe) setState(safe);
         setOnline(true);
         return next;
       } catch (err) {

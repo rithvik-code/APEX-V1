@@ -183,6 +183,67 @@ export function encodeSetup(config: SceneConfig): string {
   return CODE_PREFIX + toBase64Url(bytes);
 }
 
+const COLOR_MODES = new Set<FlowColorMode>(["velocity", "pressure", "acid"]);
+const FOCUS_VALUES = new Set<AeroFocus>(["both", "car", "bike"]);
+const WEATHER_VALUES = new Set<Weather>(["clear", "rain"]);
+const CAMERA_IDS = new Set<string>(CAMERA_PRESETS.map((preset) => preset.id));
+const LIGHTING_IDS = new Set<string>(LIGHTING_PRESETS.map((preset) => preset.id));
+const LIVERY_IDS = new Set<string>(LIVERIES.map((livery) => livery.id));
+
+function boundedNumber(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+function flag(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+// Share codes and saved garage entries both cross a trust boundary: either can
+// be hand-edited or produced by an older build. Every field is whitelisted and
+// numeric ranges are clamped so a bad value cannot crash the render loop.
+export function sanitizeSceneConfig(input: unknown): SceneConfig | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const value = input as Record<string, unknown>;
+  const paintRaw =
+    value.paint && typeof value.paint === "object" && !Array.isArray(value.paint)
+      ? (value.paint as Record<string, unknown>)
+      : {};
+  const pick = <T extends string>(candidate: unknown, allowed: Set<T>, fallback: T): T =>
+    typeof candidate === "string" && allowed.has(candidate as T) ? (candidate as T) : fallback;
+  return {
+    aero: flag(value.aero, DEFAULT_SCENE.aero),
+    windSpeed: boundedNumber(value.windSpeed, DEFAULT_SCENE.windSpeed, 40, 400),
+    density: boundedNumber(value.density, DEFAULT_SCENE.density, 0.01, 1),
+    turbulence: boundedNumber(value.turbulence, DEFAULT_SCENE.turbulence, 0, 1),
+    timeScale: boundedNumber(value.timeScale, DEFAULT_SCENE.timeScale, 0.1, 2),
+    glow: boundedNumber(value.glow, DEFAULT_SCENE.glow, 0, 1.5),
+    colorMode: pick(value.colorMode, COLOR_MODES, DEFAULT_SCENE.colorMode),
+    focus: pick(value.focus, FOCUS_VALUES, DEFAULT_SCENE.focus),
+    camera: pick(value.camera, CAMERA_IDS, DEFAULT_SCENE.camera),
+    lighting: pick(value.lighting, LIGHTING_IDS, DEFAULT_SCENE.lighting),
+    livery: pick(value.livery, LIVERY_IDS, DEFAULT_SCENE.livery),
+    autoOrbit: flag(value.autoOrbit, DEFAULT_SCENE.autoOrbit),
+    grid: flag(value.grid, DEFAULT_SCENE.grid),
+    weather: pick(value.weather, WEATHER_VALUES, DEFAULT_SCENE.weather),
+    rainAmount: boundedNumber(value.rainAmount, DEFAULT_SCENE.rainAmount, 0, 1),
+    nightRace: flag(value.nightRace, DEFAULT_SCENE.nightRace),
+    explode: boundedNumber(value.explode, DEFAULT_SCENE.explode, 0, 1),
+    dyno: flag(value.dyno, DEFAULT_SCENE.dyno),
+    rpm: boundedNumber(value.rpm, DEFAULT_SCENE.rpm, 0, 1),
+    paint: {
+      enabled: flag(paintRaw.enabled, DEFAULT_PAINT.enabled),
+      base: typeof paintRaw.base === "string" ? paintRaw.base : DEFAULT_PAINT.base,
+      accent: typeof paintRaw.accent === "string" ? paintRaw.accent : DEFAULT_PAINT.accent,
+      number:
+        typeof paintRaw.number === "string"
+          ? paintRaw.number.slice(0, 3)
+          : DEFAULT_PAINT.number,
+      stripe: flag(paintRaw.stripe, DEFAULT_PAINT.stripe),
+    },
+  };
+}
+
 export function decodeSetup(code: string): Partial<SceneConfig> | null {
   const trimmed = code.trim();
   const body = trimmed.startsWith(CODE_PREFIX)
@@ -192,27 +253,17 @@ export function decodeSetup(code: string): Partial<SceneConfig> | null {
   try {
     const json = new TextDecoder().decode(fromBase64Url(body));
     const parsed = JSON.parse(json) as Record<string, unknown>;
-    if (!parsed || typeof parsed !== "object") return null;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const safe = sanitizeSceneConfig(parsed);
+    if (!safe) return null;
     const patch: Partial<SceneConfig> = {};
-    const defaults = DEFAULT_SCENE as unknown as Record<string, unknown>;
-    for (const key of Object.keys(defaults)) {
+    for (const key of Object.keys(DEFAULT_SCENE) as Array<keyof SceneConfig>) {
       if (key === "aero" || key === "paint") continue;
-      const value = parsed[key];
-      if (value === undefined) continue;
-      if (typeof value === typeof defaults[key]) {
-        (patch as Record<string, unknown>)[key] = value;
+      if (parsed[key] !== undefined) {
+        (patch as Record<string, unknown>)[key] = safe[key];
       }
     }
-    if (parsed.paint && typeof parsed.paint === "object") {
-      const paint = parsed.paint as Record<string, unknown>;
-      patch.paint = {
-        enabled: typeof paint.enabled === "boolean" ? paint.enabled : DEFAULT_PAINT.enabled,
-        base: typeof paint.base === "string" ? paint.base : DEFAULT_PAINT.base,
-        accent: typeof paint.accent === "string" ? paint.accent : DEFAULT_PAINT.accent,
-        number: typeof paint.number === "string" ? paint.number.slice(0, 3) : DEFAULT_PAINT.number,
-        stripe: typeof paint.stripe === "boolean" ? paint.stripe : DEFAULT_PAINT.stripe,
-      };
-    }
+    if (parsed.paint !== undefined) patch.paint = safe.paint;
     return Object.keys(patch).length ? patch : null;
   } catch {
     return null;
@@ -249,11 +300,29 @@ export function loadGarage(): GarageEntry[] {
   try {
     const raw = localStorage.getItem(GARAGE_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw) as GarageEntry[];
+    const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (entry) => entry && typeof entry.id === "string" && entry.config,
-    );
+    const entries: GarageEntry[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const value = item as Record<string, unknown>;
+      if (typeof value.id !== "string" || !value.id) continue;
+      const config = sanitizeSceneConfig(value.config);
+      if (!config) continue;
+      entries.push({
+        id: value.id,
+        name:
+          typeof value.name === "string" && value.name.trim()
+            ? value.name.trim().slice(0, 28)
+            : "UNTITLED BUILD",
+        createdAt:
+          typeof value.createdAt === "number" && Number.isFinite(value.createdAt)
+            ? value.createdAt
+            : Date.now(),
+        config,
+      });
+    }
+    return entries;
   } catch {
     return [];
   }
