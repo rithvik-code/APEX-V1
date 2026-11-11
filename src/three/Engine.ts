@@ -5,7 +5,7 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
-import { createSupercar, numberTexture, type Assembly, type VehicleAnchor } from "./car";
+import { createSupercar, badgeTexture, numberTexture, type Assembly, type VehicleAnchor } from "./car";
 import { createSuperbike } from "./bike";
 import { AeroFlow, buildBikeStreamlines, buildCarStreamlines } from "./aero";
 import { WeatherSystem } from "./weather";
@@ -328,6 +328,8 @@ export class ApexEngine {
   private driveCamTgt = new THREE.Vector3();
   private driveWheelSpin = 0;
   private driveForward = new THREE.Vector3();
+  private careerUnlocks: ReadonlySet<string> = new Set();
+  private careerLicence = "ROOKIE";
 
   constructor(canvas: HTMLCanvasElement, labelsEl: HTMLElement, onReady?: () => void) {
     this.labelsEl = labelsEl;
