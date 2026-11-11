@@ -13,6 +13,7 @@ import { buildTrack, type Track } from "./track";
 import {
   DriveSession,
   type DriveHudState,
+  type DriveLapEvent,
   type DriveOptions,
   type DriveSetup,
   type DriveTouch,
@@ -330,6 +331,7 @@ export class ApexEngine {
   private driveForward = new THREE.Vector3();
   private careerUnlocks: ReadonlySet<string> = new Set();
   private careerLicence = "ROOKIE";
+  private onDriveLap: ((lap: DriveLapEvent) => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement, labelsEl: HTMLElement, onReady?: () => void) {
     this.labelsEl = labelsEl;
@@ -1014,6 +1016,11 @@ export class ApexEngine {
     this.careerUnlocks = new Set(unlocks);
     this.careerLicence = licence;
     this.applyCareerVisuals();
+    this.drive?.setGhostTrail(unlocks.has("ghostTrail"));
+  }
+
+  setDriveLapListener(listener: ((lap: DriveLapEvent) => void) | null): void {
+    this.onDriveLap = listener;
   }
 
   private applyCareerVisuals(): void {
@@ -1257,6 +1264,8 @@ export class ApexEngine {
     this.stopLapReplay();
 
     this.drive = new DriveSession(this.track, this.scene, vehicle, setup, options);
+    this.drive.setGhostTrail(this.careerUnlocks.has("ghostTrail"));
+    this.drive.onLap = (lap) => this.onDriveLap?.(lap);
     this.driveWheelSpin = 0;
     this.applyDriveVisibility();
     (this.scene.fog as THREE.FogExp2).density = 0.0042;

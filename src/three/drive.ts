@@ -64,6 +64,7 @@ export type DriveHudState = {
   lapCount: number;
   offTrack: boolean;
   drift: number;
+  distanceM: number;
   pos: { x: number; z: number };
   heading: number;
   ghostPos: { x: number; z: number } | null;
