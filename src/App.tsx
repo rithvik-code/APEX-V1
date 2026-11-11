@@ -8,6 +8,8 @@ import { Preloader } from "./components/Preloader";
 import { Cursor } from "./components/Cursor";
 import { AeroDock, AeroLaunch, type DockBridge, type DockStatus } from "./components/AeroDock";
 import { DriveHUD, type TrackOutline } from "./components/DriveHUD";
+import { Garage } from "./components/Garage";
+import type { GarageView } from "./three/garage";
 import type { DriveHudState, DriveVehicle } from "./three/drive";
 import { DEFAULT_DRIVE_SETUP, type DriveSetup } from "./lib/driveStore";
 import {
@@ -141,6 +143,7 @@ export default function App() {
   const [driveTrack, setDriveTrack] = useState<TrackOutline | null>(null);
   const [driveSetup, setDriveSetup] = useState<DriveSetup>(DEFAULT_DRIVE_SETUP);
   const driveSetupRef = useRef(driveSetup);
+  const [garage, setGarage] = useState<GarageView | null>(null);
   const [career, setCareer] = useState<CareerState>(() => loadCareer());
   const careerRef = useRef(career);
   const careerDistanceRef = useRef(0);
@@ -168,6 +171,8 @@ export default function App() {
   }, []);
 
   const activeChapter = CHAPTERS.find((c) => c.id === active) ?? CHAPTERS[0];
+  const licenceName = currentLicence(career.cp).name;
+  const unlockCount = useMemo(() => unlockSet(career).size, [career]);
 
   const openTakeover = useCallback((goal?: string) => {
     sound.tick("start");
@@ -243,6 +248,51 @@ export default function App() {
     setDriveHud(null);
     setDriveTrack(null);
     sound.tick("click");
+  }, []);
+
+  const openGarage = useCallback(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    if (drive) {
+      engine.exitDrive();
+      setDrive(null);
+      setDriveHud(null);
+      setDriveTrack(null);
+    }
+    setCoreView(null);
+    setTakeover(false);
+    if (sceneRef.current.aero) setScene((prev) => ({ ...prev, aero: false }));
+    sound.tick("start");
+    sound.whoosh();
+    if (!audioLockedRef.current && !sound.isOn) setAudioOn(sound.toggle());
+    engine.enterGarage("third");
+    setGarage("third");
+  }, [drive]);
+
+  const closeGarage = useCallback(() => {
+    engineRef.current?.exitGarage();
+    setGarage(null);
+    sound.tick("click");
+  }, []);
+
+  const switchGarageView = useCallback((view: GarageView) => {
+    engineRef.current?.setGarageView(view);
+    setGarage(view);
+    sound.tick("click");
+  }, []);
+
+  const replayGarage = useCallback(() => {
+    engineRef.current?.replayGarageEntry();
+    sound.whoosh();
+    sound.tick("start");
+  }, []);
+
+  const revVehicle = useCallback((vehicle: "car" | "bike") => {
+    if (!audioLockedRef.current && !sound.isOn) {
+      setAudioOn(sound.toggle());
+    }
+    sound.revEngine(vehicle);
+    engineRef.current?.revVehicle(vehicle);
   }, []);
 
   const switchDriveVehicle = useCallback(
@@ -498,6 +548,20 @@ export default function App() {
   }, [drive]);
 
   useEffect(() => {
+    document.body.classList.toggle("garage-open", garage !== null);
+    return () => document.body.classList.remove("garage-open");
+  }, [garage]);
+
+  useEffect(() => {
+    if (!garage) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeGarage();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [garage, closeGarage]);
+
+  useEffect(() => {
     if (!drive) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") exitDrive();
@@ -574,7 +638,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (coreView || takeover || drive) return;
+      if (coreView || takeover || drive || garage) return;
       const tag = (event.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       const key = event.key.toLowerCase();
@@ -618,7 +682,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [coreView, takeover, drive, scene, toggleAero, updateScene, resetScene, exportScene, scrollToId]);
+  }, [coreView, takeover, drive, garage, scene, toggleAero, updateScene, resetScene, exportScene, scrollToId]);
 
   const finishBoot = () => {
     setBooting(false);
@@ -781,6 +845,31 @@ export default function App() {
               >
                 TIME ATTACK <span aria-hidden="true">↗</span>
               </button>
+              <button
+                type="button"
+                className="btn btn--garage"
+                onClick={openGarage}
+              >
+                ENTER THE GARAGE <span aria-hidden="true">↘</span>
+              </button>
+              <div className="hero__revs" role="group" aria-label="Rev the engines">
+                <button
+                  type="button"
+                  className="revbtn"
+                  onClick={() => revVehicle("car")}
+                >
+                  <span>V12 BITURBO</span>
+                  <b>REV</b>
+                </button>
+                <button
+                  type="button"
+                  className="revbtn"
+                  onClick={() => revVehicle("bike")}
+                >
+                  <span>INLINE-4</span>
+                  <b>REV</b>
+                </button>
+              </div>
               <button
                 type="button"
                 className="cmdline"
@@ -1298,6 +1387,21 @@ export default function App() {
           onSetup={updateDriveSetup}
           onGhost={toggleDriveGhost}
           onTouch={(touch) => engineRef.current?.setDriveTouch(touch)}
+        />
+      )}
+
+      {garage && (
+        <Garage
+          view={garage}
+          licence={licenceName}
+          cp={career.cp}
+          unlocks={unlockCount}
+          audioOn={audioOn}
+          onAudio={toggleAudio}
+          onView={switchGarageView}
+          onRev={revVehicle}
+          onReplay={replayGarage}
+          onExit={closeGarage}
         />
       )}
 
