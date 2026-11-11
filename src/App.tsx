@@ -7,6 +7,9 @@ import { Takeover } from "./components/Takeover";
 import { Preloader } from "./components/Preloader";
 import { Cursor } from "./components/Cursor";
 import { AeroDock, AeroLaunch, type DockBridge, type DockStatus } from "./components/AeroDock";
+import { DriveHUD, type TrackOutline } from "./components/DriveHUD";
+import type { DriveHudState, DriveTouch, DriveVehicle } from "./three/drive";
+import { DEFAULT_DRIVE_SETUP, type DriveSetup } from "./lib/driveStore";
 import { useControl } from "./hooks/useControl";
 import { sound } from "./lib/sound";
 import { downloadBlob } from "./lib/clip";
@@ -124,6 +127,11 @@ export default function App() {
     replayDuration: 0,
   });
   const audioLockedRef = useRef(false);
+  const [drive, setDrive] = useState<{ vehicle: DriveVehicle } | null>(null);
+  const [driveHud, setDriveHud] = useState<DriveHudState | null>(null);
+  const [driveTrack, setDriveTrack] = useState<TrackOutline | null>(null);
+  const [driveSetup, setDriveSetup] = useState<DriveSetup>(DEFAULT_DRIVE_SETUP);
+  const driveSetupRef = useRef(driveSetup);
   const control = useControl();
   const { copied, copy } = useCopy();
 
@@ -181,6 +189,60 @@ export default function App() {
       window.setTimeout(() => scrollToId("top"), 60);
     }
   }, [scrollToId]);
+
+  const launchDrive = useCallback((vehicle: DriveVehicle = "car") => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    sound.tick("start");
+    setCoreView(null);
+    setTakeover(false);
+    engine.enterDrive(vehicle, driveSetupRef.current, {
+      wet: sceneRef.current.weather === "rain",
+      night: sceneRef.current.nightRace,
+    });
+    setDriveTrack(engine.getTrackOutline());
+    setDriveHud(engine.getDriveState());
+    setDrive({ vehicle });
+  }, []);
+
+  const exitDrive = useCallback(() => {
+    engineRef.current?.exitDrive();
+    setDrive(null);
+    setDriveHud(null);
+    setDriveTrack(null);
+    sound.tick("click");
+  }, []);
+
+  const switchDriveVehicle = useCallback(
+    (vehicle: DriveVehicle) => {
+      const engine = engineRef.current;
+      if (!engine || drive?.vehicle === vehicle) return;
+      engine.enterDrive(vehicle, driveSetupRef.current, {
+        wet: sceneRef.current.weather === "rain",
+        night: sceneRef.current.nightRace,
+      });
+      setDriveTrack(engine.getTrackOutline());
+      setDriveHud(engine.getDriveState());
+      setDrive({ vehicle });
+      sound.tick("click");
+    },
+    [drive],
+  );
+
+  const updateDriveSetup = useCallback((patch: Partial<DriveSetup>) => {
+    setDriveSetup((prev) => {
+      const next = { ...prev, ...patch };
+      driveSetupRef.current = next;
+      engineRef.current?.setDriveSetup(next);
+      return next;
+    });
+  }, []);
+
+  const toggleDriveGhost = useCallback((enabled: boolean) => {
+    engineRef.current?.setDriveGhost(enabled);
+    setDriveHud(engineRef.current?.getDriveState() ?? null);
+    sound.tick("click");
+  }, []);
 
   const exportScene = useCallback(() => {
     const url = engineRef.current?.exportPNG();
@@ -316,6 +378,32 @@ export default function App() {
   }, [scene.aero]);
 
   useEffect(() => {
+    driveSetupRef.current = driveSetup;
+  }, [driveSetup]);
+
+  useEffect(() => {
+    if (!drive) return;
+    const read = () => setDriveHud(engineRef.current?.getDriveState() ?? null);
+    read();
+    const id = window.setInterval(read, 50);
+    return () => window.clearInterval(id);
+  }, [drive]);
+
+  useEffect(() => {
+    document.body.classList.toggle("driving", drive !== null);
+    return () => document.body.classList.remove("driving");
+  }, [drive]);
+
+  useEffect(() => {
+    if (!drive) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") exitDrive();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drive, exitDrive]);
+
+  useEffect(() => {
     document.body.classList.toggle("locked", booting);
     return () => document.body.classList.remove("locked");
   }, [booting]);
@@ -383,7 +471,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (coreView || takeover) return;
+      if (coreView || takeover || drive) return;
       const tag = (event.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       const key = event.key.toLowerCase();
@@ -427,7 +515,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [coreView, takeover, scene, toggleAero, updateScene, resetScene, exportScene, scrollToId]);
+  }, [coreView, takeover, drive, scene, toggleAero, updateScene, resetScene, exportScene, scrollToId]);
 
   const finishBoot = () => {
     setBooting(false);
@@ -582,6 +670,13 @@ export default function App() {
                 onClick={() => scrollToId("pitwall")}
               >
                 ENTER THE PIT WALL <span aria-hidden="true">↘</span>
+              </button>
+              <button
+                type="button"
+                className="btn btn--drive"
+                onClick={() => launchDrive("car")}
+              >
+                TIME ATTACK <span aria-hidden="true">↗</span>
               </button>
               <button
                 type="button"
@@ -829,7 +924,12 @@ export default function App() {
               </p>
             </div>
 
-            <Terminal onTakeControl={openTakeover} scene={scene} onTune={tuneScene} />
+            <Terminal
+              onTakeControl={openTakeover}
+              onDrive={() => launchDrive("car")}
+              scene={scene}
+              onTune={tuneScene}
+            />
           </div>
         </section>
 
@@ -1064,6 +1164,25 @@ export default function App() {
           onReset={resetScene}
           bridge={dockBridge}
           status={dockStatus}
+        />
+      )}
+
+      {drive && driveHud && (
+        <DriveHUD
+          state={driveHud}
+          track={driveTrack}
+          audioOn={audioOn}
+          onAudio={toggleAudio}
+          onExit={exitDrive}
+          onRestart={() => {
+            engineRef.current?.restartDrive();
+            sound.tick("click");
+          }}
+          onRecover={() => engineRef.current?.recoverDrive()}
+          onVehicle={switchDriveVehicle}
+          onSetup={updateDriveSetup}
+          onGhost={toggleDriveGhost}
+          onTouch={(touch) => engineRef.current?.setDriveTouch(touch)}
         />
       )}
 

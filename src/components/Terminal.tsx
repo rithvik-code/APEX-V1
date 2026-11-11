@@ -42,6 +42,7 @@ type LinkState = "checking" | "online" | "offline";
 
 type TerminalProps = {
   onTakeControl?: (goal: string) => void;
+  onDrive?: () => void;
   scene: SceneConfig;
   onTune?: (patch: Partial<SceneConfig>) => void;
 };
@@ -80,6 +81,7 @@ const COMMANDS = [
   ["/model <name>", "switch the active model"],
   ["/prompt <text>", "replace the system prompt"],
   ["/control <goal>", "hand a task to the computer-use agent"],
+  ["/drive", "enter time attack on the hard circuit"],
   ["/settings", "open the link configuration"],
   ["/install", "show CLI install steps"],
   ["/clear", "wipe the session"],
@@ -287,7 +289,7 @@ const INITIAL_ENTRIES: Entry[] = [
   { id: "welcome", role: "assistant", content: WELCOME },
 ];
 
-export function Terminal({ onTakeControl, scene, onTune }: TerminalProps) {
+export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProps) {
   const [settings, setSettings] = useState<AiSettings>(() => loadSettings());
   const [draft, setDraft] = useState<AiSettings>(() => loadSettings());
   const [entries, setEntries] = useState<Entry[]>(INITIAL_ENTRIES);
@@ -644,6 +646,18 @@ export function Terminal({ onTakeControl, scene, onTune }: TerminalProps) {
         addEntry("meta", `HANDING OFF TO TAKE CONTROL → "${arg.slice(0, 90)}"`);
         sound.tick("start");
         onTakeControl(arg);
+        break;
+      case "/drive":
+        if (!onDrive) {
+          addEntry("meta", "TIME ATTACK UNAVAILABLE IN THIS VIEW.");
+          break;
+        }
+        addEntry(
+          "meta",
+          "LAUNCHING TIME ATTACK → HARD CIRCUIT / TIMED LAPS / SECTOR SPLITS / GHOST.",
+        );
+        sound.tick("start");
+        onDrive();
         break;
       case "/settings":
         openSettings();

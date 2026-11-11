@@ -107,7 +107,7 @@ export class DriveSession {
   private scene: THREE.Scene;
   private velDir = 0;
   private phase: DrivePhase = "countdown";
-  private countdown = 3.4;
+  private countdown = 3;
   private raceTime = 0;
   private lapStart = 0;
   private totalProgress = 0;
@@ -297,7 +297,7 @@ export class DriveSession {
     this.steer = 0;
     this.slip = 0;
     this.phase = "countdown";
-    this.countdown = 3.4;
+    this.countdown = 3;
     this.raceTime = 0;
     this.lapStart = 0;
     this.totalProgress = 0;
