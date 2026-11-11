@@ -99,10 +99,10 @@ export function createSuperbike(): {
     roughness: 0.52,
   });
   const mirror = new THREE.MeshStandardMaterial({
-    color: 0xc7ced4,
+    color: 0x9aa3ab,
     metalness: 1,
-    roughness: 0.07,
-    envMapIntensity: 1.7,
+    roughness: 0.16,
+    envMapIntensity: 0.85,
   });
   const wire = new THREE.LineBasicMaterial({
     color: ACID,
@@ -115,6 +115,13 @@ export function createSuperbike(): {
     roughness: 0.22,
   });
   const acid = new THREE.MeshBasicMaterial({ color: ACID });
+  const trellisMat = new THREE.MeshStandardMaterial({
+    color: ACID,
+    emissive: ACID,
+    emissiveIntensity: 0.38,
+    metalness: 0.35,
+    roughness: 0.42,
+  });
   const rubber = new THREE.MeshStandardMaterial({
     color: 0x080909,
     metalness: 0.15,
@@ -211,7 +218,7 @@ export function createSuperbike(): {
     trellis.push([head, mid], [mid, pivot], [head, pivot], [mid, sub], [pivot, sub]);
   }
   for (const [a, b] of trellis) {
-    frame.add(strut(a, b, 0.02, acid));
+    frame.add(strut(a, b, 0.02, trellisMat));
   }
 
   // Inverted forks + clip-ons -------------------------------------------------

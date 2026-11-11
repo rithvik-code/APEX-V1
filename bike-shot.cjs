@@ -26,22 +26,37 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.goto("http://127.0.0.1:5173/", { waitUntil: "domcontentloaded", timeout: 60000 });
   await page.waitForSelector(".site.is-ready", { timeout: 60000 });
   await sleep(2500);
-  await page.click(".aero-launch");
-  await page.waitForSelector(".aero-dock", { timeout: 10000 });
+  await page.evaluate(() => document.querySelector(".aero-launch")?.click());
+  await page.waitForSelector(".aero-dock", { timeout: 20000 });
   await sleep(500);
   await page.evaluate(() => {
     [...document.querySelectorAll(".aero-seg button")].find((b) => b.textContent.trim() === "BIKE")?.click();
   });
+  await sleep(300);
+  await page.evaluate(() => {
+    [...document.querySelectorAll(".aero-seg button")].find((b) => b.textContent.trim() === "SIDE")?.click();
+  });
   await sleep(2500);
   await page.evaluate(() => document.querySelector(".aero-dock__close")?.click());
-  await sleep(800);
-  await page.evaluate(() => document.getElementById("machine")?.scrollIntoView({ behavior: "instant", block: "start" }));
-  await sleep(3000);
+  await sleep(500);
+  // Hide the HTML hero overlay so the 3D bike is unobstructed for inspection.
+  await page.evaluate(() => {
+    const hero = document.querySelector(".hero");
+    if (hero) hero.style.visibility = "hidden";
+  });
+  await sleep(2500);
   await page.screenshot({ path: path.join(OUT, "11-bike-hero.jpg"), type: "jpeg", quality: 80, optimizeForSpeed: true });
-  console.log("bike hero shot saved");
-  await page.evaluate(() => window.scrollBy(0, 500));
+  console.log("bike side shot saved");
+  await page.evaluate(() => document.querySelector(".aero-launch")?.click());
+  await page.waitForSelector(".aero-dock", { timeout: 20000 });
+  await sleep(400);
+  await page.evaluate(() => {
+    [...document.querySelectorAll(".aero-seg button")].find((b) => b.textContent.trim() === "HERO")?.click();
+  });
+  await sleep(300);
+  await page.evaluate(() => document.querySelector(".aero-dock__close")?.click());
   await sleep(2500);
   await page.screenshot({ path: path.join(OUT, "12-bike-alt.jpg"), type: "jpeg", quality: 80, optimizeForSpeed: true });
-  console.log("bike alt shot saved");
+  console.log("bike hero-cam shot saved");
   await browser.close();
 })().catch((e) => { console.error("SHOT ERROR:", e); process.exit(2); });
