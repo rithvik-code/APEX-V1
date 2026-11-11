@@ -29,6 +29,19 @@ import {
 } from "../lib/radio";
 import type { SceneConfig } from "../lib/scene";
 import { sound } from "../lib/sound";
+import { ArcadeCard } from "./ArcadeCard";
+import type { XpKind } from "./ArcadeCard";
+import {
+  awardArcade,
+  buildArcadePayload,
+  classifyArcade,
+  loadArcadeMode,
+  loadArcadeStats,
+  QUIZ_INSTRUCTION,
+  saveArcadeMode,
+  type ArcadePayload,
+  type ArcadeStats,
+} from "../lib/arcade";
 
 type Entry = {
   id: string;
@@ -36,6 +49,7 @@ type Entry = {
   content: string;
   controlGoal?: string;
   engineer?: boolean;
+  arcade?: ArcadePayload;
 };
 
 type LinkState = "checking" | "online" | "offline";
@@ -75,6 +89,7 @@ const COMMANDS = [
   ["/race <request>", "race engineer tunes the car live"],
   ["/vox [on|off]", "speak replies over the racing radio"],
   ["/web [on|off]", "toggle live web grounding"],
+  ["/arcade [on|off]", "wrap replies in quiz, mission and intel cards"],
   ["/search <query>", "pull live sources without the model"],
   ["/live", "detect a local Ollama model and connect"],
   ["/demo", "drop back to the canned demo"],
@@ -262,6 +277,8 @@ RACE ENGINEER on duty: say "more downforce for the wet" and the car
 tunes itself live. RADIO is push-to-talk, VOX speaks the replies.
 WEB grounding is ON: current facts (F1, people, releases, news) are
 pulled live from Wikipedia and racing data before the model answers.
+ARCADE MODE is ON: answers arrive as quiz, mission or intel cards —
+the full text stays one click away. /arcade off for plain replies.
 Open LINK to point this terminal at a local Ollama model.`;
 
 function loadWeb(): boolean {
@@ -304,6 +321,10 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
   const [web, setWeb] = useState<boolean>(() => loadWeb());
   const [vox, setVox] = useState(false);
   const [listening, setListening] = useState(false);
+  const [arcade, setArcade] = useState<boolean>(() => loadArcadeMode());
+  const [arcadeStats, setArcadeStats] = useState<ArcadeStats>(() =>
+    loadArcadeStats(),
+  );
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);

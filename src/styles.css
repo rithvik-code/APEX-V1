@@ -2076,6 +2076,359 @@ body.is-orbiting * {
   }
 }
 
+/* Arcade mode cards — presentation layer over the real answer. */
+
+.arcade {
+  flex: 1;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(200, 255, 22, 0.22);
+  border-radius: 4px;
+  background:
+    linear-gradient(160deg, rgba(200, 255, 22, 0.045), transparent 55%),
+    rgba(8, 10, 8, 0.55);
+  animation: handoffIn 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.arcade--risk-high {
+  border-color: rgba(255, 92, 77, 0.4);
+}
+
+.arcade__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.arcade__kicker {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--acid);
+}
+
+.arcade__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.arcade__chip {
+  border: 1px solid var(--line);
+  padding: 2px 6px;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.arcade__chip--streak {
+  border-color: rgba(200, 255, 22, 0.45);
+  color: var(--acid);
+}
+
+.arcade__chip--low {
+  border-color: rgba(200, 255, 22, 0.4);
+  color: var(--acid);
+}
+
+.arcade__chip--medium {
+  border-color: rgba(255, 190, 60, 0.45);
+  color: #ffbe3c;
+}
+
+.arcade__chip--high {
+  border-color: rgba(255, 92, 77, 0.55);
+  color: #ff6a5c;
+}
+
+.arcade__chip--btn {
+  background: none;
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+  transition:
+    color 0.2s,
+    border-color 0.2s;
+}
+
+.arcade__chip--btn:hover {
+  color: var(--acid);
+  border-color: rgba(200, 255, 22, 0.5);
+}
+
+.arcade__question {
+  margin: 0 0 12px;
+  color: var(--paper);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.arcade__options {
+  display: grid;
+  gap: 7px;
+}
+
+.arcade__option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--paper-soft);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.2s,
+    color 0.2s,
+    background 0.2s;
+}
+
+.arcade__option:hover:not(:disabled) {
+  border-color: rgba(200, 255, 22, 0.45);
+  background: rgba(200, 255, 22, 0.05);
+  color: var(--paper);
+}
+
+.arcade__option:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.arcade__option-key {
+  display: grid;
+  place-items: center;
+  flex: 0 0 20px;
+  height: 20px;
+  border: 1px solid rgba(200, 255, 22, 0.3);
+  color: var(--acid);
+  font-size: 9px;
+}
+
+.arcade__option-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.arcade__option-mark {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.arcade__option--correct {
+  border-color: var(--acid);
+  background: rgba(200, 255, 22, 0.12);
+  color: var(--paper);
+  opacity: 1;
+}
+
+.arcade__option--correct .arcade__option-key {
+  background: var(--acid);
+  border-color: var(--acid);
+  color: #050607;
+}
+
+.arcade__option--correct .arcade__option-mark {
+  color: var(--acid);
+}
+
+.arcade__option--wrong {
+  border-color: rgba(255, 92, 77, 0.6);
+  background: rgba(255, 92, 77, 0.08);
+  color: var(--paper);
+  opacity: 1;
+}
+
+.arcade__option--wrong .arcade__option-key {
+  border-color: rgba(255, 92, 77, 0.6);
+  color: #ff6a5c;
+}
+
+.arcade__option--wrong .arcade__option-mark {
+  color: #ff6a5c;
+}
+
+.arcade__result {
+  margin: 10px 0 0;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.arcade__result--good {
+  color: var(--acid);
+}
+
+.arcade__reveal {
+  margin-top: 10px;
+}
+
+.arcade__revealbtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.arcade__revealbtn:hover {
+  color: var(--acid);
+}
+
+.arcade__answer {
+  max-height: 320px;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-left: 1px solid rgba(200, 255, 22, 0.3);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--paper-soft);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.arcade__goal {
+  margin: 0 0 10px;
+  padding-left: 10px;
+  border-left: 2px solid var(--acid);
+  color: var(--paper);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.arcade__caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.arcade__cap {
+  padding: 3px 6px;
+  border: 1px solid rgba(200, 255, 22, 0.3);
+  color: var(--acid);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+}
+
+.arcade__steps {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  color: var(--paper-soft);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.arcade__steps li::marker {
+  color: var(--acid);
+  font-size: 10px;
+}
+
+.arcade__steps li + li {
+  margin-top: 4px;
+}
+
+.arcade__run {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid rgba(200, 255, 22, 0.5);
+  background: linear-gradient(
+    100deg,
+    rgba(200, 255, 22, 0.14),
+    rgba(200, 255, 22, 0.04) 55%,
+    rgba(200, 255, 22, 0.1)
+  );
+  color: var(--acid);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.25s ease,
+    box-shadow 0.25s ease,
+    transform 0.25s ease;
+}
+
+.arcade__run:hover:not(:disabled) {
+  border-color: var(--acid);
+  box-shadow:
+    0 0 0 1px rgba(200, 255, 22, 0.4),
+    0 0 26px rgba(200, 255, 22, 0.28);
+  transform: translateY(-1px);
+}
+
+.arcade__run:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.arcade__run-arrow {
+  margin-left: auto;
+  font-size: 15px;
+  transition: transform 0.25s ease;
+}
+
+.arcade__run:hover:not(:disabled) .arcade__run-arrow {
+  transform: translate(3px, -3px);
+}
+
+.arcade__poster {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--line);
+  background: #050607;
+}
+
+.arcade__intel-text {
+  margin: 10px 0 0;
+  color: var(--paper-soft);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .arcade {
+    padding: 11px;
+  }
+
+  .arcade__option {
+    font-size: 10.5px;
+  }
+
+  .arcade__answer {
+    max-height: 240px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arcade {
+    animation: none;
+  }
+}
+
 .term__chips {
   display: flex;
   flex-wrap: wrap;
