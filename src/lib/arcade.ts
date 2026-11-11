@@ -115,9 +115,13 @@ export function awardArcade(
 
 // Appended to the system prompt for quiz turns. The strict tail line is parsed
 // out of the transcript and never shown as prose.
-export const QUIZ_INSTRUCTION = `ARCADE QUIZ: the interface will wrap this reply in a quiz card. Answer normally first, then add one final line, exactly:
-QUIZ: <question> | <correct answer> | <wrong answer> | <wrong answer> | <wrong answer>
-The question must be answerable from your reply. Every option under 60 characters, no pipes inside the text, no numbering. If the reply has no testable fact, write QUIZ: SKIP instead.`;
+export const QUIZ_INSTRUCTION = `ARCADE QUIZ: the interface will wrap this reply in a quiz card.
+Write the normal answer first, short.
+Then, on its own new line at the very end, write exactly one line:
+QUIZ: <question ending in ?> | <correct answer> | <wrong answer> | <wrong answer> | <wrong answer>
+Example:
+QUIZ: What creates most of an F1 car's downforce? | The floor and diffuser | The rear wing | Exhaust gases | Tyre slip
+Rules: never put QUIZ on the same line as the answer; exactly four options after the question; every option under 60 characters; no pipes inside option text; no numbering. If the reply has no testable fact, end with QUIZ: SKIP.`;
 
 const VISUAL_START =
   /^(show me|draw|sketch|diagram|visuali[sz]e|picture|image|poster|illustrate)\b/i;
@@ -192,7 +196,16 @@ export function buildMission(goal: string): MissionPayload {
 
 /* --------------------------------- quizzes -------------------------------- */
 
-const QUIZ_LINE = /^[ \t]*QUIZ:[ \t]*(.+)$/im;
+// The tail can land on its own line or be appended to the answer's last line,
+// so anchor to the end of the reply rather than to a line start.
+const QUIZ_LINE = /(?:^|\s)QUIZ:[ \t]*([^\n]*?)[ \t]*$/i;
+
+export function stripQuizLine(raw: string): string {
+  return raw
+    .replace(QUIZ_LINE, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
+}
 
 function shuffled<T>(items: T[]): T[] {
   const out = [...items];
@@ -206,10 +219,7 @@ function shuffled<T>(items: T[]): T[] {
 export function extractQuiz(raw: string): { text: string; quiz: QuizPayload | null } {
   const match = raw.match(QUIZ_LINE);
   if (!match) return { text: raw, quiz: null };
-  const text = raw
-    .replace(QUIZ_LINE, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trimEnd();
+  const text = stripQuizLine(raw);
   const payload = match[1].trim();
   if (!payload || /^skip\b/i.test(payload)) return { text, quiz: null };
   const parts = payload
@@ -219,6 +229,11 @@ export function extractQuiz(raw: string): { text: string; quiz: QuizPayload | nu
   if (parts.length < 5) return { text, quiz: null };
   const [question, correct, ...wrong] = parts;
   if (!question || !correct) return { text, quiz: null };
+  // Small models sometimes emit a label instead of a question; reject those so
+  // the card falls back to a real question from the answer or the bank.
+  if (!question.includes("?") && question.split(/\s+/).length < 4) {
+    return { text, quiz: null };
+  }
   const unique = Array.from(new Set([correct, ...wrong.slice(0, 3)]));
   if (unique.length < 4) return { text, quiz: null };
   const options = shuffled(unique);
@@ -429,9 +444,22 @@ function stripDecor(raw: string): string {
   return raw
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/SOURCES ─[\s\S]*$/i, " ")
+    // Uppercase labels become the poster title; keep them out of the body.
+    .replace(/^[ \t]*[A-Z0-9][A-Z0-9 /&.'()_:-]{3,}[ \t]*$/gm, " ")
     .replace(/[|#*_`]/g, " ")
     .replace(/[ \t]+/g, " ")
     .trim();
+}
+
+function posterSentences(raw: string): string[] {
+  return raw
+    .split(/\n\s*\n/)
+    .flatMap((paragraph) => {
+      const single = paragraph.replace(/\s*\n\s*/g, " ").trim();
+      return single.split(SENTENCE_SPLIT);
+    })
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length >= 30 && !/^https?:/i.test(sentence));
 }
 
 function pickStat(raw: string): string | null {
@@ -447,10 +475,7 @@ export function buildPoster(raw: string, query: string): PosterSpec {
     .map((line) => line.trim())
     .filter((line) => /^[A-Z0-9][A-Z0-9 /&.'()_:-]{3,}$/.test(line));
   const clean = stripDecor(raw);
-  const sentences = clean
-    .split(SENTENCE_SPLIT)
-    .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length >= 30 && !/^https?:/i.test(sentence));
+  const sentences = posterSentences(clean);
 
   const lines: string[] = [];
   for (const sentence of sentences) {
@@ -505,25 +530,23 @@ function wrapLines(
   maxWidth: number,
   maxLines: number,
 ): string[] {
-  const words = text.split(/\s+/);
+  const words = text.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let current = "";
-  for (const word of words) {
-    const next = current ? `${current} ${word}` : word;
-    if (ctx.measureText(next).width <= maxWidth) {
+  let index = 0;
+  while (index < words.length && lines.length < maxLines) {
+    const next = current ? `${current} ${words[index]}` : words[index];
+    if (!current || ctx.measureText(next).width <= maxWidth) {
       current = next;
+      index++;
       continue;
     }
-    if (current) lines.push(current);
-    current = word;
-    if (lines.length === maxLines - 1) break;
+    lines.push(current);
+    current = "";
   }
   if (current && lines.length < maxLines) lines.push(current);
-  if (lines.length === maxLines) {
-    const last = lines[maxLines - 1];
-    if (ctx.measureText(last).width > maxWidth - 24) {
-      lines[maxLines - 1] = `${last.slice(0, Math.max(0, last.length - 2))}…`;
-    }
+  if (index < words.length && lines.length === maxLines) {
+    lines[maxLines - 1] = `${lines[maxLines - 1].replace(/[\s,.;:]+$/, "")}…`;
   }
   return lines;
 }

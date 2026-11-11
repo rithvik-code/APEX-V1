@@ -48,26 +48,7 @@ async function shot(page, name) {
   await page.screenshot({ path: path.join(OUT, `${name}.png`) });
 }
 
-(async () => {
-  const browser = await puppeteer.launch({
-    executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe",
-    headless: true,
-    protocolTimeout: 300000,
-    args: [
-      "--no-sandbox",
-      "--disable-dev-shm-usage",
-      "--use-gl=angle",
-      "--use-angle=swiftshader",
-      "--enable-unsafe-swiftshader",
-      "--disable-background-timer-throttling",
-      "--disable-renderer-backgrounding",
-      "--window-size=1280,940",
-    ],
-  });
-
-  const page = await browser.newPage();
-  await page.setViewport({ width: 1280, height: 940 });
-
+async function applyHarnessEnv(page) {
   // Keep the run deterministic: no Ollama detection, no web grounding, demo
   // provider, arcade on, fresh XP.
   await page.evaluateOnNewDocument(() => {
@@ -87,6 +68,28 @@ async function shot(page, name) {
       return realFetch(input, init);
     };
   });
+}
+
+(async () => {
+  const browser = await puppeteer.launch({
+    executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe",
+    headless: true,
+    protocolTimeout: 300000,
+    args: [
+      "--no-sandbox",
+      "--disable-dev-shm-usage",
+      "--use-gl=angle",
+      "--use-angle=swiftshader",
+      "--enable-unsafe-swiftshader",
+      "--disable-background-timer-throttling",
+      "--disable-renderer-backgrounding",
+      "--window-size=1280,940",
+    ],
+  });
+
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 940 });
+  await applyHarnessEnv(page);
 
   const errors = [];
   page.on("pageerror", (err) => errors.push(String(err)));
@@ -249,6 +252,40 @@ async function shot(page, name) {
   }));
   check("session survived all cards", board.cards === 3, `${board.cards} cards`);
   check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
+
+  /* ------------------------------- mobile ------------------------------ */
+  const mob = await browser.newPage();
+  await mob.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+  const mobErrors = [];
+  mob.on("pageerror", (e) => mobErrors.push(e.message));
+  await applyHarnessEnv(mob);
+  await mob.goto("http://127.0.0.1:5173/", { waitUntil: "networkidle2" });
+  await mob.waitForSelector("#terminal-widget .term__input input", {
+    timeout: 60000,
+  });
+  await mob.evaluate(() =>
+    document.getElementById("pitwall")?.scrollIntoView({ block: "start" }),
+  );
+  await sleep(700);
+  await send(mob, "what is downforce?");
+  await mob.waitForSelector(".arcade--quiz", { timeout: 45000 });
+  await sleep(1800);
+  const mobile = await mob.evaluate(() => {
+    const term = document.querySelector(".term");
+    const card = [...document.querySelectorAll(".arcade--quiz")].pop();
+    const tr = term.getBoundingClientRect();
+    const cr = card.getBoundingClientRect();
+    return {
+      inside: cr.left >= tr.left - 1 && cr.right <= tr.right + 1,
+      options: card.querySelectorAll(".arcade__option").length,
+      overflow: document.documentElement.scrollWidth > window.innerWidth + 1,
+    };
+  });
+  check("mobile card fits the terminal", mobile.inside, "");
+  check("mobile quiz options", mobile.options === 4, `${mobile.options}`);
+  check("mobile no horizontal overflow", !mobile.overflow);
+  check("mobile no page errors", mobErrors.length === 0, mobErrors.slice(0, 2).join(" | "));
+  await mob.screenshot({ path: path.join(OUT, "07-mobile-quiz.png") });
 
   await browser.close();
   const failures = results.filter((r) => !r.ok);

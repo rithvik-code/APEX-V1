@@ -39,6 +39,7 @@ import {
   loadArcadeStats,
   QUIZ_INSTRUCTION,
   saveArcadeMode,
+  stripQuizLine,
   type ArcadePayload,
   type ArcadeStats,
 } from "../lib/arcade";
@@ -437,6 +438,18 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
+    // An arcade card can be taller than the scrollport; anchor to its top so
+    // the poster and question show first instead of the tail of the text.
+    const lastEntry = body.lastElementChild;
+    if (lastEntry instanceof HTMLElement && lastEntry.querySelector(".arcade")) {
+      const top =
+        lastEntry.getBoundingClientRect().top -
+        body.getBoundingClientRect().top +
+        body.scrollTop -
+        4;
+      body.scrollTo({ top, behavior: "smooth" });
+      return;
+    }
     body.scrollTo({ top: body.scrollHeight, behavior: "smooth" });
   }, [entries, streaming, settingsOpen]);
 
@@ -1148,6 +1161,7 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
           const handoff = parsed
             ? parsed.goal ?? entry.controlGoal ?? null
             : null;
+          const shownText = parsed ? stripQuizLine(parsed.text) : entry.content;
           return (
             <div
               key={entry.id}
@@ -1168,14 +1182,14 @@ export function Terminal({ onTakeControl, onDrive, scene, onTune }: TerminalProp
                   {entry.arcade && !isStreamingEntry ? (
                     <ArcadeCard
                       payload={entry.arcade}
-                      text={parsed?.text ?? entry.content}
+                      text={shownText}
                       stats={arcadeStats}
                       onXp={handleXp}
                       onHandoff={onTakeControl}
                     />
                   ) : (
                     <p>
-                      {parsed?.text ?? entry.content}
+                      {shownText}
                       {isStreamingEntry && (
                         <span className="term__caret" aria-hidden="true" />
                       )}
