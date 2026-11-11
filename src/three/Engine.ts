@@ -26,6 +26,7 @@ import {
 import {
   ClipRecorder,
   newLapId,
+  primeClipEncoder,
   sampleLap,
   type CameraSample,
   type LapRecording,
@@ -331,6 +332,7 @@ export class ApexEngine {
     this.labelsEl = labelsEl;
     this.onReady = onReady;
     this.reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    primeClipEncoder();
 
     this.renderer = new THREE.WebGLRenderer({
       canvas,

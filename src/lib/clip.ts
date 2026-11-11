@@ -89,6 +89,52 @@ export function sampleLap(
 /* Cinematic clip export — viewport + burned-in telemetry to a WebM file.      */
 /* -------------------------------------------------------------------------- */
 
+function pickClipMime(): string {
+  return MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+    ? "video/webm;codecs=vp9"
+    : "video/webm";
+}
+
+let encoderPrimed = false;
+
+// Some Chrome builds drop the first canvas capture pipeline of a page, which
+// produces an empty file. A tiny throwaway recording warms the encoder so the
+// first clip a visitor records actually contains video.
+export function primeClipEncoder(): void {
+  if (encoderPrimed || typeof MediaRecorder === "undefined" || typeof document === "undefined") {
+    return;
+  }
+  encoderPrimed = true;
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const stream = canvas.captureStream(30);
+    const recorder = new MediaRecorder(stream, { mimeType: pickClipMime() });
+    recorder.start(100);
+    let frame = 0;
+    const paint = () => {
+      ctx.fillStyle = "#050607";
+      ctx.fillRect(0, 0, 64, 64);
+      frame = requestAnimationFrame(paint);
+    };
+    paint();
+    window.setTimeout(() => {
+      cancelAnimationFrame(frame);
+      try {
+        if (recorder.state !== "inactive") recorder.stop();
+      } catch {
+        // The browser may already have released the recorder.
+      }
+      stream.getTracks().forEach((track) => track.stop());
+    }, 900);
+  } catch {
+    // Capture is a progressive enhancement; warm-up failures are non-fatal.
+  }
+}
+
 export class ClipRecorder {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -105,9 +151,7 @@ export class ClipRecorder {
     this.canvas.height = source.height;
     this.ctx = this.canvas.getContext("2d")!;
     const stream = this.canvas.captureStream(30);
-    this.mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
-      ? "video/webm;codecs=vp9"
-      : "video/webm";
+    this.mime = pickClipMime();
     this.recorder = new MediaRecorder(stream, {
       mimeType: this.mime,
       videoBitsPerSecond: 8_000_000,
@@ -177,5 +221,5 @@ export function downloadBlob(blob: Blob, filename: string): void {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }

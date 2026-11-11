@@ -301,7 +301,8 @@ async function captureDownload(page, filename, timeoutMs = 30000) {
   await page.evaluate(() => document.getElementById("pitwall").scrollIntoView());
   await sleep(900);
   await page.type("#terminal-widget .term__input input", "more downforce for the wet");
-  await page.click("#terminal-widget .term__input button[type=submit]");
+  await page.focus("#terminal-widget .term__input input");
+      await page.keyboard.press("Enter");
   await sleep(1500);
   const engineer = await page.evaluate(() => {
     const tag = [...document.querySelectorAll(".term__tag--engineer")];
@@ -331,7 +332,8 @@ async function captureDownload(page, filename, timeoutMs = 30000) {
 
   /* ---- #33 playbooks ---- */
   await setInput(page, "#terminal-widget .term__input input", "/control open notepad and type hello");
-  await page.click("#terminal-widget .term__input button[type=submit]");
+  await page.focus("#terminal-widget .term__input input");
+      await page.keyboard.press("Enter");
   await page.waitForSelector(".takeover", { timeout: 15000 });
   await sleep(800);
   const pbBlock = await page.evaluate(() =>
