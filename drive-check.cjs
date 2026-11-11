@@ -260,14 +260,14 @@ async function main() {
       const log = { laps: [], maxSpeed: 0, offTrackFrames: 0, frames: 0, stuck: 0, ghostSeen: false, midSectors: null, activeRow: 0 };
       let lastLap = d.lapCount;
       const start = performance.now();
-      while (performance.now() - start < 90000) {
+      while (performance.now() - start < 190000) {
         const t = d.track.nearestT(d.pos.x, d.pos.z);
         const speed = Math.abs(d.speed);
         const aheadT = (t + 0.01 + speed * 0.00042) % 1;
         const target = d.track.centerAt(aheadT, d.tmp);
         const desired = Math.atan2(target.x - d.pos.x, target.z - d.pos.z);
         const err = wrap(desired - d.heading);
-        d.touch.steer = Math.max(-1, Math.min(1, err * 2.4));
+        d.touch.steer = Math.max(-1, Math.min(1, -err * 2.4));
         const p1 = d.track.curve.getPoint(t);
         const p2 = d.track.curve.getPoint((t + 0.028) % 1);
         const turn = Math.abs(wrap(Math.atan2(p2.x - p1.x, p2.z - p1.z) - Math.atan2(target.x - d.pos.x, target.z - d.pos.z)));

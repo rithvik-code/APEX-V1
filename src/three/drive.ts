@@ -393,10 +393,11 @@ export class DriveSession {
     }
     this.speed = clamp(this.speed, -d.topSpeed * 0.18, d.topSpeed);
 
-    // Steering + grip.
+    // Steering + grip. Positive steer is "screen right"; because the chase
+    // camera looks along +Z, screen right is world -X, hence the negation.
     const speedFactor = clamp(Math.abs(this.speed) / 10, 0, 1);
     const dirSign = this.speed >= 0 ? 1 : -1;
-    const turn = this.steer * d.steerAuth * speedFactor * dirSign;
+    const turn = -this.steer * d.steerAuth * speedFactor * dirSign;
     this.heading += turn * dt;
     let gripEff = d.grip * (handbrake ? 0.22 : 1) * (this.offTrack ? 0.5 : 1);
     gripEff *= 1 / (1 + Math.abs(turn) * Math.abs(this.speed) * 0.012);

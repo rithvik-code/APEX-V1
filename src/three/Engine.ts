@@ -1263,7 +1263,7 @@ export class ApexEngine {
       for (let i = 0; i < this.car.wheels.length; i++) {
         const wheel = this.car.wheels[i];
         wheel.rotation.x = this.driveWheelSpin;
-        wheel.rotation.y = i < 2 ? drive.steer * 0.42 : 0;
+        wheel.rotation.y = i < 2 ? -drive.steer * 0.42 : 0;
         wheel.position.x = wheel.userData.baseX as number;
       }
       this.car.engine.update(this.clockTime * 2 + Math.abs(drive.speed) * 0.04);

@@ -47,8 +47,8 @@ export type GhostLap = {
   samples: GhostSample[];
 };
 
-const BOARD_KEY = "apex.drive.board.v1";
-const GHOST_KEY = "apex.drive.ghost.v1";
+const BOARD_KEY = "apex.drive.board.v2";
+const GHOST_KEY = "apex.drive.ghost.v2";
 const BOARD_LIMIT = 10;
 
 type BoardMap = Record<DriveVehicle, DriveEntry[]>;
