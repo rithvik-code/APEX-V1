@@ -33,6 +33,7 @@ import {
   type CameraSample,
   type LapRecording,
 } from "../lib/clip";
+import { REV_SHIFTS } from "../lib/sound";
 
 const ACID = 0xc8ff16;
 const UP_AXIS = new THREE.Vector3(0, 1, 0);
@@ -264,6 +265,10 @@ export class ApexEngine {
   private dust: THREE.Points;
   private tunnel: THREE.Group;
   private endRing: THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>;
+  private portalFlare: THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial>;
+  private tunnelDive = -1;
+  private tunnelDiveFrom = new THREE.Vector3();
+  private tunnelDiveTarget = new THREE.Vector3(0, 5, -118);
   private progress = 0;
   private targetProgress = 0;
   private pointer = new THREE.Vector2();
@@ -378,11 +383,15 @@ export class ApexEngine {
   private garageTarget = new THREE.Vector3();
   private garageStartPos = new THREE.Vector3();
   private garageStartTgt = new THREE.Vector3();
-  private revving = false;
+  private revHeld = false;
   private revWasActive = false;
   private revT = 0;
+  private revGear = 0;
   private revKind: "car" | "bike" = "car";
   private revRpm = 0;
+  private revKick = 0;
+  private revReleaseAt = -1;
+  private revReleaseFrom = 0;
 
   constructor(canvas: HTMLCanvasElement, labelsEl: HTMLElement, onReady?: () => void) {
     this.labelsEl = labelsEl;
@@ -501,6 +510,22 @@ export class ApexEngine {
     );
     bgGlow.position.set(0, 4.6, -112);
     this.scene.add(bgGlow);
+
+    this.portalFlare = new THREE.Mesh(
+      new THREE.CircleGeometry(11.4, 64),
+      new THREE.MeshBasicMaterial({
+        map: glowTexture(),
+        color: ACID,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        fog: false,
+      }),
+    );
+    this.portalFlare.position.set(0, 5, -117.8);
+    this.portalFlare.visible = false;
+    this.scene.add(this.portalFlare);
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.setPixelRatio(renderPixelRatio());
@@ -796,6 +821,48 @@ export class ApexEngine {
     group.add(endRing);
 
     return { group, endRing };
+  }
+
+  private updateTunnelDive(dt: number): void {
+    this.tunnelDive += dt;
+    const raw = THREE.MathUtils.clamp(this.tunnelDive / 1.5, 0, 1);
+    const t = Math.pow(raw, 2.4);
+    this.camera.position.lerpVectors(this.tunnelDiveFrom, this.tunnelDiveTarget, t);
+    const shake = (1 - t) * 0.16;
+    this.camera.position.x += Math.sin(raw * 46) * shake;
+    this.camera.position.y += Math.cos(raw * 39) * shake * 0.7;
+    this.camera.lookAt(0, 5, -160);
+    this.camera.rotateZ(Math.sin(raw * Math.PI) * 0.06);
+    this.camera.fov = THREE.MathUtils.lerp(62, 108, Math.pow(raw, 1.6));
+    this.camera.updateProjectionMatrix();
+
+    this.tunnel.visible = true;
+    this.tunnel.children.forEach((child, index) => {
+      if (child instanceof THREE.Mesh || child instanceof THREE.LineSegments) {
+        const material = child.material as THREE.Material & { opacity: number };
+        if ("opacity" in material) {
+          const wave = 0.5 + 0.5 * Math.sin(this.clockTime * 16 - index * 0.9);
+          material.opacity = 0.25 + 0.5 * wave;
+        }
+      }
+    });
+    this.endRing.material.opacity = 0.7 + raw * 0.3;
+    this.portalFlare.visible = true;
+    this.portalFlare.material.opacity = Math.min(
+      1,
+      0.12 + Math.pow(raw, 2.6) * 1.1,
+    );
+    this.portalFlare.scale.setScalar(0.35 + Math.pow(raw, 1.4) * 1.15);
+    (this.scene.fog as THREE.FogExp2).density = 0.004;
+  }
+
+  startTunnelEntry(): boolean {
+    if (this.garageOn || this.drive) return false;
+    this.tunnelDive = 0;
+    this.tunnelDiveFrom.copy(this.camera.position);
+    this.tunnel.visible = true;
+    this.portalFlare.visible = true;
+    return true;
   }
 
   private onScroll(): void {
@@ -1228,36 +1295,68 @@ export class ApexEngine {
 
   private animateRev(dt: number): void {
     const car = this.car;
-    if (!this.revving) {
+    const releasing = this.revReleaseAt >= 0;
+    if (!this.revHeld && !releasing) {
       if (!this.revWasActive) return;
       this.revWasActive = false;
       this.revRpm = 0;
+      this.revKick = 0;
       if (!this.dynoOn) car.exhaustGlow.opacity = 0;
       for (const flame of car.career.flames) flame.scale.set(1, 1, 1);
       this.applyCareerVisuals();
       return;
     }
 
-    this.revT += dt;
-    const duration = this.revKind === "bike" ? 1.7 : 2.25;
-    const p = Math.min(1, this.revT / duration);
-    let rpm: number;
-    if (p < 0.34) rpm = 0.2 + (p / 0.34) * 0.8;
-    else if (p < 0.5) rpm = 1;
-    else if (p < 0.92) rpm = 1 - ((p - 0.5) / 0.42) * 0.92;
-    else rpm = Math.max(0, 0.08 - ((p - 0.92) / 0.08) * 0.08);
-    const overrun = p > 0.55 ? 0.07 * (1 - p) * Math.random() : 0;
-    this.revRpm = Math.min(1.15, rpm + overrun);
-    this.engineTime += dt * this.revRpm * 12;
+    const shifts = REV_SHIFTS[this.revKind];
+    let target: number;
+    if (releasing) {
+      this.revReleaseAt += dt;
+      const r = this.revReleaseAt;
+      const flicker = r < 0.34 ? Math.sin(r * 84) * 0.05 * (1 - r / 0.34) : 0;
+      target = Math.max(0, this.revReleaseFrom * Math.exp(-r * 4.6) + flicker);
+      this.revKick *= Math.exp(-dt * 9);
+      if (r > 0.58) {
+        this.revReleaseAt = -1;
+        this.revRpm = 0;
+        this.revKick = 0;
+      }
+    } else {
+      this.revT += dt;
+      const t = this.revT;
+      let gear = 0;
+      while (gear < shifts.length && t >= shifts[gear]) gear++;
+      const sinceShift = t - (gear > 0 ? shifts[gear - 1] : 0);
+      if (gear !== this.revGear) {
+        // Ignition cut: the needle blips down and the exhaust cracks.
+        this.revKick = 1;
+        this.revGear = gear;
+      }
+      this.revKick *= Math.exp(-dt * 11);
+      if (gear >= shifts.length) {
+        target = 0.955 + Math.sin(this.clockTime * 46) * 0.035;
+      } else {
+        const start = gear > 0 ? shifts[gear - 1] : 0;
+        const u = THREE.MathUtils.clamp((t - start) / (shifts[gear] - start), 0, 1);
+        target = 0.18 + Math.pow(u, 0.75) * 0.78;
+        if (sinceShift < 0.07) target *= 0.72;
+      }
+    }
+
+    this.revRpm += (target - this.revRpm) * (1 - Math.exp(-dt * 22));
+    this.revRpm = Math.min(1.12, this.revRpm);
+    this.engineTime += dt * (this.revRpm + this.revKick * 0.5) * 14;
 
     if (this.revKind === "car") {
-      car.exhaustGlow.opacity = 0.16 + this.revRpm * 0.8;
+      car.exhaustGlow.opacity =
+        0.16 + this.revRpm * 0.8 + this.revKick * 0.35;
       for (const flame of car.career.flames) {
-        const s = 0.75 + this.revRpm * 1.7 + Math.random() * 0.25 * this.revRpm;
+        const kick = this.revKick * 0.8;
+        const s = 0.75 + this.revRpm * 1.7 + kick + Math.random() * 0.25 * this.revRpm;
         flame.scale.set(s, s * (0.7 + this.revRpm * 1.1), s);
       }
       if (this.careerUnlocks.has("flame")) {
-        car.career.flameMat.opacity = 0.3 + this.revRpm * 0.5;
+        car.career.flameMat.opacity =
+          Math.min(1, 0.3 + this.revRpm * 0.5 + this.revKick * 0.25);
       }
     } else {
       this.bike.accent.opacity = 0.5 + this.revRpm * 0.5;
@@ -1265,8 +1364,6 @@ export class ApexEngine {
         this.bike.career.tailStripMat.opacity = 0.25 + this.revRpm * 0.55;
       }
     }
-
-    if (p >= 1) this.revving = false;
   }
 
   exportPNG(): string {
@@ -1452,9 +1549,11 @@ export class ApexEngine {
     this.garageLookPitch = -0.04;
     this.garageKeys.clear();
     this.dragging = false;
-    this.revving = false;
+    this.revHeld = false;
     this.revWasActive = false;
+    this.revReleaseAt = -1;
     this.revRpm = 0;
+    this.revKick = 0;
 
     this.carGroup.position.set(0, GARAGE_CAR_HOVER_Y, 0.2);
     this.carGroup.rotation.set(0, 0, 0);
@@ -1466,6 +1565,9 @@ export class ApexEngine {
     }
 
     this.tunnel.visible = false;
+    this.tunnelDive = -1;
+    this.portalFlare.visible = false;
+    this.portalFlare.material.opacity = 0;
     this.shafts.visible = false;
     this.streaks.visible = false;
     this.dust.visible = false;
@@ -1499,9 +1601,11 @@ export class ApexEngine {
     this.garageOn = false;
     this.garageKeys.clear();
     this.dragging = false;
-    this.revving = false;
+    this.revHeld = false;
     this.revWasActive = false;
+    this.revReleaseAt = -1;
     this.revRpm = 0;
+    this.revKick = 0;
     document.body.classList.remove("is-orbiting");
 
     if (this.garageStage) {
@@ -1539,9 +1643,11 @@ export class ApexEngine {
     this.garageStage?.setLights(0);
     this.carGroup.position.set(0, GARAGE_CAR_HOVER_Y, 0.2);
     this.carGroup.rotation.set(0, 0, 0);
-    this.revving = false;
+    this.revHeld = false;
     this.revWasActive = false;
+    this.revReleaseAt = -1;
     this.revRpm = 0;
+    this.revKick = 0;
   }
 
   setGarageView(view: GarageView): void {
@@ -1556,12 +1662,23 @@ export class ApexEngine {
     }
   }
 
-  revVehicle(vehicle: "car" | "bike"): void {
+  startRev(vehicle: "car" | "bike"): void {
     if (this.drive) return;
-    this.revving = true;
+    if (this.revHeld && this.revKind === vehicle) return;
+    this.revHeld = true;
     this.revWasActive = true;
     this.revT = 0;
+    this.revGear = 0;
     this.revKind = vehicle;
+    this.revReleaseAt = -1;
+    this.revReleaseFrom = 0;
+  }
+
+  endRev(): void {
+    if (!this.revHeld) return;
+    this.revHeld = false;
+    this.revReleaseAt = 0;
+    this.revReleaseFrom = Math.max(0.3, this.revRpm);
   }
 
   enterDrive(vehicle: DriveVehicle, setup: DriveSetup, options: DriveOptions): void {
@@ -1632,6 +1749,9 @@ export class ApexEngine {
     this.aeroCar.setEnabled(false);
     this.aeroBike.setEnabled(false);
     this.tunnel.visible = false;
+    this.tunnelDive = -1;
+    this.portalFlare.visible = false;
+    this.portalFlare.material.opacity = 0;
     this.shafts.visible = false;
     this.streaks.visible = false;
     this.dust.visible = false;
@@ -1726,8 +1846,10 @@ export class ApexEngine {
       this.camera.updateProjectionMatrix();
     }
 
-    if (this.revRpm > 0.02) {
-      const amp = this.revRpm * (this.revKind === "car" ? 0.01 : 0.007);
+    if (this.revRpm > 0.02 || this.revKick > 0.02) {
+      const amp =
+        (this.revRpm + this.revKick * 0.45) *
+        (this.revKind === "car" ? 0.01 : 0.007);
       this.camera.position.x += Math.sin(this.clockTime * 73) * amp;
       this.camera.position.y += Math.cos(this.clockTime * 91) * amp;
       this.camera.rotateZ(Math.sin(this.clockTime * 57) * amp * 0.6);
@@ -2153,6 +2275,11 @@ export class ApexEngine {
         }
       });
       this.endRing.material.opacity = 0.25 + 0.55 * smoothstep((p - 0.85) / 0.15);
+      const gate = smoothstep((p - 0.72) / 0.18);
+      this.portalFlare.visible = gate > 0.01;
+      this.portalFlare.material.opacity =
+        gate * (0.07 + 0.05 * (0.5 + 0.5 * Math.sin(this.clockTime * 2.6)));
+      this.portalFlare.scale.setScalar(1);
       (this.scene.fog as THREE.FogExp2).density = THREE.MathUtils.lerp(
         0.017,
         0.004,
@@ -2160,11 +2287,17 @@ export class ApexEngine {
       );
     } else {
       this.tunnel.visible = false;
+      if (this.tunnelDive < 0) this.portalFlare.visible = false;
     }
+
+    if (this.tunnelDive >= 0) this.updateTunnelDive(dt);
 
     if (!this.reducedMotion) {
       const positions = this.streakPositions;
-      const rush = 0.4 + Math.min(2.4, scrollSpeed * 26);
+      const rush =
+        0.4 +
+        (this.tunnelDive >= 0 ? 8 : 0) +
+        Math.min(2.4, scrollSpeed * 26);
       for (let i = 0; i < this.streakSpeeds.length; i++) {
         const speed = this.streakSpeeds[i] * adt * rush;
         positions[i * 6 + 2] += speed;
@@ -2187,10 +2320,14 @@ export class ApexEngine {
     const speed = this.camera.position.distanceTo(this.lastCameraPos) / Math.max(dt, 0.001);
     this.lastCameraPos.copy(this.camera.position);
     this.crt.uniforms.uTime.value = this.clockTime;
+    const diveSurge =
+      this.tunnelDive >= 0
+        ? Math.pow(THREE.MathUtils.clamp(this.tunnelDive / 1.5, 0, 1), 3) * 13
+        : 0;
     this.crt.uniforms.uAberration.value = THREE.MathUtils.lerp(
       this.crt.uniforms.uAberration.value,
-      1 + Math.min(speed * 0.16, 6),
-      0.1,
+      1 + Math.min(speed * 0.16, 6) + diveSurge,
+      this.tunnelDive >= 0 ? 0.4 : 0.1,
     );
 
     this.updateLabels(p);
