@@ -83,6 +83,11 @@ export function createSuperbike(): {
   anchors: VehicleAnchor[];
   engine: EngineAssembly;
   accent: THREE.LineBasicMaterial;
+  career: {
+    tailStrip: THREE.Object3D;
+    tailStripMat: THREE.MeshBasicMaterial;
+    bodyMat: THREE.MeshStandardMaterial;
+  };
 } {
   const group = new THREE.Group();
   const anchors: VehicleAnchor[] = [];
@@ -352,6 +357,21 @@ export function createSuperbike(): {
   tailLed.position.set(0, 1.05, -1.29);
   group.add(tailLed);
 
+  // Career unlock: vertical tail light blade.
+  const tailStripMat = new THREE.MeshBasicMaterial({
+    color: ACID,
+    transparent: true,
+    opacity: 0.5,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const tailStrip = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.46), tailStripMat);
+  tailStrip.position.set(0, 1.05, -1.302);
+  tailStrip.rotation.y = Math.PI;
+  tailStrip.visible = false;
+  group.add(tailStrip);
+
   const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.26), glass);
   screen.position.set(0, 1.24, 0.78);
   screen.rotation.x = -0.55;
@@ -535,5 +555,12 @@ export function createSuperbike(): {
     },
   );
 
-  return { group, scan, anchors, engine: engineAssembly, accent: wire };
+  return {
+    group,
+    scan,
+    anchors,
+    engine: engineAssembly,
+    accent: wire,
+    career: { tailStrip, tailStripMat, bodyMat: shell },
+  };
 }

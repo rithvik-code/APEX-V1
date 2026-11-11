@@ -117,6 +117,20 @@ export function createSupercar(): {
   stripe: THREE.Mesh;
   exhaustGlow: THREE.MeshBasicMaterial;
   headlamp: THREE.MeshBasicMaterial;
+  career: {
+    wheelCovers: THREE.Object3D[];
+    canards: THREE.Object3D[];
+    gurney: THREE.Object3D[];
+    plateFrames: THREE.Object3D[];
+    soot: THREE.Object3D[];
+    veteran: THREE.Object3D[];
+    fullKit: THREE.Object3D[];
+    flames: THREE.Object3D[];
+    flameMat: THREE.MeshBasicMaterial;
+    cockpitGlow: THREE.MeshBasicMaterial;
+    badgeMesh: THREE.Object3D;
+    badgeMat: THREE.MeshBasicMaterial;
+  };
 } {
   const group = new THREE.Group();
   const wheels: THREE.Group[] = [];
@@ -392,6 +406,31 @@ export function createSupercar(): {
     shell.add(glowDisc);
   }
 
+  // Career unlock: exhaust flames, soot rings and gold veteran tips.
+  const careerFlames: THREE.Object3D[] = [];
+  const careerSoot: THREE.Object3D[] = [];
+  const careerVeteran: THREE.Object3D[] = [];
+  for (const side of [-1, 1]) {
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.44, 12, 1, true), flameMat);
+    flame.rotation.x = -Math.PI / 2;
+    flame.position.set(side * 0.4, 0.33, -2.63);
+    flame.visible = false;
+    shell.add(flame);
+    careerFlames.push(flame);
+
+    const soot = new THREE.Mesh(new THREE.TorusGeometry(0.088, 0.011, 6, 24), sootMat);
+    soot.position.set(side * 0.4, 0.33, -2.396);
+    soot.visible = false;
+    shell.add(soot);
+    careerSoot.push(soot);
+
+    const tip = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.007, 6, 26), gold);
+    tip.position.set(side * 0.4, 0.33, -2.404);
+    tip.visible = false;
+    shell.add(tip);
+    careerVeteran.push(tip);
+  }
+
   // Rear diffuser fins
   for (let i = 0; i < 7; i++) {
     const fin = new THREE.Mesh(
@@ -497,6 +536,19 @@ export function createSupercar(): {
   wheelSpoke.rotation.copy(wheelRim.rotation);
   cabin.add(wheelSpoke);
 
+  // Career unlock: ambient cockpit glow across the dash.
+  const cockpitGlowMat = new THREE.MeshBasicMaterial({
+    color: ACID,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const cockpitGlow = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.05), cockpitGlowMat);
+  cockpitGlow.position.set(0, 0.775, 0.24);
+  cockpitGlow.rotation.x = -Math.PI / 2;
+  cabin.add(cockpitGlow);
+
   const hoop = new THREE.Mesh(
     new THREE.TorusGeometry(0.5, 0.025, 8, 24, Math.PI),
     metal,
@@ -555,6 +607,36 @@ export function createSupercar(): {
     shell.add(mirror);
   }
 
+  // Career unlock: full aero kit — dorsal shark fin and rear quarter winglets.
+  const careerFullKit: THREE.Object3D[] = [];
+  const finShape = new THREE.Shape();
+  finShape.moveTo(-0.6, 0.74);
+  finShape.quadraticCurveTo(-0.34, 1.14, 0.02, 0.78);
+  finShape.lineTo(-0.6, 0.74);
+  const finGeo = new THREE.ExtrudeGeometry(finShape, {
+    depth: 0.028,
+    bevelEnabled: false,
+    steps: 1,
+  });
+  finGeo.translate(0, 0, -0.014);
+  finGeo.rotateY(Math.PI / 2);
+  const fin = new THREE.Mesh(finGeo, carbon);
+  fin.position.set(0, 0, -0.62);
+  fin.visible = false;
+  shell.add(fin);
+  careerFullKit.push(fin);
+  for (const side of [-1, 1]) {
+    const winglet = new THREE.Mesh(
+      new RoundedBoxGeometry(0.34, 0.02, 0.16, 2, 0.01),
+      carbon,
+    );
+    winglet.position.set(side * 0.94, 0.7, -1.5);
+    winglet.rotation.z = side * 0.18;
+    winglet.visible = false;
+    shell.add(winglet);
+    careerFullKit.push(winglet);
+  }
+
   // Underbody glow — a soft radial falloff so it never reads as a hard
   // rectangle of light on the tarmac.
   const glowPlane = new THREE.Mesh(
@@ -595,6 +677,23 @@ export function createSupercar(): {
     roundel.visible = false;
     roundel.userData.isNumber = true;
     shell.add(roundel);
+  }
+
+  // Career unlock: machined ring framing the racing number.
+  const plateFrameMat = new THREE.MeshBasicMaterial({
+    map: numberFrameTexture(),
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const careerPlateFrames: THREE.Object3D[] = [];
+  for (const side of [-1, 1]) {
+    const frame = new THREE.Mesh(new THREE.PlaneGeometry(0.58, 0.58), plateFrameMat);
+    frame.position.set(side * 0.925, 0.5, 0.12);
+    frame.rotation.y = side * (Math.PI / 2);
+    frame.visible = false;
+    shell.add(frame);
+    careerPlateFrames.push(frame);
   }
 
   // ---------------------------------------------------------------------------
@@ -734,5 +833,19 @@ export function createSupercar(): {
     stripe,
     exhaustGlow,
     headlamp,
+    career: {
+      wheelCovers: careerWheelCovers,
+      canards: careerCanards,
+      gurney: careerGurney,
+      plateFrames: careerPlateFrames,
+      soot: careerSoot,
+      veteran: careerVeteran,
+      fullKit: careerFullKit,
+      flames: careerFlames,
+      flameMat,
+      cockpitGlow: cockpitGlowMat,
+      badgeMesh: wingBadge,
+      badgeMat,
+    },
   };
 }
