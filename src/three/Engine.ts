@@ -1702,6 +1702,11 @@ export class ApexEngine {
 
     this.explodeTarget = 0;
     this.explodeCurrent = 0;
+    this.revHeld = false;
+    this.revWasActive = false;
+    this.revReleaseAt = -1;
+    this.revRpm = 0;
+    this.revKick = 0;
     for (const assembly of this.car.assemblies) assembly.group.position.set(0, 0, 0);
     this.stopLapReplay();
 

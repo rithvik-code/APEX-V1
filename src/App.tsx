@@ -1,4 +1,14 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import type { ApexEngine } from "./three/Engine";
 import { Terminal } from "./components/Terminal";
 import type { CoreVariant } from "./components/CoreLab";
@@ -144,6 +154,10 @@ export default function App() {
   const [driveSetup, setDriveSetup] = useState<DriveSetup>(DEFAULT_DRIVE_SETUP);
   const driveSetupRef = useRef(driveSetup);
   const [garage, setGarage] = useState<GarageView | null>(null);
+  const [portalReady, setPortalReady] = useState(false);
+  const [portalPhase, setPortalPhase] = useState<"dive" | "flash" | null>(null);
+  const portalReadyRef = useRef(false);
+  const portalTimers = useRef<number[]>([]);
   const [career, setCareer] = useState<CareerState>(() => loadCareer());
   const careerRef = useRef(career);
   const careerDistanceRef = useRef(0);
@@ -230,6 +244,7 @@ export default function App() {
   const launchDrive = useCallback((vehicle: DriveVehicle = "car") => {
     const engine = engineRef.current;
     if (!engine) return;
+    sound.endRev();
     sound.tick("start");
     setCoreView(null);
     setTakeover(false);
@@ -253,6 +268,7 @@ export default function App() {
   const openGarage = useCallback(() => {
     const engine = engineRef.current;
     if (!engine) return;
+    sound.endRev();
     if (drive) {
       engine.exitDrive();
       setDrive(null);
@@ -270,12 +286,16 @@ export default function App() {
   }, [drive]);
 
   const closeGarage = useCallback(() => {
+    engineRef.current?.endRev();
+    sound.endRev();
     engineRef.current?.exitGarage();
     setGarage(null);
     sound.tick("click");
   }, []);
 
   const switchGarageView = useCallback((view: GarageView) => {
+    engineRef.current?.endRev();
+    sound.endRev();
     engineRef.current?.setGarageView(view);
     setGarage(view);
     sound.tick("click");
@@ -287,13 +307,33 @@ export default function App() {
     sound.tick("start");
   }, []);
 
-  const revVehicle = useCallback((vehicle: "car" | "bike") => {
+  const revStart = useCallback((vehicle: "car" | "bike") => {
     if (!audioLockedRef.current && !sound.isOn) {
       setAudioOn(sound.toggle());
     }
-    sound.revEngine(vehicle);
-    engineRef.current?.revVehicle(vehicle);
+    sound.startRev(vehicle);
+    engineRef.current?.startRev(vehicle);
   }, []);
+
+  const revEnd = useCallback(() => {
+    sound.endRev();
+    engineRef.current?.endRev();
+  }, []);
+
+  const crossRing = useCallback(() => {
+    const engine = engineRef.current;
+    if (!engine || portalPhase) return;
+    if (!audioLockedRef.current && !sound.isOn) setAudioOn(sound.toggle());
+    if (!engine.startTunnelEntry()) return;
+    sound.warp();
+    setPortalPhase("dive");
+    const flash = window.setTimeout(() => {
+      openGarage();
+      setPortalPhase("flash");
+    }, 1250);
+    const clear = window.setTimeout(() => setPortalPhase(null), 2150);
+    portalTimers.current.push(flash, clear);
+  }, [openGarage, portalPhase]);
 
   const switchDriveVehicle = useCallback(
     (vehicle: DriveVehicle) => {
@@ -615,6 +655,19 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    document.body.classList.toggle("crossing", portalPhase !== null);
+    return () => document.body.classList.remove("crossing");
+  }, [portalPhase]);
+
+  useEffect(
+    () => () => {
+      portalTimers.current.forEach((id) => window.clearTimeout(id));
+      portalTimers.current = [];
+    },
+    [],
+  );
+
+  useEffect(() => {
     let raf = 0;
     const loop = () => {
       const max = Math.max(
@@ -629,6 +682,11 @@ export default function App() {
         progressTextRef.current.textContent = String(
           Math.round(p * 100),
         ).padStart(3, "0");
+      }
+      const ready = p > 0.72;
+      if (ready !== portalReadyRef.current) {
+        portalReadyRef.current = ready;
+        setPortalReady(ready);
       }
       raf = requestAnimationFrame(loop);
     };
@@ -693,6 +751,29 @@ export default function App() {
     audioLockedRef.current = true;
     setAudioOn(sound.toggle());
   };
+
+  const revHoldProps = (vehicle: "car" | "bike") => ({
+    onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      revStart(vehicle);
+    },
+    onPointerUp: revEnd,
+    onPointerLeave: revEnd,
+    onPointerCancel: revEnd,
+    onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+      if ((event.key === " " || event.key === "Enter") && !event.repeat) {
+        event.preventDefault();
+        revStart(vehicle);
+      }
+    },
+    onKeyUp: (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+      if (event.key === " " || event.key === "Enter") {
+        event.preventDefault();
+        revEnd();
+      }
+    },
+    onBlur: revEnd,
+  });
 
   return (
     <div
@@ -852,22 +933,24 @@ export default function App() {
               >
                 ENTER THE GARAGE <span aria-hidden="true">↘</span>
               </button>
-              <div className="hero__revs" role="group" aria-label="Rev the engines">
+              <div className="hero__revs" role="group" aria-label="Hold to rev the engines">
                 <button
                   type="button"
                   className="revbtn"
-                  onClick={() => revVehicle("car")}
+                  {...revHoldProps("car")}
+                  aria-label="Hold to rev the V12 biturbo through its gears"
                 >
                   <span>V12 BITURBO</span>
-                  <b>REV</b>
+                  <b>HOLD</b>
                 </button>
                 <button
                   type="button"
                   className="revbtn"
-                  onClick={() => revVehicle("bike")}
+                  {...revHoldProps("bike")}
+                  aria-label="Hold to rev the inline-four through its gears"
                 >
                   <span>INLINE-4</span>
-                  <b>REV</b>
+                  <b>HOLD</b>
                 </button>
               </div>
               <button
@@ -1347,6 +1430,44 @@ export default function App() {
         <span>NO METER</span>
       </div>
 
+      {portalReady &&
+        !garage &&
+        !drive &&
+        !coreView &&
+        !takeover &&
+        !scene.aero &&
+        !portalPhase && (
+          <button
+            type="button"
+            className="portal-cta"
+            onClick={crossRing}
+            aria-label="Cross the tunnel ring to enter the private garage"
+          >
+            <span className="portal-cta__ring" aria-hidden="true">
+              <i />
+            </span>
+            <span className="portal-cta__copy">
+              <i>[ SYS.10 — OTHER SIDE ]</i>
+              <b>CROSS THE RING</b>
+              <em>INTO THE PRIVATE GARAGE</em>
+            </span>
+            <span className="portal-cta__go" aria-hidden="true">
+              ↘
+            </span>
+          </button>
+        )}
+
+      {portalPhase && (
+        <div
+          className={`portal${portalPhase === "flash" ? " portal--flash" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          <span className="portal__label">CROSSING THE RING</span>
+          <span className="portal__flash" aria-hidden="true" />
+        </div>
+      )}
+
       <AeroLaunch active={scene.aero} onToggle={toggleAero} />
       {scene.aero && (
         <AeroDock
@@ -1399,7 +1520,8 @@ export default function App() {
           audioOn={audioOn}
           onAudio={toggleAudio}
           onView={switchGarageView}
-          onRev={revVehicle}
+          onRevStart={revStart}
+          onRevEnd={revEnd}
           onReplay={replayGarage}
           onExit={closeGarage}
         />

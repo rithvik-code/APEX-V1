@@ -1,4 +1,9 @@
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import type { GarageView } from "../three/garage";
 
 type GarageProps = {
@@ -9,7 +14,8 @@ type GarageProps = {
   audioOn: boolean;
   onAudio: () => void;
   onView: (view: GarageView) => void;
-  onRev: (vehicle: "car" | "bike") => void;
+  onRevStart: (vehicle: "car" | "bike") => void;
+  onRevEnd: () => void;
   onReplay: () => void;
   onExit: () => void;
 };
@@ -22,7 +28,8 @@ export function Garage({
   audioOn,
   onAudio,
   onView,
-  onRev,
+  onRevStart,
+  onRevEnd,
   onReplay,
   onExit,
 }: GarageProps) {
@@ -34,6 +41,29 @@ export function Garage({
   }, []);
 
   const time = now.toLocaleTimeString("en-GB", { hour12: false });
+
+  const holdProps = (vehicle: "car" | "bike") => ({
+    onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      onRevStart(vehicle);
+    },
+    onPointerUp: onRevEnd,
+    onPointerLeave: onRevEnd,
+    onPointerCancel: onRevEnd,
+    onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+      if ((event.key === " " || event.key === "Enter") && !event.repeat) {
+        event.preventDefault();
+        onRevStart(vehicle);
+      }
+    },
+    onKeyUp: (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+      if (event.key === " " || event.key === "Enter") {
+        event.preventDefault();
+        onRevEnd();
+      }
+    },
+    onBlur: onRevEnd,
+  });
 
   return (
     <div className="garage" role="dialog" aria-modal="true" aria-label="APEX private garage">
@@ -80,14 +110,22 @@ export function Garage({
           </button>
         </div>
 
-        <div className="garage__revs" role="group" aria-label="Rev the engines">
-          <button type="button" onClick={() => onRev("car")}>
+        <div className="garage__revs" role="group" aria-label="Hold to rev the engines">
+          <button
+            type="button"
+            {...holdProps("car")}
+            aria-label="Hold to rev the V12 biturbo through its gears"
+          >
             <span>V12 BITURBO</span>
-            <b>REV</b>
+            <b>HOLD</b>
           </button>
-          <button type="button" onClick={() => onRev("bike")}>
+          <button
+            type="button"
+            {...holdProps("bike")}
+            aria-label="Hold to rev the inline-four through its gears"
+          >
             <span>INLINE-4</span>
-            <b>REV</b>
+            <b>HOLD</b>
           </button>
         </div>
 
@@ -106,8 +144,8 @@ export function Garage({
 
       <p className="garage__hint">
         {view === "third"
-          ? "DRAG — ORBIT · WHEEL — ZOOM · DOUBLE-CLICK — RESET"
-          : "WASD / ARROWS — WALK · SHIFT — SPRINT · DRAG — LOOK"}
+          ? "DRAG — ORBIT · WHEEL — ZOOM · DOUBLE-CLICK — RESET · HOLD REV — GEARBOX"
+          : "WASD / ARROWS — WALK · SHIFT — SPRINT · DRAG — LOOK · HOLD REV — GEARBOX"}
       </p>
 
       {view === "first" && <span className="garage__reticle" aria-hidden="true" />}
