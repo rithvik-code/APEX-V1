@@ -1,11 +1,13 @@
 /* Scratch harness: drive-mode verification over the Chrome DevTools Protocol. */
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 
 const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
-const PORT = 9333;
-const OUT = path.join(__dirname, ".drive-shots");
+const PORT = 9334;
+const OUT = path.join(os.tmpdir(), "apex-drive-shots");
+const PROFILE = path.join(os.tmpdir(), "apex-cdp-profile");
 const URL = process.env.APEX_URL || "http://127.0.0.1:5175/";
 
 fs.mkdirSync(OUT, { recursive: true });
@@ -13,12 +15,15 @@ fs.mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
+  fs.rmSync(PROFILE, { recursive: true, force: true });
+  fs.rmSync(OUT, { recursive: true, force: true });
+  fs.mkdirSync(OUT, { recursive: true });
   const chrome = spawn(
     CHROME,
     [
       "--headless=new",
       `--remote-debugging-port=${PORT}`,
-      "--user-data-dir=" + path.join(__dirname, ".cdp-profile"),
+      "--user-data-dir=" + PROFILE,
       "--window-size=1440,900",
       "--hide-scrollbars",
       "--no-first-run",
@@ -98,6 +103,10 @@ async function main() {
   await send("Page.enable");
   await send("Runtime.enable");
   await send("Log.enable");
+  await send("Storage.clearDataForOrigin", {
+    origin: new URL(URL).origin,
+    storageTypes: "local_storage",
+  });
 
   const evaluate = async (expression) => {
     const res = await send("Runtime.evaluate", {
