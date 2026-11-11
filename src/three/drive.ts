@@ -412,9 +412,12 @@ export class DriveSession {
     const taper = 1 / (1 + speedAbs * (this.vehicle === "bike" ? 0.0032 : 0.0042));
     const dirSign = this.speed >= 0 ? 1 : -1;
     const turn = -this.steer * d.steerAuth * speedFactor * taper * dirSign;
-    this.heading += turn * dt;
+    // Rotational inertia: the chassis eases into the yaw rate instead of
+    // snapping to it, so a flick of the key becomes a smooth arc.
+    this.yaw += (turn - this.yaw) * (1 - Math.exp(-dt * 12));
+    this.heading += this.yaw * dt;
     let gripEff = d.grip * (handbrake ? 0.22 : 1) * (this.offTrack ? 0.55 : 1);
-    gripEff *= 1 / (1 + Math.abs(turn) * speedAbs * 0.008);
+    gripEff *= 1 / (1 + Math.abs(this.yaw) * speedAbs * 0.008);
     this.slip = angleDelta(this.heading, this.velDir);
     this.velDir += this.slip * (1 - Math.exp(-gripEff * dt));
     this.speed -= Math.abs(this.slip) * speedAbs * 0.26 * dt;
@@ -454,13 +457,14 @@ export class DriveSession {
       }
       this.speed = Math.hypot(vx, vz) * (this.speed < 0 ? -1 : 1);
       this.velDir = Math.atan2(vx, vz);
+      this.yaw *= 0.7;
       this.lean *= 0.9;
     }
 
     // Body attitude.
     const leanTarget = this.vehicle === "bike"
-      ? -turn * speedFactor * 0.5
-      : -turn * speedFactor * 0.12;
+      ? -this.yaw * speedFactor * 0.5
+      : -this.yaw * speedFactor * 0.12;
     this.lean += (leanTarget - this.lean) * (1 - Math.exp(-dt * 6));
     const pitchTarget = clamp(-accel * 0.004, -0.05, 0.05);
     this.accelPitch += (pitchTarget - this.accelPitch) * (1 - Math.exp(-dt * 5));
