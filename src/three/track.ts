@@ -102,7 +102,6 @@ export function buildTrack(): Track {
     offA: number,
     offB: number,
     y: number,
-    color: number | null,
     vertexColors: boolean,
   ): THREE.BufferGeometry => {
     const positions = new Float32Array((RIBBON + 1) * 2 * 3);
@@ -140,7 +139,6 @@ export function buildTrack(): Track {
     if (colors) geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     geo.setIndex(indices);
     geo.computeVertexNormals();
-    void color;
     return geo;
   };
 
@@ -151,7 +149,7 @@ export function buildTrack(): Track {
     metalness: 0.08,
     envMapIntensity: 0.3,
   }));
-  const asphalt = new THREE.Mesh(track(flatRibbon(HALF_WIDTH, -HALF_WIDTH, 0, null, false)), asphaltMat);
+  const asphalt = new THREE.Mesh(track(flatRibbon(HALF_WIDTH, -HALF_WIDTH, 0, false)), asphaltMat);
   group.add(asphalt);
 
   // Rumble strips just outside each edge.
@@ -160,8 +158,8 @@ export function buildTrack(): Track {
     roughness: 0.7,
     metalness: 0.1,
   }));
-  group.add(new THREE.Mesh(track(flatRibbon(HALF_WIDTH + 0.6, HALF_WIDTH, 0.012, null, true)), curbMat));
-  group.add(new THREE.Mesh(track(flatRibbon(-HALF_WIDTH, -HALF_WIDTH - 0.6, 0.012, null, true)), curbMat));
+  group.add(new THREE.Mesh(track(flatRibbon(HALF_WIDTH + 0.6, HALF_WIDTH, 0.012, true)), curbMat));
+  group.add(new THREE.Mesh(track(flatRibbon(-HALF_WIDTH, -HALF_WIDTH - 0.6, 0.012, true)), curbMat));
 
   // Glowing edge lines.
   const edgeMat = track(new THREE.LineBasicMaterial({
@@ -194,14 +192,18 @@ export function buildTrack(): Track {
   group.add(dashLine);
 
   // Start / finish checker.
+  const up = new THREE.Vector3(0, 1, 0);
+  const layFlat = (mesh: THREE.Mesh, center: THREE.Vector3, tan: THREE.Vector3, y: number) => {
+    const across = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
+    mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(across, tan, up));
+    mesh.position.set(center.x, y, center.z);
+  };
   const startTex = track(checkerTexture());
   const startMat = track(new THREE.MeshBasicMaterial({ map: startTex, transparent: true, opacity: 0.92 }));
   const startLine = new THREE.Mesh(track(new THREE.PlaneGeometry(HALF_WIDTH * 2, 1.4)), startMat);
-  startLine.rotation.x = -Math.PI / 2;
   const sPos = centers[0];
   const sTan = curve.getTangent(0);
-  startLine.position.set(sPos.x, 0.025, sPos.z);
-  startLine.rotation.z = -Math.atan2(sTan.x, sTan.z);
+  layFlat(startLine, sPos, sTan, 0.025);
   group.add(startLine);
 
   // Sector gates at thirds.
@@ -214,12 +216,9 @@ export function buildTrack(): Track {
   }));
   for (const frac of [1 / 3, 2 / 3]) {
     const idx = Math.round(frac * RIBBON);
-    const c = centers[idx];
-    const n = normals[idx];
+    const gateTan = curve.getTangent(frac);
     const gate = new THREE.Mesh(track(new THREE.PlaneGeometry(HALF_WIDTH * 2, 0.35)), gateMat);
-    gate.rotation.x = -Math.PI / 2;
-    gate.position.set(c.x, 0.03, c.z);
-    gate.rotation.z = -Math.atan2(-n.z, n.x);
+    layFlat(gate, centers[idx], gateTan, 0.03);
     group.add(gate);
   }
 

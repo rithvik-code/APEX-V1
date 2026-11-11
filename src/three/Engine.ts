@@ -9,6 +9,15 @@ import { createSupercar, numberTexture, type Assembly, type VehicleAnchor } from
 import { createSuperbike } from "./bike";
 import { AeroFlow, buildBikeStreamlines, buildCarStreamlines } from "./aero";
 import { WeatherSystem } from "./weather";
+import { buildTrack, type Track } from "./track";
+import {
+  DriveSession,
+  type DriveHudState,
+  type DriveOptions,
+  type DriveSetup,
+  type DriveTouch,
+  type DriveVehicle,
+} from "./drive";
 import {
   LIVERIES,
   type LightingPreset,
@@ -271,6 +280,7 @@ export class ApexEngine {
   private aeroBike: AeroFlow;
   private bloom: UnrealBloomPass;
   private gridHelper: THREE.GridHelper;
+  private groundDecor: THREE.Group;
   private lights: LightRig;
   private lightTargets = LIGHTING_TARGETS.studio;
   private shafts: THREE.Group;
@@ -304,6 +314,18 @@ export class ApexEngine {
   private ghostLine: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial> | null = null;
   private replayPos = new THREE.Vector3();
   private replayTgt = new THREE.Vector3();
+  private drive: DriveSession | null = null;
+  private track: Track | null = null;
+  private driveVehicle: DriveVehicle = "car";
+  private lastConfig: SceneConfig | null = null;
+  private savedCarPos = new THREE.Vector3();
+  private savedCarRot = new THREE.Euler();
+  private savedBikePos = new THREE.Vector3();
+  private savedBikeRot = new THREE.Euler();
+  private driveCamPos = new THREE.Vector3();
+  private driveCamTgt = new THREE.Vector3();
+  private driveWheelSpin = 0;
+  private driveForward = new THREE.Vector3();
 
   constructor(canvas: HTMLCanvasElement, labelsEl: HTMLElement, onReady?: () => void) {
     this.labelsEl = labelsEl;
@@ -342,6 +364,7 @@ export class ApexEngine {
     const ground = this.buildGround();
     this.gridHelper = ground.grid;
     this.floorMat = ground.floor;
+    this.groundDecor = ground.decor;
 
     this.car = createSupercar();
     this.carGroup.add(this.car.group);
@@ -514,13 +537,16 @@ export class ApexEngine {
     return group;
   }
 
-  private buildGround(): { grid: THREE.GridHelper; floor: THREE.MeshStandardMaterial } {
+  private buildGround(): { grid: THREE.GridHelper; floor: THREE.MeshStandardMaterial; decor: THREE.Group } {
     const grid = new THREE.GridHelper(240, 240, 0x1d2a16, 0x111713);
     grid.position.y = 0.002;
     const gridMat = grid.material as unknown as THREE.LineBasicMaterial;
     gridMat.transparent = true;
     gridMat.opacity = 0.5;
     this.scene.add(grid);
+
+    const decor = new THREE.Group();
+    this.scene.add(decor);
 
     const floorMat = new THREE.MeshStandardMaterial({
       color: 0x070909,
@@ -531,7 +557,7 @@ export class ApexEngine {
     const floor = new THREE.Mesh(new THREE.CircleGeometry(60, 64), floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.01;
-    this.scene.add(floor);
+    decor.add(floor);
 
     const rings = [3.2, 5.2, 5.205, 6.6, 9.4, 14.2];
     rings.forEach((radius, i) => {
@@ -549,7 +575,7 @@ export class ApexEngine {
       );
       ring.rotation.x = -Math.PI / 2;
       ring.position.y = 0.012;
-      this.scene.add(ring);
+      decor.add(ring);
     });
 
     // Radar ticks
@@ -572,7 +598,7 @@ export class ApexEngine {
         fog: false,
       }),
     );
-    this.scene.add(ticks);
+    decor.add(ticks);
 
     // Bike stage ring
     const bikeRing = new THREE.Mesh(
@@ -589,9 +615,9 @@ export class ApexEngine {
     );
     bikeRing.rotation.x = -Math.PI / 2;
     bikeRing.position.set(-9, 0.014, -6);
-    this.scene.add(bikeRing);
+    decor.add(bikeRing);
 
-    return { grid, floor: floorMat };
+    return { grid, floor: floorMat, decor };
   }
 
   private buildStreaks(): {
@@ -920,6 +946,7 @@ export class ApexEngine {
   }
 
   configure(config: SceneConfig): void {
+    this.lastConfig = config;
     this.aeroCar.setEnabled(config.aero && config.focus !== "bike");
     this.aeroBike.setEnabled(config.aero && config.focus !== "car");
     for (const flow of [this.aeroCar, this.aeroBike]) {
@@ -970,6 +997,7 @@ export class ApexEngine {
         livery.id === "silver" || livery.id === "graphite" ? ACID : livery.hex,
       );
     }
+    if (this.drive) this.applyDriveVisibility();
   }
 
   exportPNG(): string {
