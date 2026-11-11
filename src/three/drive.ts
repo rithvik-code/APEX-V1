@@ -300,6 +300,7 @@ export class DriveSession {
     this.lean = 0;
     this.steer = 0;
     this.slip = 0;
+    this.yaw = 0;
     this.phase = "countdown";
     this.countdown = 3;
     this.raceTime = 0;
@@ -320,6 +321,7 @@ export class DriveSession {
     this.track.tangentAt(t, this.tmp);
     this.heading = Math.atan2(this.tmp.x, this.tmp.z);
     this.velDir = this.heading;
+    this.yaw = 0;
     this.speed = 0;
     this.lastT = t;
     this.flash = { kind: "recover", text: "RECOVERED", at: performance.now() };
@@ -349,6 +351,8 @@ export class DriveSession {
     if (this.phase === "countdown") {
       this.countdown -= dt;
       this.speed = 0;
+      this.steer = 0;
+      this.yaw = 0;
       this.lean += (0 - this.lean) * (1 - Math.exp(-dt * 6));
       this.ghostGroup.visible = false;
       this.trail.visible = false;
