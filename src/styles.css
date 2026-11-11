@@ -6513,19 +6513,19 @@ body.driving .cursor {
   padding: 3px 4px;
   border-left: 2px solid transparent;
   font-size: 9px;
-  color: var(--dim);
+  color: #94a098;
   transition: color 0.2s, border-color 0.2s, background 0.2s;
 }
 
 .dhud__sector b {
   font-weight: 400;
-  color: var(--muted);
+  color: #b9c4bc;
 }
 
 .dhud__sector i {
   font-style: normal;
   font-size: 8.5px;
-  color: var(--dim);
+  color: #8a958d;
 }
 
 .dhud__sector.is-active {

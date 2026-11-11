@@ -257,7 +257,7 @@ async function main() {
     const lapRun = await evaluate(`(async () => {
       const d = window.__apexDrive;
       const wrap = (a) => { a = (a + Math.PI) % (2 * Math.PI); if (a < 0) a += 2 * Math.PI; return a - Math.PI; };
-      const log = { laps: [], maxSpeed: 0, offTrackFrames: 0, frames: 0, stuck: 0, ghostSeen: false };
+      const log = { laps: [], maxSpeed: 0, offTrackFrames: 0, frames: 0, stuck: 0, ghostSeen: false, midSectors: null, activeRow: 0 };
       let lastLap = d.lapCount;
       const start = performance.now();
       while (performance.now() - start < 46000) {
@@ -275,6 +275,10 @@ async function main() {
         d.touch.throttle = speed < targetSpeed;
         d.touch.brake = speed > targetSpeed + 3.5;
         if (d.ghostHasPos) log.ghostSeen = true;
+        if (!log.midSectors && d.sectors[0] !== null && d.sectors[1] === null) {
+          log.midSectors = [...document.querySelectorAll('.dhud__sector b')].map((e) => e.textContent);
+          log.activeRow = document.querySelectorAll('.dhud__sector.is-active').length;
+        }
         log.maxSpeed = Math.max(log.maxSpeed, speed);
         if (d.offTrack) log.offTrackFrames++;
         log.frames++;
@@ -334,7 +338,13 @@ async function main() {
     }))()`);
     check("leaderboard row rendered", hudAfter.board >= 1, hudAfter);
     check("best label updated", hudAfter.best && hudAfter.best !== "--:--.---", hudAfter.best);
-    check("sector splits rendered", hudAfter.sectors.every((s) => s !== "--:--.---"), hudAfter.sectors);
+    check(
+      "sector splits rendered",
+      Array.isArray(lapRun.midSectors) &&
+        lapRun.midSectors[0] !== "--:--.---" &&
+        lapRun.activeRow === 1,
+      { mid: lapRun.midSectors, active: lapRun.activeRow },
+    );
 
     // Toggle ghost off/on through the real button.
     await evaluate(
@@ -452,6 +462,7 @@ async function main() {
     ].filter(([a, b]) => mo(mobile[a], mobile[b]));
     check("mobile panels do not overlap", mobileOverlap.length === 0, mobileOverlap);
     await waitFor("window.__apexDrive && window.__apexDrive.phase === 'racing'", 12000);
+    await sleep(1500);
     await shot("06-drive-mobile");
 
     // Touch throttle: pointer events on the GAS button.

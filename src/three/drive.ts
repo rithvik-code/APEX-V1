@@ -172,7 +172,7 @@ export class DriveSession {
       new THREE.MeshBasicMaterial({
         color: ACID,
         transparent: true,
-        opacity: 0.3,
+        opacity: 0.2,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         side: THREE.DoubleSide,
@@ -181,11 +181,11 @@ export class DriveSession {
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.04;
     this.ghostGroup.add(ring);
-    this.ghostGroup.scale.setScalar(vehicle === "bike" ? 0.72 : 1);
+    this.ghostGroup.scale.setScalar(vehicle === "bike" ? 0.62 : 0.82);
     this.ghostGroup.visible = false;
     scene.add(this.ghostGroup);
 
-    const maxTrail = 90;
+    const maxTrail = 48;
     this.trailPositions = new Float32Array(maxTrail * 3);
     const trailGeo = new THREE.BufferGeometry();
     trailGeo.setAttribute("position", new THREE.BufferAttribute(this.trailPositions, 3));
@@ -195,7 +195,7 @@ export class DriveSession {
       new THREE.LineBasicMaterial({
         color: ACID,
         transparent: true,
-        opacity: 0.4,
+        opacity: 0.24,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       }),
@@ -214,7 +214,7 @@ export class DriveSession {
     const holo = new THREE.MeshBasicMaterial({
       color: ACID,
       transparent: true,
-      opacity: 0.22,
+      opacity: 0.13,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
@@ -222,11 +222,11 @@ export class DriveSession {
       color: ACID,
       wireframe: true,
       transparent: true,
-      opacity: 0.5,
+      opacity: 0.32,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
-    const bodyGeo = new THREE.ConeGeometry(0.55, 2.6, 5);
+    const bodyGeo = new THREE.ConeGeometry(0.5, 2.5, 5);
     bodyGeo.rotateX(Math.PI / 2);
     bodyGeo.translate(0, 0.55, 0.2);
     group.add(new THREE.Mesh(bodyGeo, holo));
