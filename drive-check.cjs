@@ -7,8 +7,8 @@ const path = require("node:path");
 const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const PORT = 9334;
 const OUT = path.join(os.tmpdir(), "apex-drive-shots");
-const PROFILE = path.join(os.tmpdir(), "apex-cdp-profile");
-const URL = process.env.APEX_URL || "http://127.0.0.1:5175/";
+const PROFILE = path.join(os.tmpdir(), "apex-cdp-profile-" + process.pid);
+const APP_URL = process.env.APEX_URL || "http://127.0.0.1:5173/";
 
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -31,10 +31,24 @@ async function main() {
       "--disable-search-engine-choice-screen",
       "--enable-unsafe-swiftshader",
       "--use-angle=swiftshader",
+      "--disable-background-timer-throttling",
+      "--disable-renderer-backgrounding",
+      "--disable-backgrounding-occluded-windows",
       "about:blank",
     ],
     { stdio: "ignore" },
   );
+  const killChrome = () => {
+    try {
+      require("node:child_process").execSync(`taskkill /PID ${chrome.pid} /T /F`, {
+        stdio: "ignore",
+      });
+    } catch {
+      /* already gone */
+    }
+  };
+  process.on("exit", killChrome);
+  process.on("SIGINT", () => process.exit(1));
 
   let version;
   for (let i = 0; i < 60; i++) {
@@ -103,8 +117,10 @@ async function main() {
   await send("Page.enable");
   await send("Runtime.enable");
   await send("Log.enable");
+  await send("Page.bringToFront");
+  await send("Emulation.setFocusEmulationEnabled", { enabled: true });
   await send("Storage.clearDataForOrigin", {
-    origin: new URL(URL).origin,
+    origin: new URL(APP_URL).origin,
     storageTypes: "local_storage",
   });
 
@@ -166,7 +182,7 @@ async function main() {
 
   try {
     await setViewport(1440, 900);
-    await send("Page.navigate", { url: URL });
+    await send("Page.navigate", { url: APP_URL });
     await waitFor("document.querySelector('.site.is-ready')", 30000);
     await sleep(1200);
     check("desktop hero ready", true);
@@ -501,7 +517,7 @@ async function main() {
     } catch {
       /* ignore */
     }
-    chrome.kill();
+    killChrome();
     ws.close();
     const summary = {
       results,
