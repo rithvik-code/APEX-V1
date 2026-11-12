@@ -698,12 +698,18 @@ a {
   font-size: 9px;
   letter-spacing: 0.44em;
   text-transform: uppercase;
-  color: var(--dim);
+  color: var(--paper-soft);
   writing-mode: vertical-rl;
   transform: rotate(180deg);
   pointer-events: none;
   user-select: none;
   transition: color 0.3s var(--ease);
+}
+
+.credit__tm {
+  font-size: 8px;
+  letter-spacing: 0;
+  color: var(--acid);
 }
 
 .credit::before {

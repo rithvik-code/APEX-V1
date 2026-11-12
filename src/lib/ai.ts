@@ -191,6 +191,7 @@ type StreamOptions = {
   onToken: (token: string) => void;
   signal: AbortSignal;
   grounding?: Grounding | null;
+  knowledge?: string;
   extraSystem?: string;
   temperature?: number;
   numPredict?: number;
@@ -205,6 +206,7 @@ function composeSystem(settings: AiSettings, options: StreamOptions): string {
     CONTROL_RULE,
   ];
   if (options.grounding) parts.push(formatGroundingContext(options.grounding));
+  if (options.knowledge) parts.push(options.knowledge);
   if (options.extraSystem) parts.push(options.extraSystem);
   return parts.join("\n\n");
 }
@@ -480,6 +482,7 @@ async function streamDemo({
   onToken,
   signal,
   grounding,
+  knowledge,
 }: StreamOptions): Promise<void> {
   const last = [...messages].reverse().find((m) => m.role === "user");
   const text = grounding
@@ -488,7 +491,11 @@ async function streamDemo({
 ${grounding.summary}
 
 WEB GROUNDING IS ON — THAT ANSWER CAME FROM LIVE SOURCES, NOT THE CANNED DEMO.`
-    : demoAnswerFor(last?.content ?? "");
+    : knowledge
+      ? `${knowledge.split("\n\n").slice(0, 4).join("\n\n")}
+
+LOCAL KNOWLEDGE IS ON — THAT ANSWER CAME FROM FACTS SYNCED TO THIS MACHINE, NOT THE CANNED DEMO.`
+      : demoAnswerFor(last?.content ?? "");
   const chunks = text.match(/.{1,12}/gs) ?? [text];
 
   for (const chunk of chunks) {

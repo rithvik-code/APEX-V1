@@ -1628,7 +1628,7 @@ export default function App() {
       )}
 
       <span className="credit" aria-label="Made by Rithvik">
-        MADE BY RITHVIK
+        MADE BY RITHVIK<span className="credit__tm">™</span>
       </span>
     </div>
   );

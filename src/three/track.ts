@@ -1,8 +1,8 @@
 import * as THREE from "three";
 
 const ACID = 0xc8ff16;
-const HALF_WIDTH = 3;
-const RUNOFF = 2.4;
+const HALF_WIDTH = 4.6;
+const RUNOFF = 2.6;
 const RIBBON = 3600;
 
 // A 1.7 km technical circuit: a long main straight, a fast right-hand

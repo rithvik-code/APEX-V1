@@ -411,9 +411,27 @@ function buildSourceLine(sources: WebSource[]): string {
 
 // Data questions do not need a language model to repeat numbers back. This
 // answer is composed straight from the live blocks so it lands in milliseconds.
+function championSentence(
+  seasonDetail: string | null,
+  personExtract: string | null,
+): string | null {
+  for (const text of [seasonDetail ?? "", personExtract ?? ""]) {
+    if (!text) continue;
+    const sentences = text.split(/(?<=[.!?])\s+/);
+    const hit = sentences.find(
+      (sentence) =>
+        /(?:world\s+)?drivers'?\s+championship|world\s+champion/i.test(sentence) &&
+        /clinched|sealed|won|champion/i.test(sentence),
+    );
+    if (hit) return hit.trim();
+  }
+  return null;
+}
+
 function quickRaceAnswer(
   f1: F1Data,
   person: WikiSummaryData | null,
+  seasonDetail: string | null,
   query: string,
 ): string | null {
   const [standings, race] = f1.detail.split("\n\n");
@@ -425,12 +443,9 @@ function quickRaceAnswer(
   );
 
   if (wantsTitle && standings) {
-    const extract = person?.extract ? stripHtml(person.extract) : "";
-    const title = extract
-      .split(/(?<=\.)\s+/)
-      .find((sentence) => /champion/i.test(sentence));
-    const note = title
-      ? `${trim(title, 240)}\n\nTitle settled. The rest of the grid is now racing for pride and next year's contract.`
+    const sentence = championSentence(seasonDetail, person?.extract ?? null);
+    const note = sentence
+      ? `${sentence}\n\nTitle settled. The rest of the grid is now racing for pride and next year's contract.`
       : "That is the standings, not the trophy. Nothing is decided until the maths says so.";
     return `LIVE READ // ${f1.season} · AFTER ROUND ${f1.round}\n${standings}\n\n${note}`;
   }
@@ -445,14 +460,15 @@ function quickRaceAnswer(
 async function seasonSource(
   signal: AbortSignal,
   budget: number,
+  season: string,
 ): Promise<WebSource[]> {
-  const page = "2026_Formula_One_World_Championship";
+  const page = `${season}_Formula_One_World_Championship`;
   const data = await pageSummary(page, signal, budget);
   if (!data?.extract) return [];
   return [
     {
       kind: "wiki",
-      title: data.title ?? "2026 Formula One World Championship",
+      title: data.title ?? `${season} Formula One World Championship`,
       url:
         data.content_urls?.desktop?.page ??
         `https://en.wikipedia.org/wiki/${encodeURIComponent(page)}`,
@@ -494,7 +510,7 @@ export async function retrieveGrounding(
 
   const [wiki, person] = await Promise.all([
     race
-      ? seasonSource(signal, budget)
+      ? seasonSource(signal, budget, f1?.season || "2026")
       : wikiSources([base], clean, signal, 2),
     subjectPage
       ? pageSummary(subjectPage, signal, budget)
@@ -538,6 +554,8 @@ export async function retrieveGrounding(
   if (!sources.length) return null;
 
   const fetchedAt = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  const seasonDetail =
+    wiki.find((source) => /World Championship/i.test(source.title))?.detail ?? null;
   const grounding: Grounding = {
     query: clean,
     fetchedAt,
@@ -546,7 +564,7 @@ export async function retrieveGrounding(
     context: buildContext(sources, fetchedAt),
     summary: buildSummary(sources),
     sourceLine: buildSourceLine(sources),
-    quick: f1 ? quickRaceAnswer(f1, person, clean) : null,
+    quick: f1 ? quickRaceAnswer(f1, person, seasonDetail, clean) : null,
   };
 
   cache.set(key, { at: Date.now(), data: grounding });

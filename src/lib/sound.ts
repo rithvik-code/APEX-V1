@@ -24,6 +24,15 @@ class SoundEngine {
     oscs: OscillatorNode[];
     pops: AudioScheduledSourceNode[];
   } | null = null;
+  private idle: {
+    gain: GainNode;
+    oscs: OscillatorNode[];
+    timer: number;
+  } | null = null;
+  private station: {
+    gain: GainNode;
+    sources: AudioScheduledSourceNode[];
+  } | null = null;
 
   private init(): AudioContext {
     if (this.ctx) return this.ctx;
@@ -146,7 +155,11 @@ class SoundEngine {
     const ctx = this.init();
     if (ctx.state === "suspended") void ctx.resume();
     this.enabled = !this.enabled;
-    if (!this.enabled) this.releaseRev(0.1);
+    if (!this.enabled) {
+      this.releaseRev(0.1);
+      this.stopIdle();
+      this.silenceStation();
+    }
     this.master?.gain.setTargetAtTime(
       this.enabled ? 0.5 : 0,
       ctx.currentTime,
@@ -471,6 +484,236 @@ class SoundEngine {
         // Already stopped.
       }
     }
+  }
+
+  private noiseBurst(
+    frequency: number,
+    q: number,
+    peak: number,
+    duration: number,
+    type: BiquadFilterType = "bandpass",
+    rate = 1,
+  ): void {
+    if (!this.enabled || !this.ctx || !this.master || !this.noiseBuffer) return;
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    src.playbackRate.value = rate;
+    const filter = ctx.createBiquadFilter();
+    filter.type = type;
+    filter.frequency.value = frequency;
+    filter.Q.value = q;
+    const gain = ctx.createGain();
+    const now = ctx.currentTime;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(peak, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.master);
+    src.start(now);
+    src.stop(now + duration + 0.03);
+  }
+
+  // Bay idle: a low, warm engine bed with the occasional exhaust tick.
+  startIdle(kind: "car" | "bike"): void {
+    if (!this.enabled || !this.ctx || !this.master) return;
+    if (this.idle) return;
+    const ctx = this.ctx;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.0001;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = kind === "car" ? 320 : 540;
+    filter.Q.value = 2;
+    const a = ctx.createOscillator();
+    a.type = "sawtooth";
+    a.frequency.value = kind === "car" ? 36 : 52;
+    const b = ctx.createOscillator();
+    b.type = "triangle";
+    b.frequency.value = kind === "car" ? 72 : 104;
+    b.detune.value = 7;
+    a.connect(filter);
+    b.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.master);
+    gain.gain.setTargetAtTime(kind === "car" ? 0.032 : 0.026, ctx.currentTime, 0.7);
+    a.start();
+    b.start();
+    const timer = window.setInterval(() => {
+      if (!this.enabled) return;
+      this.noiseBurst(140 + Math.random() * 130, 0.9, 0.05, 0.16, "lowpass");
+    }, 2200 + Math.random() * 2400);
+    this.idle = { gain, oscs: [a, b], timer };
+  }
+
+  stopIdle(): void {
+    const idle = this.idle;
+    if (!idle || !this.ctx) return;
+    this.idle = null;
+    window.clearInterval(idle.timer);
+    const now = this.ctx.currentTime;
+    idle.gain.gain.cancelScheduledValues(now);
+    idle.gain.gain.setValueAtTime(Math.max(0.0001, idle.gain.gain.value), now);
+    idle.gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+    for (const osc of idle.oscs) {
+      try {
+        osc.stop(now + 0.45);
+      } catch {
+        // Already stopped.
+      }
+    }
+  }
+
+  footstep(sprint = false): void {
+    this.noiseBurst(sprint ? 320 : 210, 1.1, sprint ? 0.1 : 0.062, 0.12, "lowpass");
+  }
+
+  meow(): void {
+    if (!this.enabled || !this.ctx || !this.master) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(560, now);
+    osc.frequency.exponentialRampToValueAtTime(920, now + 0.09);
+    osc.frequency.exponentialRampToValueAtTime(470, now + 0.3);
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.value = 1200;
+    filter.Q.value = 2.4;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.09, now + 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.master);
+    osc.start(now);
+    osc.stop(now + 0.36);
+  }
+
+  hydraulic(): void {
+    this.noiseBurst(820, 0.8, 0.13, 0.85, "bandpass", 1.1);
+    if (!this.enabled || !this.ctx || !this.master) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime + 0.85;
+    const osc = ctx.createOscillator();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(90, now);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.05, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start(now);
+    osc.stop(now + 0.12);
+  }
+
+  garageDoor(open: boolean): void {
+    this.noiseBurst(open ? 120 : 90, 0.7, 0.15, 1.25, "lowpass", 1.5);
+    if (!this.enabled || !this.ctx || !this.master) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime + 1.18;
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(72, now);
+    osc.frequency.exponentialRampToValueAtTime(38, now + 0.18);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.18, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start(now);
+    osc.stop(now + 0.24);
+  }
+
+  launchBeep(go = false): void {
+    if (!this.enabled || !this.ctx || !this.master) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = "square";
+    osc.frequency.value = go ? 880 : 440;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.06, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + (go ? 0.34 : 0.1));
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start(now);
+    osc.stop(now + (go ? 0.36 : 0.12));
+  }
+
+  private silenceStation(): void {
+    const station = this.station;
+    if (!station || !this.ctx) return;
+    this.station = null;
+    const now = this.ctx.currentTime;
+    station.gain.gain.cancelScheduledValues(now);
+    station.gain.gain.setValueAtTime(Math.max(0.0001, station.gain.gain.value), now);
+    station.gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+    for (const src of station.sources) {
+      try {
+        src.stop(now + 0.16);
+      } catch {
+        // Already stopped.
+      }
+    }
+  }
+
+  // 0 off · 1 pit wall · 2 synth wave · 3 engine radio.
+  setStation(index: number): void {
+    this.silenceStation();
+    if (index <= 0 || !this.enabled || !this.ctx || !this.master) return;
+    const ctx = this.ctx;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.0001;
+    gain.connect(this.master);
+    const sources: AudioScheduledSourceNode[] = [];
+    const tone = (freq: number, type: OscillatorType, level: number) => {
+      const osc = ctx.createOscillator();
+      osc.type = type;
+      osc.frequency.value = freq;
+      const g = ctx.createGain();
+      g.gain.value = level;
+      osc.connect(g);
+      g.connect(gain);
+      osc.start();
+      sources.push(osc);
+    };
+    if (index === 1) {
+      tone(392, "sine", 0.5);
+      tone(523, "sine", 0.3);
+      const src = ctx.createBufferSource();
+      if (this.noiseBuffer) {
+        src.buffer = this.noiseBuffer;
+        src.loop = true;
+        src.playbackRate.value = 0.5;
+        const filter = ctx.createBiquadFilter();
+        filter.type = "bandpass";
+        filter.frequency.value = 1400;
+        filter.Q.value = 1.6;
+        const noiseGain = ctx.createGain();
+        noiseGain.gain.value = 0.05;
+        src.connect(filter);
+        filter.connect(noiseGain);
+        noiseGain.connect(gain);
+        src.start();
+        sources.push(src);
+      }
+    } else if (index === 2) {
+      tone(110, "sawtooth", 0.35);
+      tone(164.8, "sawtooth", 0.28);
+      tone(220, "triangle", 0.22);
+    } else {
+      tone(55, "sawtooth", 0.5);
+      tone(82.5, "sawtooth", 0.3);
+    }
+    gain.gain.setTargetAtTime(0.035, ctx.currentTime, 0.3);
+    this.station = { gain, sources };
   }
 
   tick(kind: "start" | "click" | "hover" | "key" = "click"): void {

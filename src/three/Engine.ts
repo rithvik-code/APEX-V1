@@ -7,7 +7,7 @@ import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { createSupercar, badgeTexture, numberTexture, type Assembly, type VehicleAnchor } from "./car";
 import { createSuperbike } from "./bike";
-import { createGarage, type GarageStage } from "./garage";
+import { createGarage, type GarageHotspot, type GarageStage } from "./garage";
 import { AeroFlow, buildBikeStreamlines, buildCarStreamlines } from "./aero";
 import { WeatherSystem } from "./weather";
 import { buildTrack, type Track } from "./track";
@@ -33,7 +33,7 @@ import {
   type CameraSample,
   type LapRecording,
 } from "../lib/clip";
-import { REV_SHIFTS } from "../lib/sound";
+import { REV_SHIFTS, sound } from "../lib/sound";
 
 const ACID = 0xc8ff16;
 const TUNNEL_DIVE_DURATION = 1.2;
@@ -70,6 +70,11 @@ type Keyframe = {
   tgt: [number, number, number];
   fov: number;
 };
+
+export type GarageEvent =
+  | { type: "focus"; id: string | null; label: string }
+  | { type: "action"; id: string }
+  | { type: "driveout"; vehicle: DriveVehicle };
 
 const KEYFRAMES: Keyframe[] = [
   { p: 0.0, pos: [7.4, 2.0, 9.2], tgt: [0, 0.62, 0], fov: 40 },
@@ -384,6 +389,17 @@ export class ApexEngine {
   private garageEntryEye = new THREE.Vector3();
   private garageEntryLook = new THREE.Vector3();
   private garageEntryTarget = new THREE.Vector3();
+  private garageListener: ((event: GarageEvent) => void) | null = null;
+  private garageFocus: GarageHotspot | null = null;
+  private garageDoor = 1;
+  private garageDoorTarget = 1;
+  private garageLift = 0;
+  private garageLiftTarget = 0;
+  private garageService = false;
+  private garageSeated = false;
+  private garageVirtualForward = 0;
+  private garageVirtualStrafe = 0;
+  private garageStepT = 0;
   private revHeld = false;
   private revWasActive = false;
   private revT = 0;
@@ -404,6 +420,7 @@ export class ApexEngine {
       canvas,
       antialias: true,
       powerPreference: "high-performance",
+      preserveDrawingBuffer: true,
     });
     this.renderer.setPixelRatio(renderPixelRatio());
     this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -1030,6 +1047,16 @@ export class ApexEngine {
     ) {
       return;
     }
+    if (event.code === "KeyE") {
+      event.preventDefault();
+      this.garageInteract();
+      return;
+    }
+    if (event.code === "KeyP") {
+      event.preventDefault();
+      this.emitGarage({ type: "action", id: "photo" });
+      return;
+    }
     if (!GARAGE_WALK_KEYS.has(event.code)) return;
     event.preventDefault();
     this.garageKeys.add(event.code);
@@ -1544,6 +1571,108 @@ export class ApexEngine {
     return this.garageOn;
   }
 
+  get garageDoorOpen(): boolean {
+    return this.garageDoorTarget > 0.5;
+  }
+
+  get garageLiftRaised(): boolean {
+    return this.garageLiftTarget > 0.5;
+  }
+
+  get garageServiceMode(): boolean {
+    return this.garageService;
+  }
+
+  setGarageListener(listener: ((event: GarageEvent) => void) | null): void {
+    this.garageListener = listener;
+  }
+
+  private emitGarage(event: GarageEvent): void {
+    this.garageListener?.(event);
+  }
+
+  setGarageMove(forward: number, strafe: number): void {
+    this.garageVirtualForward = THREE.MathUtils.clamp(forward, -1, 1);
+    this.garageVirtualStrafe = THREE.MathUtils.clamp(strafe, -1, 1);
+    if (forward || strafe) this.garageSeated = false;
+  }
+
+  toggleGarageDoor(): boolean {
+    this.garageDoorTarget = this.garageDoorTarget > 0.5 ? 0 : 1;
+    this.saveGarageState();
+    return this.garageDoorTarget > 0.5;
+  }
+
+  toggleGarageLift(): boolean {
+    this.garageLiftTarget = this.garageLiftTarget > 0.5 ? 0 : 1;
+    this.garageService = false;
+    this.saveGarageState();
+    return this.garageLiftTarget > 0.5;
+  }
+
+  setGarageService(on: boolean): void {
+    this.garageService = on;
+    this.garageLiftTarget = on ? 1 : 0;
+    this.saveGarageState();
+  }
+
+  sitGarage(): void {
+    this.garageSeated = true;
+    this.garageWalk.set(2.85, 0, -6.55);
+    this.garageLookYaw = Math.PI;
+    this.garageLookYawT = Math.PI;
+    this.garageLookPitch = -0.08;
+    this.garageLookPitchT = -0.08;
+    this.garageBob = 0;
+  }
+
+  setGarageWeather(wet: boolean, night: boolean): void {
+    this.garageStage?.setWeather(wet, night);
+  }
+
+  setGarageTrophies(count: number): void {
+    this.garageStage?.setTrophies(count);
+  }
+
+  private garageInteract(): void {
+    if (!this.garageFocus) return;
+    this.emitGarage({ type: "action", id: this.garageFocus.id });
+  }
+
+  private loadGarageState(): void {
+    try {
+      const raw = localStorage.getItem("apex.garage.state.v1");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { door?: unknown; lift?: unknown; service?: unknown };
+      this.garageDoorTarget = parsed.door === false ? 0 : 1;
+      this.garageLiftTarget = parsed.lift === true ? 1 : 0;
+      this.garageService = parsed.service === true;
+      if (this.garageService) this.garageLiftTarget = 1;
+    } catch {
+      // Storage can be unavailable; the bay simply starts at defaults.
+    }
+  }
+
+  private saveGarageState(): void {
+    try {
+      localStorage.setItem(
+        "apex.garage.state.v1",
+        JSON.stringify({
+          door: this.garageDoorTarget > 0.5,
+          lift: this.garageLiftTarget > 0.5,
+          service: this.garageService,
+        }),
+      );
+    } catch {
+      // Non-fatal: state simply will not survive a reload.
+    }
+  }
+
+  captureFrame(): string {
+    this.composer.render();
+    return this.renderer.domElement.toDataURL("image/png");
+  }
+
   enterGarage(): void {
     if (this.drive) this.exitDrive();
     this.stopLap();
@@ -1562,6 +1691,21 @@ export class ApexEngine {
     stage.group.visible = true;
     stage.setDoor(0);
     stage.setLights(0);
+    this.loadGarageState();
+    stage.setLift(0);
+    this.garageLift = 0;
+    this.garageDoor = 1;
+    this.garageSeated = false;
+    this.garageVirtualForward = 0;
+    this.garageVirtualStrafe = 0;
+    this.garageFocus = null;
+    stage.setActiveHotspot(null);
+    this.emitGarage({ type: "focus", id: null, label: "" });
+    stage.setWeather(
+      this.lastConfig?.weather === "rain",
+      Boolean(this.lastConfig?.nightRace),
+    );
+    sound.startIdle("car");
 
     this.garageOn = true;
     this.garageEntryT = 0;
@@ -1627,6 +1771,12 @@ export class ApexEngine {
     if (!this.garageOn) return;
     this.garageOn = false;
     this.garageKeys.clear();
+    this.garageVirtualForward = 0;
+    this.garageVirtualStrafe = 0;
+    this.garageSeated = false;
+    this.garageFocus = null;
+    this.garageStage?.setActiveHotspot(null);
+    sound.stopIdle();
     this.dragging = false;
     this.revHeld = false;
     this.revWasActive = false;

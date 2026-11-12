@@ -3,12 +3,25 @@ import * as THREE from "three";
 const ACID = 0xc8ff16;
 const ACID_HEX = "#c8ff16";
 
+export type GarageHotspot = {
+  id: string;
+  label: string;
+  position: THREE.Vector3;
+  radius: number;
+};
+
 export type GarageStage = {
   group: THREE.Group;
   setDoor: (open: number) => void;
   setLights: (level: number) => void;
   update: (dt: number, time: number) => void;
   dispose: () => void;
+  setRev: (rpm: number, kick: number) => void;
+  setWeather: (wet: boolean, night: boolean) => void;
+  setLift: (raised: number) => void;
+  setTrophies: (count: number) => void;
+  setActiveHotspot: (id: string | null) => void;
+  hotspots: GarageHotspot[];
 };
 
 function canvas2d(width: number, height: number) {
@@ -150,6 +163,129 @@ function wordmarkTexture(): THREE.CanvasTexture {
   ctx.fillText("TERMINAL INTELLIGENCE / THE OTHER SIDE", 700, 348);
   return texture(canvas);
 }
+
+function sideSignTexture(): THREE.CanvasTexture {
+  const { canvas, ctx } = canvas2d(256, 640);
+  ctx.clearRect(0, 0, 256, 640);
+  ctx.fillStyle = "#0b0d09";
+  ctx.fillRect(0, 0, 256, 640);
+  ctx.strokeStyle = ACID_HEX;
+  ctx.lineWidth = 6;
+  ctx.strokeRect(10, 10, 236, 620);
+  ctx.save();
+  ctx.translate(128, 320);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = ACID_HEX;
+  ctx.font = "800 150px Archivo, sans-serif";
+  ctx.fillText("APEX", 0, -18);
+  ctx.font = "500 26px 'IBM Plex Mono', monospace";
+  ctx.fillStyle = "rgba(233,237,232,0.8)";
+  ctx.fillText("SERVICE 24H / BAY 01", 0, 86);
+  ctx.restore();
+  return texture(canvas);
+}
+
+function laptopTexture(): THREE.CanvasTexture {
+  const { canvas, ctx } = canvas2d(512, 320);
+  ctx.fillStyle = "#07100b";
+  ctx.fillRect(0, 0, 512, 320);
+  ctx.fillStyle = "rgba(200,255,22,0.9)";
+  ctx.font = "700 26px 'IBM Plex Mono', monospace";
+  ctx.fillText("APEX // BAY DIAGNOSTICS", 24, 48);
+  ctx.fillStyle = "rgba(160,175,160,0.7)";
+  ctx.font = "500 19px 'IBM Plex Mono', monospace";
+  const lines = [
+    "LIFT ........ READY",
+    "DOOR ........ LINKED",
+    "PAINT ....... LIVE",
+    "KNOWLEDGE ... SYNCING",
+    "RADIO ....... PIT FM",
+  ];
+  lines.forEach((line, i) => ctx.fillText(line, 24, 100 + i * 34));
+  ctx.fillStyle = "rgba(200,255,22,0.16)";
+  ctx.fillRect(24, 282, 464, 3);
+  ctx.fillStyle = ACID_HEX;
+  ctx.fillRect(24, 282, 290 + Math.sin(Date.now() / 400) * 60, 3);
+  return texture(canvas);
+}
+
+function tachCanvas() {
+  return canvas2d(512, 256);
+}
+
+function drawTach(ctx: CanvasRenderingContext2D, rpm: number, kick: number): void {
+  const value = Math.min(1.06, Math.max(0, rpm + kick * 0.12));
+  ctx.fillStyle = "#0a0c09";
+  ctx.fillRect(0, 0, 512, 256);
+  const cx = 256;
+  const cy = 214;
+  const r = 148;
+  const a0 = Math.PI * 0.82;
+  const a1 = Math.PI * 2.18;
+
+  ctx.lineCap = "round";
+  ctx.lineWidth = 20;
+  ctx.strokeStyle = "#1b2118";
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, a0, a1);
+  ctx.stroke();
+
+  ctx.strokeStyle = value > 0.88 ? "#ff5a1f" : ACID_HEX;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, a0, a0 + (a1 - a0) * Math.min(1, value));
+  ctx.stroke();
+
+  ctx.strokeStyle = "rgba(233,237,232,0.5)";
+  ctx.lineWidth = 2;
+  for (let i = 0; i <= 10; i++) {
+    const a = a0 + ((a1 - a0) * i) / 10;
+    const inner = r - 26;
+    const outer = r - 14;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner);
+    ctx.lineTo(cx + Math.cos(a) * outer, cy + Math.sin(a) * outer);
+    ctx.stroke();
+  }
+
+  const needle = a0 + (a1 - a0) * Math.min(1, value);
+  ctx.strokeStyle = "#f4f6ef";
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(needle) * (r - 30), cy + Math.sin(needle) * (r - 30));
+  ctx.stroke();
+  ctx.fillStyle = ACID_HEX;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(233,237,232,0.9)";
+  ctx.font = "600 22px 'IBM Plex Mono', monospace";
+  ctx.fillText("RPM x1000", cx, cy - 44);
+  ctx.fillStyle = value > 0.88 ? "#ff7950" : ACID_HEX;
+  ctx.font = "800 34px Archivo, sans-serif";
+  ctx.fillText((value * 9).toFixed(1), cx, cy + 4);
+
+  const leds = 20;
+  const lit = Math.round(value * leds);
+  for (let i = 0; i < leds; i++) {
+    ctx.fillStyle =
+      i < lit
+        ? i >= leds - 3
+          ? "#ff5a1f"
+          : ACID_HEX
+        : "rgba(200,255,22,0.12)";
+    ctx.fillRect(32 + i * 22.6, 236, 17, 6);
+  }
+  ctx.textAlign = "left";
+  ctx.fillStyle = "rgba(160,175,160,0.55)";
+  ctx.font = "500 13px 'IBM Plex Mono', monospace";
+  ctx.fillText("BAY 01 / LIVE TELEMETRY", 24, 24);
+}
+
 
 function hazardTexture(): THREE.CanvasTexture {
   const { canvas, ctx } = canvas2d(128, 64);
@@ -382,10 +518,8 @@ export function createGarage(): GarageStage {
   exterior.position.set(0, 0, 9.2);
   root.add(exterior);
 
-  const road = new THREE.Mesh(
-    new THREE.PlaneGeometry(64, 72),
-    new THREE.MeshBasicMaterial({ map: asphaltMap, color: 0xdfe7da }),
-  );
+  const roadMat = new THREE.MeshBasicMaterial({ map: asphaltMap, color: 0xdfe7da });
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(64, 72), roadMat);
   road.rotation.x = -Math.PI / 2;
   road.position.set(0, -0.012, 32);
   exterior.add(road);
@@ -522,24 +656,113 @@ export function createGarage(): GarageStage {
   spill.position.set(0, 0.02, 6.2);
   root.add(spill);
 
+  // Sun shafts falling through the open door.
+  const shaftMat = new THREE.MeshBasicMaterial({
+    color: 0xffeecc,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    fog: false,
+  });
+  const shaft = new THREE.Mesh(new THREE.PlaneGeometry(6.1, 6.6), shaftMat);
+  shaft.rotation.x = -Math.PI / 2;
+  shaft.position.set(0, 0.035, 5.5);
+  root.add(shaft);
+  const hazeMat = new THREE.MeshBasicMaterial({
+    color: 0xdfeaff,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    fog: false,
+  });
+  const haze = new THREE.Mesh(new THREE.PlaneGeometry(6.2, 3.4), hazeMat);
+  haze.position.set(0, 1.75, 8.55);
+  root.add(haze);
+
+  // Tunnel traffic. Opposing streams: headlights coming in, tail lights leaving.
+  const traffic: Array<{ group: THREE.Group; dir: number; speed: number }> = [];
+  const trafficBody = new THREE.MeshBasicMaterial({ color: 0x0d120e, fog: false });
+  const headlightMat = new THREE.MeshBasicMaterial({ color: 0xfff6d8, fog: false });
+  const taillightMat = new THREE.MeshBasicMaterial({ color: 0xff3b1f, fog: false });
+  for (let i = 0; i < 5; i++) {
+    const car = new THREE.Group();
+    const direction = i % 2 === 0 ? -1 : 1;
+    car.position.set(direction > 0 ? 1.9 : -1.9, 0.34, 6 + i * 11);
+    car.rotation.y = direction > 0 ? 0 : Math.PI;
+    box(1.5, 0.5, 2.9, trafficBody, 0, 0, 0, car);
+    box(1.2, 0.32, 1.3, trafficBody, 0, 0.38, -0.1, car);
+    for (const side of [-1, 1]) {
+      const head = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.14), headlightMat);
+      head.position.set(side * 0.5, 0.04, 1.48);
+      car.add(head);
+      const tail = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.12), taillightMat);
+      tail.position.set(side * 0.5, 0.06, -1.48);
+      tail.rotation.y = Math.PI;
+      car.add(tail);
+    }
+    exterior.add(car);
+    traffic.push({ group: car, dir: direction, speed: 8 + Math.random() * 9 });
+  }
+
+  // Illuminated pylon beside the tunnel mouth.
+  const pylonMat = new THREE.MeshBasicMaterial({
+    map: sideSignTexture(),
+    transparent: true,
+    side: THREE.DoubleSide,
+    fog: false,
+  });  const pylon = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 6), pylonMat);
+  pylon.position.set(6.6, 4.2, 13.5);
+  pylon.rotation.y = Math.PI;
+  exterior.add(pylon);
+  for (const y of [1.2, 7.2]) {
+    box(0.12, 0.12, 0.12, darkSteel, 6.6, y, 13.6, exterior);
+  }
+
+  // Rain, only visible through the door when the weather turns.
+  const rainCount = 460;
+  const rainPositions = new Float32Array(rainCount * 3);
+  for (let i = 0; i < rainCount; i++) {
+    rainPositions[i * 3] = (Math.random() - 0.5) * 44;
+    rainPositions[i * 3 + 1] = Math.random() * 18;
+    rainPositions[i * 3 + 2] = Math.random() * 66;
+  }
+  const rainGeo = new THREE.BufferGeometry();
+  rainGeo.setAttribute("position", new THREE.BufferAttribute(rainPositions, 3));
+  const rainMat = new THREE.PointsMaterial({
+    color: 0xb8cfe0,
+    size: 0.055,
+    transparent: true,
+    opacity: 0.55,
+    depthWrite: false,
+    fog: false,
+  });
+  const rain = new THREE.Points(rainGeo, rainMat);
+  rain.visible = false;
+  exterior.add(rain);
+
   /* ------------------------------------------------------------------ */
   /* Two-post lift                                                       */
   /* ------------------------------------------------------------------ */
 
   const lift = new THREE.Group();
   root.add(lift);
+  const carriage = new THREE.Group();
+  lift.add(carriage);
   for (const side of [-1, 1]) {
     box(0.34, 3.1, 0.6, darkSteel, side * 2.0, 1.55, 0.2, lift);
     box(0.62, 0.16, 1.0, darkSteel, side * 2.0, 0.08, 0.2, lift);
     box(0.2, 2.4, 0.16, hazard, side * 2.0, 1.55, 0.52, lift);
     cylinder(0.1, 2.3, steel, side * 1.92, 1.5, 0.2, lift);
-    box(0.64, 0.16, 4.7, darkSteel, side * 0.86, 0.32, 0.2, lift);
-    box(0.42, 0.05, 4.5, steel, side * 0.86, 0.41, 0.2, lift);
-    const ramp = box(0.64, 0.05, 0.8, steel, side * 0.86, 0.3, 2.86, lift);
+    box(0.64, 0.16, 4.7, darkSteel, side * 0.86, 0.32, 0.2, carriage);
+    box(0.42, 0.05, 4.5, steel, side * 0.86, 0.41, 0.2, carriage);
+    const ramp = box(0.64, 0.05, 0.8, steel, side * 0.86, 0.3, 2.86, carriage);
     ramp.rotation.x = -0.18;
-    const rampBack = box(0.64, 0.05, 0.8, steel, side * 0.86, 0.3, -2.46, lift);
+    const rampBack = box(0.64, 0.05, 0.8, steel, side * 0.86, 0.3, -2.46, carriage);
     rampBack.rotation.x = 0.18;
-    box(0.06, 0.04, 4.2, acid, side * 1.16, 0.44, 0.2, lift);
+    box(0.06, 0.04, 4.2, acid, side * 1.16, 0.44, 0.2, carriage);
   }
   box(4.35, 0.26, 0.52, darkSteel, 0, 3.12, 0.2, lift);
   box(0.5, 0.36, 0.3, darkSteel, -2.0, 1.55, 0.62, lift);
@@ -734,6 +957,132 @@ export function createGarage(): GarageStage {
     leg.rotation.z = Math.cos(a) * 0.2;
   }
 
+  // Bay computer on the bench: paint, service and knowledge in one screen.
+  box(0.52, 0.02, 0.34, darkSteel, -0.85, 1.0, -8.08);
+  for (let i = 0; i < 4; i++) {
+    box(0.05, 0.004, 0.02, steel, -1.03 + i * 0.05, 1.012, -7.94);
+    box(0.05, 0.004, 0.02, steel, -1.03 + i * 0.05, 1.012, -8.22);
+  }
+  const laptopScreenMat = new THREE.MeshBasicMaterial({
+    map: laptopTexture(),
+    transparent: true,
+    fog: false,
+  });
+  const laptopLid = new THREE.Group();
+  laptopLid.position.set(-0.85, 1.01, -8.22);
+  laptopLid.rotation.x = -0.28;
+  root.add(laptopLid);
+  box(0.52, 0.34, 0.02, darkSteel, 0, 0.17, 0, laptopLid);
+  const laptopScreen = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.28), laptopScreenMat);
+  laptopScreen.position.set(0, 0.17, 0.012);
+  laptopLid.add(laptopScreen);
+
+  // Door remote on the front wall.
+  box(0.3, 0.44, 0.08, darkSteel, -4.35, 1.5, 8.64);
+  const remoteButton = box(
+    0.11,
+    0.11,
+    0.05,
+    new THREE.MeshStandardMaterial({
+      color: 0x3d120c,
+      emissive: 0xff4b1f,
+      emissiveIntensity: 1.6,
+      roughness: 0.4,
+    }),
+    -4.35,
+    1.6,
+    8.58,
+  );
+  remoteButton.rotation.x = 0.02;
+  box(0.16, 0.02, 0.01, acid, -4.35, 1.4, 8.59);
+
+  // Launch-control practice area near the door.
+  const padMat = new THREE.MeshBasicMaterial({
+    color: ACID,
+    transparent: true,
+    opacity: 0.07,
+    depthWrite: false,
+    fog: false,
+  });
+  const pad = new THREE.Mesh(new THREE.PlaneGeometry(2.1, 3.1), padMat);
+  pad.rotation.x = -Math.PI / 2;
+  pad.position.set(3.6, 0.016, 6.0);
+  root.add(pad);
+  for (const [px, pz] of [
+    [2.7, 4.6],
+    [4.5, 4.6],
+    [2.7, 7.4],
+    [4.5, 7.4],
+  ]) {
+    box(0.09, 0.5, 0.09, darkSteel, px, 0.25, pz);
+    cylinder(0.06, 0.06, acid, px, 0.54, pz, root, 10);
+  }
+
+  // The bay cat, asleep by the tyre stack until it decides otherwise.
+  const cat = new THREE.Group();
+  cat.position.set(6.05, 0, 2.6);
+  root.add(cat);
+  const fur = new THREE.MeshStandardMaterial({ color: 0x2b2c26, roughness: 0.92 });
+  const furLight = new THREE.MeshStandardMaterial({ color: 0x4a4b40, roughness: 0.9 });
+  const catBody = box(0.24, 0.17, 0.46, fur, 0, 0.2, 0, cat);
+  box(0.17, 0.14, 0.15, fur, 0, 0.27, 0.26, cat);
+  const catHead = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), fur);
+  catHead.position.set(0, 0.34, 0.33);
+  cat.add(catHead);
+  for (const side of [-1, 1]) {
+    const ear = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.07, 6), furLight);
+    ear.position.set(side * 0.06, 0.43, 0.33);
+    cat.add(ear);
+    const leg = box(0.045, 0.14, 0.045, furLight, side * 0.085, 0.08, 0.15, cat);
+    leg.rotation.x = 0.1;
+    box(0.045, 0.14, 0.045, furLight, side * 0.085, 0.08, -0.16, cat);
+  }
+  const catTail = new THREE.Group();
+  catTail.position.set(0, 0.2, -0.24);
+  cat.add(catTail);
+  const tailSeg = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.028, 0.34, 8), fur);
+  tailSeg.position.set(0, 0.12, -0.04);
+  tailSeg.rotation.x = -0.6;
+  catTail.add(tailSeg);
+  const catBed = cylinder(0.42, 0.09, red, 6.3, 0.045, 3.5, root, 20);
+  catBed.scale.z = 0.8;
+  catBed.rotation.y = 0.4;
+
+  // Wall tachometer: live rpm off the rev rig.
+  const tach = tachCanvas();
+  const tachTexture = texture(tach.canvas);
+  tachTexture.wrapS = THREE.ClampToEdgeWrapping;
+  tachTexture.wrapT = THREE.ClampToEdgeWrapping;
+  drawTach(tach.ctx, 0, 0);
+  tachTexture.needsUpdate = true;
+  const tachPanel = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.7, 1.35),
+    new THREE.MeshBasicMaterial({ map: tachTexture, fog: false }),
+  );
+  tachPanel.position.set(-7.66, 3.05, 1.7);
+  tachPanel.rotation.y = Math.PI / 2;
+  root.add(tachPanel);
+  box(0.08, 1.5, 2.86, darkSteel, -7.7, 3.05, 1.7);
+
+  // Rev-reactive LED strips under the bench and along the left wall.
+  const revLeds: Array<{ mat: THREE.MeshBasicMaterial }> = [];
+  const ledGeo = new THREE.PlaneGeometry(0.17, 0.055);
+  for (let i = 0; i < 16; i++) {
+    const mat = new THREE.MeshBasicMaterial({ color: 0x141a11, fog: false });
+    const led = new THREE.Mesh(ledGeo, mat);
+    led.position.set(-1.8 + i * 0.24, 0.72, -7.66);
+    root.add(led);
+    revLeds.push({ mat });
+  }
+  for (let i = 0; i < 12; i++) {
+    const mat = new THREE.MeshBasicMaterial({ color: 0x141a11, fog: false });
+    const led = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.42), mat);
+    led.position.set(-7.63, 1.2, -6.4 + i * 0.62);
+    led.rotation.y = Math.PI / 2;
+    root.add(led);
+    revLeds.push({ mat });
+  }
+
   /* ------------------------------------------------------------------ */
   /* Wall details: sign, posters, clock, trophy shelf                    */
   /* ------------------------------------------------------------------ */
@@ -786,6 +1135,7 @@ export function createGarage(): GarageStage {
   for (const z of [-4.6, -1.6]) {
     box(0.06, 0.32, 0.06, steel, 7.5, 1.9, z);
   }
+  const trophyGroups: THREE.Group[] = [];
   const trophy = (x: number, y: number, z: number, scale: number) => {
     const group = new THREE.Group();
     group.position.set(x, y, z);
@@ -804,12 +1154,16 @@ export function createGarage(): GarageStage {
       group.add(handle);
     }
     root.add(group);
+    trophyGroups.push(group);
   };
   trophy(7.5, 1.75, -4.3, 1);
   trophy(7.5, 1.75, -3.35, 0.85);
   trophy(7.5, 1.75, -2.5, 0.7);
   trophy(7.5, 2.37, -4.0, 0.6);
-  trophy(7.5, 2.37, -2.9, 0.55);
+  trophy(7.5, 2.37, -3.1, 0.55);
+  trophy(7.5, 2.37, -2.2, 0.5);
+  trophy(7.5, 1.75, -3.9, 0.45);
+  trophy(7.5, 1.75, -2.9, 0.42);
 
   /* ------------------------------------------------------------------ */
   /* Tyre stack, shelves, bike mat, fridge                              */
@@ -945,16 +1299,77 @@ export function createGarage(): GarageStage {
   root.add(dust);
 
   /* ------------------------------------------------------------------ */
+  /* Hotspots                                                            */
+  /* ------------------------------------------------------------------ */
+
+  const hotspots: GarageHotspot[] = [
+    { id: "lift", label: "LIFT CONTROLS", position: new THREE.Vector3(-2, 1.5, 0.62), radius: 1.7 },
+    { id: "door", label: "DOOR REMOTE", position: new THREE.Vector3(-4.35, 1.5, 8.3), radius: 1.8 },
+    { id: "shelf", label: "DIE-CAST SHELF", position: new THREE.Vector3(0.42, 1.25, -8.2), radius: 1.3 },
+    { id: "computer", label: "BAY COMPUTER", position: new THREE.Vector3(-0.85, 1.2, -8.1), radius: 1.25 },
+    { id: "radio", label: "RADIO TUNER", position: new THREE.Vector3(2.05, 1.2, -8.15), radius: 1.35 },
+    { id: "stool", label: "SIT ON STOOL", position: new THREE.Vector3(2.85, 0.7, -7.2), radius: 1.4 },
+    { id: "trophies", label: "TROPHY WALL", position: new THREE.Vector3(7.1, 2.1, -3.1), radius: 1.9 },
+    { id: "cat", label: "THE BAY CAT", position: new THREE.Vector3(6.05, 0.3, 2.6), radius: 1.7 },
+    { id: "launch", label: "LAUNCH PRACTICE", position: new THREE.Vector3(3.6, 0.3, 6.0), radius: 2 },
+  ];
+
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: ACID,
+    transparent: true,
+    opacity: 0.35,
+    depthWrite: false,
+    fog: false,
+  });
+  const ringGeo = new THREE.RingGeometry(0.3, 0.42, 36);
+  const rings = new Map<string, THREE.Mesh>();
+  for (const spot of hotspots) {
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(spot.position.x, 0.028, spot.position.z);
+    ring.visible = false;
+    root.add(ring);
+    rings.set(spot.id, ring);
+  }
+  let activeRing: THREE.Mesh | null = null;
+
+  /* ------------------------------------------------------------------ */
   /* Animation                                                           */
   /* ------------------------------------------------------------------ */
 
   let lightLevel = 1;
   let doorOpen = 0;
+  let revRpm = 0;
+  let revKick = 0;
+  let lastTach = -1;
+
+  const setRev = (rpm: number, kick: number): void => {
+    revRpm = Math.max(0, Math.min(1.12, rpm));
+    revKick = Math.max(0, Math.min(1, kick));
+  };
+
+  const setLift = (raised: number): void => {
+    carriage.position.y = Math.max(0, Math.min(1, raised)) * 1.32;
+  };
+
+  const setTrophies = (count: number): void => {
+    const shown = Math.max(0, Math.min(trophyGroups.length, Math.round(count)));
+    trophyGroups.forEach((group, index) => {
+      group.visible = index < shown;
+    });
+  };
+
+  const setActiveHotspot = (id: string | null): void => {
+    for (const [key, ring] of rings) ring.visible = key === id;
+    activeRing = id ? rings.get(id) ?? null : null;
+  };
 
   const setDoor = (open: number): void => {
     doorOpen = Math.max(0, Math.min(1, open));
     roll.scale.y = Math.max(0.035, 1 - doorOpen * 0.965);
     spillMat.opacity = doorOpen * 0.3;
+    shaftMat.opacity = doorOpen * 0.055;
+    hazeMat.opacity = doorOpen * 0.03;
     doorLight.intensity = 0.15 + doorOpen * 1.05;
   };
 
@@ -967,6 +1382,14 @@ export function createGarage(): GarageStage {
     stripMat.opacity = 0.05 + lightLevel * 0.95;
     bulbMat.opacity = 0.1 + lightLevel * 0.9;
     signMat.opacity = (0.35 + lightLevel * 0.6) * (0.86 + 0.14 * Math.sin(lightLevel * 24));
+  };
+
+  const setWeather = (wet: boolean, night: boolean): void => {
+    rain.visible = wet;
+    roadMat.color.setHex(wet ? 0x93a49a : 0xdfe7da);
+    towerMat.color.setHex(night ? 0x070c09 : 0x111a14);
+    laneMat.opacity = night ? 0.55 : 0.4;
+    pylonMat.opacity = wet ? 0.7 : 0.95;
   };
 
   const update = (dt: number, time: number): void => {
@@ -982,8 +1405,53 @@ export function createGarage(): GarageStage {
     signMat.opacity = (0.35 + lightLevel * 0.6) * (0.82 + 0.18 * Math.abs(Math.sin(time * 2.1)));
     liftLamp.visible = Math.sin(time * 2.4) > -0.4;
     spillMat.opacity = doorOpen * (0.27 + 0.04 * Math.sin(time * 1.7));
+    shaftMat.opacity = doorOpen * (0.05 + 0.014 * Math.sin(time * 0.9));
+    hazeMat.opacity = doorOpen * (0.026 + 0.008 * Math.sin(time * 1.3));
     glowMat.opacity = 0.84 + 0.09 * Math.sin(time * 1.15);
+    pylonMat.opacity = 0.82 + 0.16 * Math.sin(time * 1.4);
     toolGroup.position.y = Math.sin(time * 0.5) * 0.002;
+
+    // Tachometer + shift lights.
+    if (Math.abs(revRpm - lastTach) > 0.003 || revKick > 0.06) {
+      drawTach(tach.ctx, revRpm, revKick);
+      tachTexture.needsUpdate = true;
+      lastTach = revRpm;
+    }
+    const fuel = Math.min(1, revRpm + revKick * 0.18);
+    const hot = revRpm > 0.86;
+    revLeds.forEach(({ mat }, index) => {
+      const point = index / (revLeds.length - 1);
+      mat.color.setHex(point <= fuel ? (hot && point > 0.7 ? 0xff5a1f : ACID) : 0x141a11);
+    });
+
+    // Traffic down the approach and rain through the door.
+    for (const trafficCar of traffic) {
+      const group = trafficCar.group;
+      group.position.z += trafficCar.dir * trafficCar.speed * dt;
+      if (group.position.z > 64) group.position.z = 2;
+      if (group.position.z < 2) group.position.z = 64;
+    }
+    if (rain.visible) {
+      const positions = rainGeo.getAttribute("position") as THREE.BufferAttribute;
+      const array = positions.array as Float32Array;
+      for (let i = 0; i < rainCount; i++) {
+        array[i * 3 + 1] -= dt * (7 + (i % 4) * 2.3);
+        if (array[i * 3 + 1] < 0) array[i * 3 + 1] = 18;
+      }
+      positions.needsUpdate = true;
+    }
+
+    // The cat patrols its corner and never hurries.
+    cat.position.x = 6.05 + Math.sin(time * 0.17) * 0.55;
+    cat.position.z = 2.6 + Math.cos(time * 0.23) * 0.85;
+    cat.rotation.y = Math.sin(time * 0.17) * 0.7;
+    catBody.position.y = 0.2 + Math.sin(time * 1.7) * 0.006;
+    catHead.rotation.y = Math.sin(time * 0.6) * 0.4;
+    catTail.rotation.z = Math.sin(time * 2.6) * 0.42;
+    catTail.rotation.x = Math.sin(time * 1.3) * 0.18;
+
+    if (activeRing) activeRing.rotation.z += dt * 0.5;
+    ringMat.opacity = 0.26 + 0.16 * Math.sin(time * 3.6);
   };
 
   setDoor(0);
@@ -994,6 +1462,12 @@ export function createGarage(): GarageStage {
     setDoor,
     setLights,
     update,
+    setRev,
+    setWeather,
+    setLift,
+    setTrophies,
+    setActiveHotspot,
+    hotspots,
     dispose: () => {
       root.traverse((object) => {
         const mesh = object as THREE.Mesh;
@@ -1012,6 +1486,10 @@ export function createGarage(): GarageStage {
       bulbMat.dispose();
       signMat.map?.dispose();
       signMat.dispose();
+      ringMat.dispose();
+      ringGeo.dispose();
+      rainGeo.dispose();
+      rainMat.dispose();
     },
   };
 }

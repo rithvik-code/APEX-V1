@@ -20,6 +20,15 @@ import {
 } from "../lib/web";
 import { tuneFromText } from "../lib/engineer";
 import {
+  knowledgeContext,
+  knowledgeState,
+  learnFromGrounding,
+  startKnowledgeSync,
+  subscribeKnowledge,
+  syncKnowledge,
+  type KnowledgeState,
+} from "../lib/knowledge";
+import {
   createRecognizer,
   pttSupported,
   speakRadio,
@@ -93,6 +102,8 @@ const COMMANDS = [
   ["/race <request>", "race engineer tunes the car live"],
   ["/vox [on|off]", "speak replies over the racing radio"],
   ["/web [on|off]", "toggle live web grounding"],
+  ["/learn", "sync the local knowledge base now"],
+  ["/knowledge", "list facts the machine has learned"],
   ["/arcade [on|off]", "wrap replies in quiz, mission and intel cards"],
   ["/search <query>", "pull live sources without the model"],
   ["/live", "detect a local Ollama model and connect"],
@@ -281,6 +292,8 @@ RACE ENGINEER on duty: say "more downforce for the wet" and the car
 tunes itself live. RADIO is push-to-talk, VOX speaks the replies.
 WEB grounding is ON: current facts (F1, people, releases, news) are
 pulled live from Wikipedia and racing data before the model answers.
+LOCAL KNOWLEDGE also syncs itself every 15 minutes and remembers what
+it read, so answers stay current across sessions. /knowledge to inspect.
 ARCADE MODE is ON: answers arrive as quiz, mission or intel cards —
 the full text stays one click away. /arcade off for plain replies.
 Open LINK to point this terminal at a local Ollama model.`;
@@ -335,6 +348,9 @@ export function Terminal({
   const [arcade, setArcade] = useState<boolean>(() => loadArcadeMode());
   const [arcadeStats, setArcadeStats] = useState<ArcadeStats>(() =>
     loadArcadeStats(),
+  );
+  const [knowledge, setKnowledge] = useState<KnowledgeState>(() =>
+    knowledgeState(),
   );
 
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -479,6 +495,14 @@ export function Terminal({
       void warmGrounding();
     }, 800);
     return () => window.clearTimeout(id);
+  }, []);
+
+  // The knowledge base refreshes itself on a timer and on reconnect; the
+  // subscription keeps the status bar honest about how much it has learned.
+  useEffect(() => {
+    startKnowledgeSync();
+    setKnowledge({ ...knowledgeState() });
+    return subscribeKnowledge(() => setKnowledge({ ...knowledgeState() }));
   }, []);
 
   const persist = (next: AiSettings) => {
@@ -640,6 +664,45 @@ export function Terminal({
         }
         setArcadeMode(arg ? /^on$/i.test(arg) : !arcade);
         break;
+      case "/learn": {
+        addEntry("meta", "KNOWLEDGE // SYNCING LIVE SOURCES...");
+        void syncKnowledge(true).then((next) => {
+          if (!mounted.current) return;
+          const when = next.lastSync
+            ? new Date(next.lastSync).toLocaleTimeString()
+            : "unknown";
+          addEntry(
+            "meta",
+            next.error
+              ? `KNOWLEDGE // SYNC FAILED: ${next.error}. ${next.facts.length} FACTS REMAIN STORED.`
+              : `KNOWLEDGE // ${next.facts.length} FACTS STORED · LAST SYNC ${when} · SYNC #${next.syncs}.`,
+          );
+        });
+        break;
+      }
+      case "/knowledge": {
+        const base = knowledgeState();
+        const when = base.lastSync
+          ? new Date(base.lastSync).toISOString().slice(0, 16).replace("T", " ")
+          : "never";
+        const rows = base.facts
+          .slice(0, 8)
+          .map(
+            (fact) =>
+              `  ${fact.source.padEnd(4)} ${fact.title.slice(0, 62)} · ${new Date(
+                fact.at,
+              )
+                .toISOString()
+                .slice(0, 10)}`,
+          );
+        addEntry(
+          "assistant",
+          `LOCAL KNOWLEDGE // ${base.facts.length} FACTS · ${base.syncs} SYNCS · LAST ${when} UTC\n\n${
+            rows.join("\n") || "  nothing learned yet — run /learn"
+          }\n\nThe model reads the best-matching facts before every answer. Facts persist in this browser on this machine.`,
+        );
+        break;
+      }
       case "/search": {
         if (!arg) {
           addEntry("meta", "USAGE: /search <query>");
@@ -658,6 +721,7 @@ export function Terminal({
             );
             return;
           }
+          learnFromGrounding(result);
           addEntry(
             "assistant",
             `LIVE RETRIEVAL // ${result.fetchedAt.slice(0, 10)}\n\n${result.summary}\n\n${result.sourceLine}`,
@@ -846,6 +910,8 @@ export function Terminal({
 
       const result = await retrieveGrounding(text, controller.signal);
       grounding = result;
+      // Whatever retrieval found is worth keeping for the next session.
+      if (result) learnFromGrounding(result);
 
       if (!mounted.current) return;
       if (controller.signal.aborted) {
@@ -877,6 +943,10 @@ export function Terminal({
         ),
       );
     }
+
+    // Local knowledge rides along on every turn: whatever live sources the
+    // question needs, plus facts learned during earlier background syncs.
+    const knowledgeText = knowledgeContext(text);
 
     const assistantId = uid();
     const quickGrounding = grounding;
@@ -936,6 +1006,7 @@ export function Terminal({
         settings,
         messages: historyForModel,
         grounding,
+        knowledge: knowledgeText || undefined,
         temperature: grounding ? 0.2 : 0.55,
         extraSystem: arcadeKind === "quiz" ? QUIZ_INSTRUCTION : undefined,
         signal: controller.signal,
@@ -1442,6 +1513,9 @@ export function Terminal({
         </span>
         <span>
           WEB <b>{web ? "ON" : "OFF"}</b>
+        </span>
+        <span>
+          KNOWLEDGE <b>{knowledge.facts.length}</b>
         </span>
         <span>
           {career ? (
