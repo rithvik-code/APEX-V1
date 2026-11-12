@@ -4,16 +4,17 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import type { GarageView } from "../three/garage";
+
+type BoardState = "idle" | "loading" | "ready" | "offline";
 
 type GarageProps = {
-  view: GarageView;
   licence: string;
   cp: number;
   unlocks: number;
+  files: number;
+  filesState: BoardState;
   audioOn: boolean;
   onAudio: () => void;
-  onView: (view: GarageView) => void;
   onRevStart: (vehicle: "car" | "bike") => void;
   onRevEnd: () => void;
   onReplay: () => void;
@@ -21,13 +22,13 @@ type GarageProps = {
 };
 
 export function Garage({
-  view,
   licence,
   cp,
   unlocks,
+  files,
+  filesState,
   audioOn,
   onAudio,
-  onView,
   onRevStart,
   onRevEnd,
   onReplay,
@@ -79,6 +80,15 @@ export function Garage({
           <span>{licence}</span>
           <span>{cp} CP</span>
           <span>{unlocks} UNLOCKS</span>
+          <span className={`garage__files is-${filesState}`}>
+            {filesState === "ready"
+              ? `${files} FILES LINKED`
+              : filesState === "loading"
+                ? "SYNCING FILES"
+                : filesState === "offline"
+                  ? "LOCAL LINK OFFLINE"
+                  : "LOCAL LINK"}
+          </span>
           <b>{time}</b>
         </div>
       </header>
@@ -88,26 +98,20 @@ export function Garage({
         <h2>THE GARAGE</h2>
         <p className="garage__lede">
           Door up. Lights on. The lift holds the car where you left it. Walk the
-          floor, or orbit the bay.
+          floor — your local files are chalked up on the left wall.
         </p>
 
-        <div className="garage__views" role="group" aria-label="Camera mode">
-          <button
-            type="button"
-            className={view === "third" ? "is-on" : ""}
-            aria-pressed={view === "third"}
-            onClick={() => onView("third")}
-          >
-            <span>03</span> THIRD PERSON
-          </button>
-          <button
-            type="button"
-            className={view === "first" ? "is-on" : ""}
-            aria-pressed={view === "first"}
-            onClick={() => onView("first")}
-          >
-            <span>01</span> FIRST PERSON
-          </button>
+        <div className="garage__board" aria-live="polite">
+          <span>BLACKBOARD · LEFT WALL</span>
+          <b>
+            {filesState === "ready"
+              ? `${files} LOCAL FILES CHALKED`
+              : filesState === "loading"
+                ? "SCANNING HOME ROOTS"
+                : filesState === "offline"
+                  ? "RUN npm run apex TO SYNC"
+                  : "AWAITING LOCAL LINK"}
+          </b>
         </div>
 
         <div className="garage__revs" role="group" aria-label="Hold to rev the engines">
@@ -143,12 +147,10 @@ export function Garage({
       </aside>
 
       <p className="garage__hint">
-        {view === "third"
-          ? "DRAG — ORBIT · WHEEL — ZOOM · DOUBLE-CLICK — RESET · HOLD REV — GEARBOX"
-          : "WASD / ARROWS — WALK · SHIFT — SPRINT · DRAG — LOOK · HOLD REV — GEARBOX"}
+        MOVE POINTER — LOOK · WASD / ARROWS — WALK · SHIFT — SPRINT · HOLD REV — GEARBOX
       </p>
 
-      {view === "first" && <span className="garage__reticle" aria-hidden="true" />}
+      <span className="garage__reticle" aria-hidden="true" />
     </div>
   );
 }
