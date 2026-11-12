@@ -8355,50 +8355,42 @@ body.garage-open .vignette {
   color: var(--muted);
 }
 
-.garage__views {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.garage__views button {
+.garage__board {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  background: transparent;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px dashed rgba(200, 255, 22, 0.28);
+  background: rgba(200, 255, 22, 0.045);
+}
+
+.garage__board span {
+  font-size: 7.5px;
+  letter-spacing: 0.18em;
   color: var(--dim);
-  font-family: var(--mono);
-  font-size: 8px;
-  letter-spacing: 0.14em;
-  transition:
-    border-color 0.2s,
-    background 0.2s,
-    color 0.2s;
 }
 
-.garage__views button span {
-  color: var(--dim);
-  font-size: 8px;
-}
-
-.garage__views button:hover {
-  border-color: rgba(200, 255, 22, 0.55);
-  color: var(--paper);
-}
-
-.garage__views button.is-on {
-  border-color: var(--acid);
-  background: var(--acid-soft);
-  color: var(--paper);
-  box-shadow: inset 0 0 0 1px rgba(200, 255, 22, 0.2);
-}
-
-.garage__views button.is-on span {
+.garage__board b {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
   color: var(--acid);
+}
+
+.garage__meta .garage__files {
+  border-color: rgba(200, 255, 22, 0.35);
+  color: var(--acid);
+}
+
+.garage__meta .garage__files.is-offline {
+  border-color: rgba(255, 90, 31, 0.42);
+  color: #ff7a45;
+}
+
+.garage__meta .garage__files.is-loading,
+.garage__meta .garage__files.is-idle {
+  color: var(--muted);
 }
 
 .garage__revs {
@@ -8543,7 +8535,8 @@ body.garage-open .vignette {
   }
 
   .garage__brand i,
-  .garage__meta span:nth-child(3) {
+  .garage__meta span:nth-child(3),
+  .garage__meta .garage__files {
     display: none;
   }
 
