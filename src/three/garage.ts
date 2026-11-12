@@ -106,20 +106,48 @@ function doorSpillTexture(): THREE.CanvasTexture {
   return texture(canvas);
 }
 
-function outsideTexture(): THREE.CanvasTexture {
-  const { canvas, ctx } = canvas2d(512, 256);
-  const grad = ctx.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0, "#cfd9e4");
-  grad.addColorStop(0.55, "#8ea4b6");
-  grad.addColorStop(1, "#3d4a3e");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 512, 256);
-  ctx.fillStyle = "rgba(255,255,255,0.35)";
-  for (let i = 0; i < 4; i++) {
-    ctx.fillRect(40 + i * 120, 40, 2, 200);
+function asphaltTexture(): THREE.CanvasTexture {
+  const { canvas, ctx } = canvas2d(512, 512);
+  ctx.fillStyle = "#0a0d0b";
+  ctx.fillRect(0, 0, 512, 512);
+  for (let i = 0; i < 2600; i++) {
+    ctx.fillStyle = `rgba(128,148,126,${0.015 + Math.random() * 0.045})`;
+    ctx.fillRect(Math.random() * 512, Math.random() * 512, 1.4, 1.4);
   }
-  ctx.fillStyle = "rgba(30,40,30,0.55)";
-  ctx.fillRect(0, 196, 512, 60);
+  const sheen = ctx.createLinearGradient(0, 0, 0, 512);
+  sheen.addColorStop(0, "rgba(150,180,140,0.05)");
+  sheen.addColorStop(0.5, "rgba(0,0,0,0)");
+  sheen.addColorStop(1, "rgba(150,180,140,0.025)");
+  ctx.fillStyle = sheen;
+  ctx.fillRect(0, 0, 512, 512);
+  return texture(canvas, 6, 10);
+}
+
+function portalGlowTexture(): THREE.CanvasTexture {
+  const { canvas, ctx } = canvas2d(512, 512);
+  const grad = ctx.createRadialGradient(256, 256, 30, 256, 256, 256);
+  grad.addColorStop(0, "rgba(226,255,208,0.03)");
+  grad.addColorStop(0.6, "rgba(200,255,22,0.07)");
+  grad.addColorStop(0.86, "rgba(200,255,22,0.26)");
+  grad.addColorStop(1, "rgba(200,255,22,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 512, 512);
+  return texture(canvas);
+}
+
+function wordmarkTexture(): THREE.CanvasTexture {
+  const { canvas, ctx } = canvas2d(1400, 420);
+  ctx.clearRect(0, 0, 1400, 420);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "rgba(235,240,232,0.94)";
+  ctx.font = "800 236px Archivo, sans-serif";
+  ctx.fillText("APEX", 700, 176);
+  ctx.fillStyle = "rgba(200,255,22,0.22)";
+  ctx.fillRect(320, 222, 760, 2);
+  ctx.font = "600 38px 'IBM Plex Mono', monospace";
+  ctx.fillStyle = "rgba(200,255,22,0.82)";
+  ctx.fillText("TERMINAL INTELLIGENCE / THE OTHER SIDE", 700, 348);
   return texture(canvas);
 }
 
@@ -342,17 +370,144 @@ export function createGarage(): GarageStage {
   const drum = cylinder(0.24, 6.55, steel, 0, 3.68, 8.92);
   drum.rotation.z = Math.PI / 2;
 
-  const outsideMat = new THREE.MeshBasicMaterial({
-    map: outsideTexture(),
+  /* ------------------------------------------------------------------ */
+  /* Tunnel approach beyond the door                                     */
+  /* ------------------------------------------------------------------ */
+
+  const asphaltMap = asphaltTexture();
+  const portalMap = portalGlowTexture();
+  const wordmarkMap = wordmarkTexture();
+
+  const exterior = new THREE.Group();
+  exterior.position.set(0, 0, 9.2);
+  root.add(exterior);
+
+  const road = new THREE.Mesh(
+    new THREE.PlaneGeometry(64, 72),
+    new THREE.MeshBasicMaterial({ map: asphaltMap, color: 0xdfe7da }),
+  );
+  road.rotation.x = -Math.PI / 2;
+  road.position.set(0, -0.012, 32);
+  exterior.add(road);
+
+  const laneMat = new THREE.MeshBasicMaterial({
+    color: ACID,
     transparent: true,
-    opacity: 0,
+    opacity: 0.4,
+    blending: THREE.AdditiveBlending,
     depthWrite: false,
     fog: false,
   });
-  const outside = new THREE.Mesh(new THREE.PlaneGeometry(7.6, 5.2), outsideMat);
-  outside.position.set(0, 2.4, 10.4);
-  outside.rotation.y = Math.PI;
-  root.add(outside);
+  for (const x of [-3.3, 3.3]) {
+    const lane = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 56), laneMat);
+    lane.rotation.x = -Math.PI / 2;
+    lane.position.set(x, 0.012, 30);
+    exterior.add(lane);
+  }
+
+  // Guide lights marching down the approach.
+  for (let i = 0; i < 5; i++) {
+    const z = 4 + i * 7;
+    for (const side of [-1, 1]) {
+      box(0.16, 3.1, 0.16, darkSteel, side * 4.7, 1.55, z, exterior);
+      box(0.05, 2.1, 0.05, acid, side * 4.62, 1.5, z, exterior);
+    }
+  }
+
+  // Three arches straddle the road, growing as they recede into the tunnel.
+  // Half-torus arches keep their crowns inside the door's view cone.
+  const archSpecs: Array<[number, number, number, number]> = [
+    [4.2, 8, 0.1, 0.34],
+    [5.2, 22, 0.13, 0.5],
+    [6.4, 36, 0.16, 0.68],
+  ];
+  for (const [radius, z, tube, strength] of archSpecs) {
+    const arch = new THREE.Mesh(
+      new THREE.TorusGeometry(radius, tube, 10, 72, Math.PI),
+      new THREE.MeshBasicMaterial({
+        color: ACID,
+        transparent: true,
+        opacity: strength,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        fog: false,
+      }),
+    );
+    arch.position.set(0, 0.16, z);
+    exterior.add(arch);
+    const halo = new THREE.Mesh(
+      new THREE.TorusGeometry(radius + 0.35, 0.028, 8, 72, Math.PI),
+      new THREE.MeshBasicMaterial({
+        color: 0xe9f6e2,
+        transparent: true,
+        opacity: strength * 0.3,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        fog: false,
+      }),
+    );
+    halo.position.set(0, 0.16, z + 0.02);
+    exterior.add(halo);
+  }
+
+  const glowMat = new THREE.MeshBasicMaterial({
+    map: portalMap,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    fog: false,
+  });
+  const glow = new THREE.Mesh(new THREE.PlaneGeometry(12.6, 11), glowMat);
+  glow.position.set(0, 4.6, 40.5);
+  exterior.add(glow);
+
+  // Distant skyline flanking the tunnel.
+  const towerMat = new THREE.MeshBasicMaterial({ color: 0x111a14, fog: false });
+  const windowMat = new THREE.MeshBasicMaterial({
+    color: 0xbfe6ff,
+    transparent: true,
+    opacity: 0.08,
+    fog: false,
+  });
+  const towers: Array<[number, number, number, number, number]> = [
+    [-24, 46, 7, 16, 8],
+    [-17, 57, 5, 11, 6],
+    [20, 44, 8, 19, 9],
+    [27, 55, 6, 12, 7],
+    [12, 61, 5, 9, 5],
+  ];
+  for (const [x, z, w, h, d] of towers) {
+    box(w, h, d, towerMat, x, h / 2, z, exterior);
+    for (let i = 0; i < 4; i++) {
+      box(
+        w * 0.72,
+        0.035,
+        0.02,
+        windowMat,
+        x,
+        2.4 + i * (h * 0.18),
+        z - d / 2 - 0.02,
+        exterior,
+      );
+    }
+  }
+
+  // The showroom wordmark hanging in the mouth of the tunnel.
+  const wordmark = new THREE.Mesh(
+    new THREE.PlaneGeometry(16, 4.8),
+    new THREE.MeshBasicMaterial({
+      map: wordmarkMap,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      fog: false,
+    }),
+  );
+  wordmark.position.set(0, 8.6, 39.6);
+  wordmark.rotation.y = Math.PI;
+  exterior.add(wordmark);
 
   const spillMat = new THREE.MeshBasicMaterial({
     map: doorSpillTexture(),
@@ -529,7 +684,7 @@ export function createGarage(): GarageStage {
     const y = 0.01 + tier * 0.135;
     const z = 0.1 - tier * 0.062;
     box(0.96, 0.022, 0.21, darkSteel, 0, y, z, display);
-    box(0.96, 0.012, 0.014, acid, 0, y + 0.014, z + 0.1, display);
+    box(0.96, 0.012, 0.014, steel, 0, y + 0.014, z + 0.1, display);
     for (let slot = 0; slot < 4; slot++) {
       const paint = diecastPaints[(tier * 4 + slot) % diecastPaints.length];
       const car = new THREE.Group();
@@ -799,8 +954,7 @@ export function createGarage(): GarageStage {
   const setDoor = (open: number): void => {
     doorOpen = Math.max(0, Math.min(1, open));
     roll.scale.y = Math.max(0.035, 1 - doorOpen * 0.965);
-    outsideMat.opacity = doorOpen;
-    spillMat.opacity = doorOpen * 0.5;
+    spillMat.opacity = doorOpen * 0.3;
     doorLight.intensity = 0.15 + doorOpen * 1.05;
   };
 
@@ -827,7 +981,8 @@ export function createGarage(): GarageStage {
     dust.position.y = Math.sin(time * 0.16) * 0.06;
     signMat.opacity = (0.35 + lightLevel * 0.6) * (0.82 + 0.18 * Math.abs(Math.sin(time * 2.1)));
     liftLamp.visible = Math.sin(time * 2.4) > -0.4;
-    spillMat.opacity = doorOpen * (0.46 + 0.06 * Math.sin(time * 1.7));
+    spillMat.opacity = doorOpen * (0.27 + 0.04 * Math.sin(time * 1.7));
+    glowMat.opacity = 0.84 + 0.09 * Math.sin(time * 1.15);
     toolGroup.position.y = Math.sin(time * 0.5) * 0.002;
   };
 
@@ -849,7 +1004,9 @@ export function createGarage(): GarageStage {
       });
       for (const { light } of garageLights) light.dispose();
       concrete.map?.dispose();
-      outsideMat.map?.dispose();
+      asphaltMap.dispose();
+      portalMap.dispose();
+      wordmarkMap.dispose();
       spillMat.map?.dispose();
       stripMat.dispose();
       bulbMat.dispose();

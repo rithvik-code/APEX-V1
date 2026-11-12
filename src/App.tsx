@@ -1626,6 +1626,10 @@ export default function App() {
           initialGoal={takeoverGoal}
         />
       )}
+
+      <span className="credit" aria-label="Made by Rithvik">
+        MADE BY RITHVIK
+      </span>
     </div>
   );
 }
