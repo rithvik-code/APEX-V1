@@ -7,7 +7,7 @@ import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { createSupercar, badgeTexture, numberTexture, type Assembly, type VehicleAnchor } from "./car";
 import { createSuperbike } from "./bike";
-import { createGarage, type GarageHotspot, type GarageStage } from "./garage";
+import { createGarage, type GarageHotspot, type GarageStage, type GarageTerminalState } from "./garage";
 import { AeroFlow, buildBikeStreamlines, buildCarStreamlines } from "./aero";
 import { WeatherSystem } from "./weather";
 import { buildTrack, type Track } from "./track";
@@ -396,6 +396,7 @@ export class ApexEngine {
   private garageLift = 0;
   private garageLiftTarget = 0;
   private garageService = false;
+  private garageServiceOpen = 0;
   private garageSeated = false;
   private garageVirtualForward = 0;
   private garageVirtualStrafe = 0;
@@ -1331,6 +1332,8 @@ export class ApexEngine {
     // Pulsing accent is animated in animateCareer; reset baselines here.
     this.car.accentMats[1].opacity = 0.55;
     this.bike.accent.opacity = 0.85;
+
+    this.garageStage?.setDiecast(u);
   }
 
   private animateCareer(): void {
@@ -1634,9 +1637,18 @@ export class ApexEngine {
     this.garageStage?.setTrophies(count);
   }
 
+  setGarageTerminal(patch: Partial<GarageTerminalState>): void {
+    this.garageStage?.setTerminal(patch);
+  }
+
   private garageInteract(): void {
     if (!this.garageFocus) return;
-    this.emitGarage({ type: "action", id: this.garageFocus.id });
+    const id = this.garageFocus.id;
+    if (id === "car" || id === "bike") {
+      this.emitGarage({ type: "driveout", vehicle: id });
+      return;
+    }
+    this.emitGarage({ type: "action", id });
   }
 
   private loadGarageState(): void {
@@ -1670,7 +1682,38 @@ export class ApexEngine {
 
   captureFrame(): string {
     this.composer.render();
-    return this.renderer.domElement.toDataURL("image/png");
+    const source = this.renderer.domElement;
+    const out = document.createElement("canvas");
+    out.width = source.width;
+    out.height = source.height;
+    const ctx = out.getContext("2d");
+    if (!ctx) return source.toDataURL("image/png");
+    ctx.drawImage(source, 0, 0);
+
+    // Every frame leaves the bay with the APEX mark and the maker's name.
+    const w = out.width;
+    const h = out.height;
+    const unit = Math.max(1, Math.min(w, h) / 900);
+    const pad = 34 * unit;
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "rgba(9,11,9,0.42)";
+    ctx.fillRect(0, h - 132 * unit, 420 * unit, 132 * unit);
+    ctx.fillStyle = "#c8ff16";
+    ctx.font = `800 ${Math.round(52 * unit)}px Archivo, "Helvetica Neue", Arial, sans-serif`;
+    ctx.fillText("APEX", pad, h - 66 * unit);
+    ctx.fillStyle = "rgba(233,237,232,0.86)";
+    ctx.font = `600 ${Math.round(17 * unit)}px "IBM Plex Mono", "Courier New", monospace`;
+    ctx.fillText("MADE BY RITHVIK", pad, h - 38 * unit);
+    ctx.fillStyle = "rgba(200,255,22,0.85)";
+    ctx.fillRect(pad, h - 92 * unit, 150 * unit, 3 * unit);
+
+    ctx.fillStyle = "rgba(9,11,9,0.42)";
+    ctx.fillRect(w - 250 * unit, pad - 22 * unit, 216 * unit, 44 * unit);
+    ctx.fillStyle = "rgba(233,237,232,0.86)";
+    ctx.font = `600 ${Math.round(15 * unit)}px "IBM Plex Mono", "Courier New", monospace`;
+    ctx.fillText("BAY 01 / PRIVATE GARAGE", w - 250 * unit + 12 * unit, pad + 6 * unit);
+
+    return out.toDataURL("image/png");
   }
 
   enterGarage(): void {
@@ -1983,6 +2026,18 @@ export class ApexEngine {
     }
     this.carGroup.rotation.y = 0;
     stage.setRev(this.revRpm, this.revKick);
+    stage.setService(this.garageService);
+    stage.setTerminal({
+      rpm: this.revRpm,
+      door: this.garageDoorTarget > 0.5,
+      lift: this.garageLiftTarget > 0.5,
+      service: this.garageService,
+    });
+
+    // Service mode cracks the power dome open so the V12 is on show.
+    const serviceTarget = this.garageService ? 1 : 0;
+    this.garageServiceOpen += (serviceTarget - this.garageServiceOpen) * (1 - Math.exp(-dt * 2.8));
+    this.car.service.setOpen(this.garageServiceOpen);
 
     this.engineTime += dt * (1 + this.revRpm * 30);
     this.car.engine.update(this.engineTime);

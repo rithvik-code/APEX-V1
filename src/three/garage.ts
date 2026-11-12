@@ -1127,10 +1127,12 @@ export function createGarage(): GarageStage {
   const catHead = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), fur);
   catHead.position.set(0, 0.34, 0.33);
   cat.add(catHead);
+  const catEars: THREE.Mesh[] = [];
   for (const side of [-1, 1]) {
     const ear = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.07, 6), furLight);
     ear.position.set(side * 0.06, 0.43, 0.33);
     cat.add(ear);
+    catEars.push(ear);
     const leg = box(0.045, 0.14, 0.045, furLight, side * 0.085, 0.08, 0.15, cat);
     leg.rotation.x = 0.1;
     box(0.045, 0.14, 0.045, furLight, side * 0.085, 0.08, -0.16, cat);
@@ -1410,6 +1412,8 @@ export function createGarage(): GarageStage {
     { id: "trophies", label: "TROPHY WALL", position: new THREE.Vector3(7.1, 2.1, -3.1), radius: 1.9 },
     { id: "cat", label: "THE BAY CAT", position: new THREE.Vector3(6.05, 0.3, 2.6), radius: 1.7 },
     { id: "launch", label: "LAUNCH PRACTICE", position: new THREE.Vector3(3.6, 0.3, 6.0), radius: 2 },
+    { id: "car", label: "TAKE THE CAR OUT", position: new THREE.Vector3(0, 1.1, 0.2), radius: 3.1 },
+    { id: "bike", label: "TAKE THE BIKE OUT", position: new THREE.Vector3(5.5, 0.9, 3.4), radius: 2.1 },
   ];
 
   const ringMat = new THREE.MeshBasicMaterial({
@@ -1440,10 +1444,28 @@ export function createGarage(): GarageStage {
   let revRpm = 0;
   let revKick = 0;
   let lastTach = -1;
+  let serviceTarget = 0;
+  let serviceT = 0;
+  let catAlert = 0;
+  let terminalClock = 0;
 
   const setRev = (rpm: number, kick: number): void => {
     revRpm = Math.max(0, Math.min(1.12, rpm));
     revKick = Math.max(0, Math.min(1, kick));
+  };
+
+  const setService = (on: boolean): void => {
+    serviceTarget = on ? 1 : 0;
+  };
+
+  const setTerminal = (patch: Partial<GarageTerminalState>): void => {
+    Object.assign(terminalState, patch);
+  };
+
+  const setDiecast = (unlocks: ReadonlySet<string>): void => {
+    for (const item of diecastCars) {
+      item.group.visible = diecastUnlocked(item.entry, unlocks);
+    }
   };
 
   const setLift = (raised: number): void => {
@@ -1509,6 +1531,24 @@ export function createGarage(): GarageStage {
     pylonMat.opacity = 0.82 + 0.16 * Math.sin(time * 1.4);
     toolGroup.position.y = Math.sin(time * 0.5) * 0.002;
 
+    // Service mode: the wall of tools comes down and gets laid out on the floor.
+    serviceT += (serviceTarget - serviceT) * (1 - Math.exp(-dt * 2.6));
+    if (Math.abs(serviceT - serviceTarget) < 0.001) serviceT = serviceTarget;
+    for (const tool of tools) {
+      tool.node.position.lerpVectors(tool.home, tool.rest, serviceT);
+      tool.node.position.y += Math.sin(Math.PI * serviceT) * 0.5;
+      tool.node.quaternion.slerpQuaternions(tool.homeQuat, tool.restQuat, serviceT);
+    }
+
+    // Bay terminal repaints on a slow tick so the canvas upload stays cheap.
+    terminalClock += dt;
+    if (terminalClock > 0.09) {
+      terminalClock = 0;
+      terminalState.rpm = revRpm;
+      drawTerminal(terminal.ctx, terminalState, time);
+      terminalTexture.needsUpdate = true;
+    }
+
     // Tachometer + shift lights.
     if (Math.abs(revRpm - lastTach) > 0.003 || revKick > 0.06) {
       drawTach(tach.ctx, revRpm, revKick);
@@ -1539,14 +1579,30 @@ export function createGarage(): GarageStage {
       positions.needsUpdate = true;
     }
 
-    // The cat patrols its corner and never hurries.
-    cat.position.x = 6.05 + Math.sin(time * 0.17) * 0.55;
-    cat.position.z = 2.6 + Math.cos(time * 0.23) * 0.85;
-    cat.rotation.y = Math.sin(time * 0.17) * 0.7;
-    catBody.position.y = 0.2 + Math.sin(time * 1.7) * 0.006;
-    catHead.rotation.y = Math.sin(time * 0.6) * 0.4;
+    // The cat patrols its corner and never hurries — until the V12 wakes up.
+    const alertTarget = Math.min(1, revRpm * 1.25 + revKick * 0.6);
+    catAlert += (alertTarget - catAlert) * (1 - Math.exp(-dt * 6));
+    const drift = 1 - catAlert * 0.75;
+    cat.position.x = 6.05 + Math.sin(time * 0.17) * 0.55 * drift;
+    cat.position.z = 2.6 + Math.cos(time * 0.23) * 0.85 * drift;
+    cat.rotation.y = Math.sin(time * 0.17) * 0.7 * drift;
+    catBody.position.y = 0.2 - catAlert * 0.035 + Math.sin(time * 1.7) * 0.006;
+    const toCar = Math.atan2(0 - cat.position.x, 0.2 - cat.position.z);
+    catHead.rotation.y = THREE.MathUtils.lerp(
+      Math.sin(time * 0.6) * 0.4,
+      toCar - cat.rotation.y,
+      catAlert,
+    );
+    catHead.rotation.x = catAlert * 0.12;
     catTail.rotation.z = Math.sin(time * 2.6) * 0.42;
-    catTail.rotation.x = Math.sin(time * 1.3) * 0.18;
+    catTail.rotation.x = THREE.MathUtils.lerp(
+      Math.sin(time * 1.3) * 0.18,
+      -0.95,
+      catAlert,
+    );
+    for (const ear of catEars) {
+      ear.rotation.x = catAlert * -0.45;
+    }
 
     if (activeRing) activeRing.rotation.z += dt * 0.5;
     ringMat.opacity = 0.26 + 0.16 * Math.sin(time * 3.6);
@@ -1565,6 +1621,9 @@ export function createGarage(): GarageStage {
     setLift,
     setTrophies,
     setActiveHotspot,
+    setTerminal,
+    setDiecast,
+    setService,
     hotspots,
     dispose: () => {
       root.traverse((object) => {
@@ -1588,6 +1647,7 @@ export function createGarage(): GarageStage {
       ringGeo.dispose();
       rainGeo.dispose();
       rainMat.dispose();
+      terminalTexture.dispose();
     },
   };
 }
