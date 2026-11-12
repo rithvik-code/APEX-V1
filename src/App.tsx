@@ -922,6 +922,7 @@ export default function App() {
     const on = sound.toggle();
     setAudioOn(on);
     if (!on) engineRef.current?.endRev();
+    if (on && garage) sound.startIdle("car");
   };
 
   const revHoldProps = (vehicle: "car" | "bike") => ({
@@ -1694,6 +1695,21 @@ export default function App() {
           onRevEnd={revEnd}
           onReplay={replayGarage}
           onExit={closeGarage}
+          focus={garageFocus}
+          action={garageAction}
+          onInteract={runGarageAction}
+          onMove={garageMove}
+          doorOpen={garageBits.door}
+          liftUp={garageBits.lift}
+          service={garageBits.service}
+          paint={scene.paint}
+          onPaint={(patch) =>
+            updateScene({ paint: { ...sceneRef.current.paint, ...patch } })
+          }
+          onDriveOut={driveOutGarage}
+          onCapture={garageCapture}
+          onReward={garageReward}
+          trophies={trophyCount}
         />
       )}
 

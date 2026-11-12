@@ -8354,6 +8354,10 @@ body.garage-open .vignette {
   left: 22px;
   bottom: 22px;
   width: 336px;
+  max-height: calc(100vh - 116px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(200, 255, 22, 0.35) transparent;
   padding: 20px 20px 18px;
   pointer-events: auto;
   background: linear-gradient(160deg, rgba(9, 12, 11, 0.94), rgba(5, 6, 7, 0.78));
@@ -8449,6 +8453,81 @@ body.garage-open .vignette {
   gap: 6px;
 }
 
+.garage__toggle-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.garage__toggle-row button {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 7.5px;
+  letter-spacing: 0.12em;
+  text-align: left;
+  transition:
+    border-color 0.2s,
+    color 0.2s;
+}
+
+.garage__toggle-row b {
+  color: var(--paper-soft);
+  font-size: 8.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+}
+
+.garage__toggle-row button:hover {
+  border-color: var(--line-soft);
+  color: var(--paper);
+}
+
+.garage__toggle-row button.is-on {
+  border-color: rgba(200, 255, 22, 0.42);
+  color: var(--acid);
+  background: rgba(200, 255, 22, 0.05);
+}
+
+.garage__toggle-row button.is-on b {
+  color: var(--acid);
+}
+
+.garage__chips {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.garage__chips button {
+  min-height: 30px;
+  border: 1px dashed var(--line-soft);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 7.5px;
+  letter-spacing: 0.12em;
+  transition:
+    border-color 0.2s,
+    color 0.2s,
+    background 0.2s;
+}
+
+.garage__chips button:hover {
+  border-color: var(--acid);
+  color: var(--acid);
+  background: rgba(200, 255, 22, 0.05);
+}
+
 .garage__actions button {
   display: flex;
   align-items: center;
@@ -8528,9 +8607,574 @@ body.garage-open .vignette {
   transform: translate(-50%, -50%);
 }
 
+/* ---- Interaction prompt, toasts and sheets ----------------------------- */
+
+.garage__focus {
+  position: absolute;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px 9px 9px;
+  border: 1px solid rgba(200, 255, 22, 0.5);
+  background: rgba(5, 7, 6, 0.82);
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  pointer-events: auto;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  animation: fadeUp 0.25s var(--ease) both;
+}
+
+.garage__focus kbd {
+  padding: 3px 8px;
+  background: var(--acid);
+  color: #050607;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.garage__focus:hover {
+  background: var(--acid);
+  color: #050607;
+}
+
+.garage__toast {
+  position: absolute;
+  left: 50%;
+  bottom: 152px;
+  transform: translateX(-50%);
+  max-width: 78vw;
+  overflow: hidden;
+  padding: 9px 16px;
+  border: 1px solid var(--line);
+  background: rgba(5, 7, 6, 0.9);
+  color: var(--acid);
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: 0.14em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  animation: fadeUp 0.25s var(--ease) both;
+}
+
+.garage__sheet {
+  position: absolute;
+  right: 22px;
+  top: 92px;
+  width: 380px;
+  max-height: calc(100vh - 190px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(200, 255, 22, 0.35) transparent;
+  padding: 18px;
+  pointer-events: auto;
+  background: linear-gradient(160deg, rgba(9, 12, 11, 0.96), rgba(5, 6, 7, 0.9));
+  border: 1px solid var(--line);
+  backdrop-filter: blur(18px) saturate(125%);
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(233, 237, 232, 0.05);
+  animation: fadeUp 0.35s var(--ease) both;
+}
+
+.garage__sheet > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--acid);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+}
+
+.garage__sheet > header button {
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 7.5px;
+  letter-spacing: 0.12em;
+}
+
+.garage__sheet > header button:hover {
+  border-color: var(--line-soft);
+  color: var(--paper);
+}
+
+.garage__sheet p {
+  margin: 12px 0;
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.6;
+  letter-spacing: 0.03em;
+}
+
+.garage__sheet-label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--dim);
+  font-size: 7.5px;
+  letter-spacing: 0.18em;
+}
+
+.garage__sheet button {
+  font-family: var(--mono);
+  cursor: pointer;
+}
+
+.garage__shelf-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.garage__shelf-grid button {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 6px;
+  border: 1px solid var(--line-soft);
+  background: transparent;
+  color: var(--dim);
+  font-size: 7px;
+  letter-spacing: 0.08em;
+  text-align: left;
+}
+
+.garage__shelf-grid button b {
+  color: var(--paper-soft);
+  font-size: 8px;
+  font-weight: 500;
+}
+
+.garage__shelf-grid button.is-active {
+  border-color: var(--acid);
+  color: var(--acid);
+  box-shadow: inset 0 0 12px rgba(200, 255, 22, 0.12);
+}
+
+.garage__spec {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 12px;
+  padding: 12px;
+  border-left: 2px solid var(--acid);
+  background: rgba(200, 255, 22, 0.05);
+}
+
+.garage__spec b {
+  font-family: var(--display);
+  font-size: 20px;
+}
+
+.garage__spec span {
+  color: var(--acid);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+}
+
+.garage__spec i {
+  color: var(--muted);
+  font-size: 8.5px;
+  font-style: normal;
+  letter-spacing: 0.08em;
+}
+
+.garage__paint {
+  margin-bottom: 14px;
+}
+
+.garage__paint-swatches {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.garage__paint-swatches button {
+  position: relative;
+  height: 46px;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--line);
+}
+
+.garage__paint-swatches button span {
+  position: absolute;
+  left: 6px;
+  bottom: 5px;
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 7px;
+  letter-spacing: 0.12em;
+  text-shadow: 0 1px 3px #000;
+}
+
+.garage__paint-swatches button.is-active {
+  border-color: var(--acid);
+  box-shadow: 0 0 0 1px var(--acid);
+}
+
+.garage__paint-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.garage__paint-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 7.5px;
+  letter-spacing: 0.12em;
+}
+
+.garage__paint-row input[type="text"],
+.garage__paint-row input:not([type]) {
+  width: 44px;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  background: rgba(5, 7, 6, 0.6);
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+}
+
+.garage__paint-toggle input {
+  accent-color: var(--acid);
+}
+
+.garage__paint-row > button {
+  margin-left: auto;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--dim);
+  font-size: 7.5px;
+  letter-spacing: 0.12em;
+}
+
+.garage__computer .garage__toggle-row {
+  grid-template-columns: 1fr;
+  margin-top: 14px;
+}
+
+.garage__knowledge {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.garage__knowledge p {
+  margin: 0 0 8px;
+  font-size: 8px;
+}
+
+.garage__knowledge button {
+  padding: 7px 10px;
+  border: 1px solid rgba(200, 255, 22, 0.4);
+  background: transparent;
+  color: var(--acid);
+  font-size: 7.5px;
+  letter-spacing: 0.14em;
+}
+
+.garage__knowledge i {
+  display: block;
+  margin-top: 6px;
+  color: #ff9a82;
+  font-size: 7.5px;
+  font-style: normal;
+}
+
+.garage__tally-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.garage__tally-grid span {
+  padding: 8px;
+  border: 1px solid var(--line-soft);
+  color: var(--dim);
+  font-size: 7.5px;
+  letter-spacing: 0.1em;
+}
+
+.garage__tally-grid span.is-earned {
+  border-color: rgba(200, 255, 22, 0.35);
+  background: rgba(200, 255, 22, 0.05);
+  color: var(--acid);
+}
+
+.garage__stations {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.garage__stations button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  background: transparent;
+  color: var(--dim);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-align: left;
+}
+
+.garage__stations b {
+  color: var(--paper-soft);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+}
+
+.garage__stations button.is-active {
+  border-color: var(--acid);
+  color: var(--acid);
+}
+
+.garage__stations button.is-active b {
+  color: var(--acid);
+}
+
+.garage__launch-note {
+  margin-top: 0 !important;
+}
+
+.garage__meter {
+  position: relative;
+  height: 26px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: linear-gradient(90deg, rgba(200, 255, 22, 0.08), rgba(200, 255, 22, 0.02));
+}
+
+.garage__meter-band {
+  position: absolute;
+  left: 62%;
+  top: 0;
+  bottom: 0;
+  width: 16%;
+  border-left: 1px solid var(--acid);
+  border-right: 1px solid var(--acid);
+  background: rgba(200, 255, 22, 0.26);
+}
+
+.garage__meter-needle {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: var(--paper);
+  box-shadow: 0 0 10px #fff;
+  transition: left 0.04s linear;
+}
+
+.garage__meter-labels {
+  display: flex;
+  justify-content: space-between;
+  margin: 4px 0 12px;
+  color: var(--dim);
+  font-size: 7px;
+  letter-spacing: 0.1em;
+}
+
+.garage__launch-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 54px;
+  padding: 14px;
+  border: 1px solid rgba(200, 255, 22, 0.45);
+  background: transparent;
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  touch-action: none;
+}
+
+.garage__launch-btn b {
+  color: var(--acid);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+}
+
+.garage__launch-result {
+  margin-top: 12px !important;
+  padding: 10px;
+  border: 1px solid rgba(255, 154, 130, 0.3);
+  color: #ffb4a0 !important;
+}
+
+.garage__launch-result.is-perfect {
+  border-color: rgba(200, 255, 22, 0.4);
+  color: var(--acid) !important;
+}
+
+/* ---- Touch D-pad -------------------------------------------------------- */
+
+.garage__pad {
+  display: none;
+  position: absolute;
+  right: 18px;
+  bottom: 64px;
+  grid-template-columns: repeat(3, 46px);
+  grid-template-rows: repeat(3, 46px);
+  gap: 4px;
+  pointer-events: auto;
+}
+
+.garage__pad button {
+  border: 1px solid var(--line);
+  background: rgba(5, 7, 6, 0.8);
+  color: var(--paper-soft);
+  font-family: var(--mono);
+  font-size: 11px;
+  touch-action: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.garage__pad-up {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.garage__pad-left {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.garage__pad-e {
+  grid-column: 2;
+  grid-row: 2;
+  border-color: rgba(200, 255, 22, 0.45) !important;
+  color: var(--acid) !important;
+  font-weight: 600;
+}
+
+.garage__pad-right {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.garage__pad-down {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+@media (pointer: coarse) {
+  .garage__pad {
+    display: grid;
+  }
+}
+
+/* ---- Photo mode --------------------------------------------------------- */
+
+.garage--photo .garage__backdrop {
+  background: radial-gradient(
+    ellipse at 50% 52%,
+    rgba(0, 0, 0, 0) 42%,
+    rgba(0, 0, 0, 0.55) 100%
+  );
+}
+
+.garage__photo {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 22px;
+  pointer-events: none;
+}
+
+.garage__photo-tag {
+  align-self: flex-start;
+  padding: 6px 10px;
+  border: 1px solid rgba(200, 255, 22, 0.4);
+  background: rgba(5, 7, 6, 0.6);
+  color: var(--acid);
+  font-size: 8px;
+  letter-spacing: 0.2em;
+}
+
+.garage__photo-actions {
+  align-self: center;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  pointer-events: auto;
+}
+
+.garage__photo-actions button {
+  padding: 12px 20px;
+  border: 1px solid rgba(200, 255, 22, 0.5);
+  background: rgba(5, 7, 6, 0.85);
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.garage__photo-actions button:first-child {
+  border-color: var(--acid);
+  background: var(--acid);
+  color: #050607;
+  font-weight: 600;
+}
+
+.garage__flash {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  pointer-events: none;
+  animation: garage-flash 0.22s ease-out forwards;
+}
+
+@keyframes garage-flash {
+  from {
+    opacity: 0.9;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
 @media (max-width: 860px) {
   .garage__panel {
     width: 300px;
+  }
+
+  .garage__sheet {
+    width: 340px;
   }
 }
 
@@ -8551,6 +9195,7 @@ body.garage-open .vignette {
     right: 12px;
     bottom: 12px;
     width: auto;
+    max-height: 48vh;
     padding: 14px;
   }
 
@@ -8562,6 +9207,26 @@ body.garage-open .vignette {
     display: none;
   }
 
+  .garage__sheet {
+    left: 12px;
+    right: 12px;
+    top: auto;
+    bottom: 12px;
+    width: auto;
+    max-height: 72vh;
+  }
+
+  .garage__focus {
+    top: 58px;
+    bottom: auto;
+    max-width: calc(100vw - 24px);
+  }
+
+  .garage__toast {
+    top: 100px;
+    bottom: auto;
+  }
+
   .garage__hint {
     display: none;
   }
@@ -8570,7 +9235,10 @@ body.garage-open .vignette {
 @media (prefers-reduced-motion: reduce) {
   .garage__bar,
   .garage__panel,
-  .garage__hint {
+  .garage__hint,
+  .garage__sheet,
+  .garage__focus,
+  .garage__toast {
     animation: none;
   }
 }

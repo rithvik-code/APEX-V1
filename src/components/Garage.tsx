@@ -248,6 +248,18 @@ export function Garage({
   }, [toast]);
 
   useEffect(() => {
+    if (!photo && !panel) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopImmediatePropagation();
+      if (photo) setPhoto(false);
+      else setPanel(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [photo, panel]);
+
+  useEffect(() => {
     if (!action || action.seq === lastAction.current) return;
     lastAction.current = action.seq;
     switch (action.id) {
