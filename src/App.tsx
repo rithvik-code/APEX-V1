@@ -153,6 +153,10 @@ export default function App() {
   const [driveSetup, setDriveSetup] = useState<DriveSetup>(DEFAULT_DRIVE_SETUP);
   const driveSetupRef = useRef(driveSetup);
   const [garage, setGarage] = useState(false);
+  const [garageFocus, setGarageFocus] = useState<{ id: string; label: string } | null>(null);
+  const [garageAction, setGarageAction] = useState<{ id: string; seq: number } | null>(null);
+  const [garageBits, setGarageBits] = useState({ door: true, lift: false, service: false });
+  const garageSeq = useRef(0);
   const [portalReady, setPortalReady] = useState(false);
   const [portalPhase, setPortalPhase] = useState<"dive" | "flash" | null>(null);
   const portalReadyRef = useRef(false);
@@ -189,6 +193,7 @@ export default function App() {
   const activeChapter = CHAPTERS.find((c) => c.id === active) ?? CHAPTERS[0];
   const licenceName = currentLicence(career.cp).name;
   const unlockCount = useMemo(() => unlockSet(career).size, [career]);
+  const trophyCount = useMemo(() => Math.min(8, Math.floor(career.cp / 120)), [career.cp]);
 
   const openTakeover = useCallback((goal?: string) => {
     sound.tick("start");
