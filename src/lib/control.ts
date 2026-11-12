@@ -103,6 +103,23 @@ export type ControlState = {
 
 export type OcrLine = { text: string; x: number; y: number; w: number; h: number };
 
+export type WorkspaceFileEntry = {
+  name: string;
+  path: string;
+  ext: string;
+  size: number;
+  mtime: number;
+};
+
+export type WorkspaceFileScan = {
+  files: WorkspaceFileEntry[];
+  total: number;
+  truncated: boolean;
+  scannedAt: number;
+  roots: number;
+  cached: boolean;
+};
+
 const EMPTY_PERMISSIONS: Permissions = CAPABILITIES.reduce(
   (acc, item) => ({ ...acc, [item.key]: false }),
   {} as Permissions,
@@ -416,6 +433,14 @@ export function getHealth(): Promise<ControlHealth> {
 
 export function getState(): Promise<ControlState | null> {
   return request<ControlState | null>("/api/control/state", {}, 6000);
+}
+
+export function getWorkspaceFiles(limit = 360): Promise<WorkspaceFileScan> {
+  return request<WorkspaceFileScan>(
+    `/api/workspace/files?limit=${encodeURIComponent(String(limit))}`,
+    {},
+    9000,
+  );
 }
 
 export function startMission(input: StartMissionInput): Promise<ControlState> {

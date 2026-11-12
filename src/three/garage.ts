@@ -3,12 +3,28 @@ import * as THREE from "three";
 const ACID = 0xc8ff16;
 const ACID_HEX = "#c8ff16";
 
-export type GarageView = "third" | "first";
+export type GarageBoardFile = {
+  name: string;
+  path: string;
+  ext: string;
+  size: number;
+  mtime: number;
+};
+
+export type GarageBoardState = "idle" | "loading" | "ready" | "offline";
+
+export type GarageBoard = {
+  files: GarageBoardFile[];
+  total: number;
+  scannedAt: number;
+  state: GarageBoardState;
+};
 
 export type GarageStage = {
   group: THREE.Group;
   setDoor: (open: number) => void;
   setLights: (level: number) => void;
+  setFiles: (board: GarageBoard | null) => void;
   update: (dt: number, time: number) => void;
   dispose: () => void;
 };
@@ -166,6 +182,285 @@ function posterTexture(index: number): THREE.CanvasTexture {
   ctx.font = "500 15px 'IBM Plex Mono', monospace";
   ctx.fillText("APEX / PRINT 0" + (index + 1), 28, 396);
   return texture(canvas);
+}
+
+function fileAge(mtime: number, now: number): string {
+  const minutes = Math.max(0, Math.round((now - mtime) / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
+function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let out = text;
+  while (out.length > 8 && ctx.measureText(`${out}…`).width > maxWidth) {
+    out = out.slice(0, -1);
+  }
+  return `${out}…`;
+}
+
+const BOARD_PAGE_SIZE = 26;
+const BOARD_ROWS = 13;
+const BOARD_PAGE_SECONDS = 8;
+
+// A physical blackboard for the left wall. The chalk face is one canvas
+// texture: real file metadata is painted on, and it cycles through pages so
+// the whole local scan gets pinned up instead of a truncated first screen.
+function createChalkboard(): {
+  group: THREE.Group;
+  setBoard: (board: GarageBoard | null) => void;
+  update: (dt: number) => void;
+  dispose: () => void;
+} {
+  const width = 1280;
+  const height = 724;
+  const { canvas, ctx } = canvas2d(width, height);
+
+  const grain = document.createElement("canvas");
+  grain.width = width;
+  grain.height = height;
+  const g = grain.getContext("2d");
+  if (!g) throw new Error("2D canvas is unavailable");
+
+  g.fillStyle = "#141a15";
+  g.fillRect(0, 0, width, height);
+  const vignette = g.createRadialGradient(
+    width / 2,
+    height / 2,
+    90,
+    width / 2,
+    height / 2,
+    width * 0.74,
+  );
+  vignette.addColorStop(0, "rgba(70,88,64,0.26)");
+  vignette.addColorStop(0.65, "rgba(23,31,23,0.18)");
+  vignette.addColorStop(1, "rgba(5,8,6,0.55)");
+  g.fillStyle = vignette;
+  g.fillRect(0, 0, width, height);
+  for (let i = 0; i < 34; i++) {
+    g.fillStyle = `rgba(210,226,198,${0.012 + Math.random() * 0.028})`;
+    g.beginPath();
+    g.ellipse(
+      Math.random() * width,
+      Math.random() * height,
+      60 + Math.random() * 190,
+      18 + Math.random() * 60,
+      Math.random() * Math.PI,
+      0,
+      Math.PI * 2,
+    );
+    g.fill();
+  }
+  for (let i = 0; i < 3000; i++) {
+    g.fillStyle = `rgba(226,238,214,${0.03 + Math.random() * 0.1})`;
+    g.fillRect(Math.random() * width, Math.random() * height, 1.2, 1.2);
+  }
+  g.strokeStyle = "rgba(226,238,214,0.03)";
+  g.lineWidth = 14;
+  for (let i = 0; i < 5; i++) {
+    g.beginPath();
+    g.moveTo(-40, 130 + i * 128);
+    g.bezierCurveTo(width * 0.3, 90 + i * 140, width * 0.7, 190 + i * 112, width + 40, 140 + i * 124);
+    g.stroke();
+  }
+
+  const map = new THREE.CanvasTexture(canvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.anisotropy = 4;
+  map.wrapS = THREE.ClampToEdgeWrapping;
+  map.wrapT = THREE.ClampToEdgeWrapping;
+
+  const faceMat = new THREE.MeshStandardMaterial({
+    map,
+    roughness: 0.94,
+    metalness: 0.02,
+    emissive: 0xffffff,
+    emissiveMap: map,
+    emissiveIntensity: 0.24,
+  });
+  const frameMat = new THREE.MeshStandardMaterial({
+    color: 0x3c2a19,
+    roughness: 0.86,
+    metalness: 0.04,
+  });
+  const chalkMat = new THREE.MeshStandardMaterial({
+    color: 0xe9e6d8,
+    roughness: 0.95,
+    metalness: 0,
+  });
+
+  const group = new THREE.Group();
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(4.72, 2.76, 0.08), frameMat);
+  group.add(frame);
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(4.5, 2.54), faceMat);
+  face.position.z = 0.046;
+  group.add(face);
+  const tray = new THREE.Mesh(new THREE.BoxGeometry(4.62, 0.09, 0.17), frameMat);
+  tray.position.set(0, -1.36, 0.1);
+  group.add(tray);
+  for (const [x, tilt] of [
+    [-1.25, 0.1],
+    [-0.72, -0.16],
+  ] as const) {
+    const stick = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.028, 0.028), chalkMat);
+    stick.position.set(x, -1.3, 0.12);
+    stick.rotation.y = tilt;
+    group.add(stick);
+  }
+  const eraser = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.08, 0.11), frameMat);
+  eraser.position.set(1.5, -1.29, 0.12);
+  group.add(eraser);
+
+  let board: GarageBoard | null = null;
+  let page = 0;
+  let timer = 0;
+
+  const pageCount = (): number =>
+    Math.max(1, Math.ceil((board?.files.length ?? 0) / BOARD_PAGE_SIZE));
+
+  const clock = (ms: number): string =>
+    new Date(ms).toLocaleTimeString("en-GB", { hour12: false });
+
+  const draw = (): void => {
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(grain, 0, 0);
+    ctx.textBaseline = "alphabetic";
+    ctx.textAlign = "left";
+
+    const state = board?.state ?? "idle";
+    const ready = state === "ready" && board !== null;
+
+    ctx.fillStyle = "rgba(240,246,232,0.94)";
+    ctx.font = "800 38px Archivo, sans-serif";
+    ctx.fillText("LOCAL FILES", 46, 68);
+    ctx.font = "600 15px 'IBM Plex Mono', monospace";
+    ctx.fillStyle = "rgba(200,255,22,0.72)";
+    ctx.fillText("THE BLACKBOARD / HOME ROOTS MERGED", 46, 94);
+
+    ctx.textAlign = "right";
+    ctx.font = "500 15px 'IBM Plex Mono', monospace";
+    ctx.fillStyle = "rgba(206,218,199,0.68)";
+    if (ready && board) {
+      ctx.fillText(`${board.total} FILES INDEXED`, width - 46, 58);
+      ctx.fillText(
+        `SCAN ${clock(board.scannedAt)} · PAGE ${page + 1}/${pageCount()}`,
+        width - 46,
+        84,
+      );
+    } else {
+      ctx.fillText(state.toUpperCase(), width - 46, 58);
+      ctx.fillText("READ ONLY · NAMES ONLY", width - 46, 84);
+    }
+
+    ctx.textAlign = "left";
+    ctx.strokeStyle = "rgba(200,255,22,0.5)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(46, 112);
+    ctx.lineTo(width - 46, 112);
+    ctx.stroke();
+
+    if (!ready || !board || board.files.length === 0) {
+      const title =
+        state === "loading"
+          ? "SCANNING HOME ROOTS…"
+          : state === "offline"
+            ? "LOCAL LINK OFFLINE"
+            : state === "ready"
+              ? "NO FILES IN SCANNED ROOTS"
+              : "AWAITING LOCAL LINK";
+      const detail =
+        state === "loading"
+          ? "READING NAMES AND SIZES · NO CONTENTS LEAVE THE MACHINE"
+          : state === "offline"
+            ? "RUN npm run apex, THEN REOPEN THE GARAGE"
+            : state === "ready"
+              ? "ADD A FILE ROOT IN ~/.apex/control.json"
+              : "OPEN THE BAY TO SYNC THIS MACHINE";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "rgba(238,244,230,0.88)";
+      ctx.font = "700 30px 'IBM Plex Mono', monospace";
+      ctx.fillText(title, width / 2, 340);
+      ctx.fillStyle = "rgba(180,194,172,0.66)";
+      ctx.font = "500 16px 'IBM Plex Mono', monospace";
+      ctx.fillText(detail, width / 2, 382);
+      ctx.textAlign = "left";
+    } else {
+      const start = page * BOARD_PAGE_SIZE;
+      const slice = board.files.slice(start, start + BOARD_PAGE_SIZE);
+      const now = Date.now();
+      for (let i = 0; i < slice.length; i++) {
+        const item = slice[i];
+        const col = Math.floor(i / BOARD_ROWS);
+        const row = i % BOARD_ROWS;
+        const x = col === 0 ? 46 : 652;
+        const y = 164 + row * 38;
+        ctx.font = "700 15px 'IBM Plex Mono', monospace";
+        ctx.fillStyle = "rgba(200,255,22,0.7)";
+        ctx.fillText(item.ext.slice(0, 4).padEnd(4, " "), x, y);
+        ctx.font = "500 17px 'IBM Plex Mono', monospace";
+        ctx.fillStyle = "rgba(236,242,228,0.9)";
+        ctx.fillText(fitText(ctx, item.path, 430), x + 54, y);
+        ctx.font = "500 14px 'IBM Plex Mono', monospace";
+        ctx.fillStyle = "rgba(168,182,162,0.66)";
+        ctx.textAlign = "right";
+        ctx.fillText(fileAge(item.mtime, now), x + 552, y);
+        ctx.textAlign = "left";
+      }
+      ctx.strokeStyle = "rgba(226,238,214,0.16)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(46, 650);
+      ctx.lineTo(width - 46, 650);
+      ctx.stroke();
+      ctx.font = "500 14px 'IBM Plex Mono', monospace";
+      ctx.fillStyle = "rgba(182,196,174,0.62)";
+      ctx.fillText("CHALK SYNC · REAL LOCAL SCAN · 30s CACHE", 46, 682);
+      ctx.textAlign = "right";
+      const end = Math.min(start + BOARD_PAGE_SIZE, board.files.length);
+      ctx.fillText(
+        `SHOWING ${start + 1}-${end} OF ${board.files.length}`,
+        width - 46,
+        682,
+      );
+      ctx.textAlign = "left";
+    }
+
+    map.needsUpdate = true;
+  };
+
+  const setBoard = (next: GarageBoard | null): void => {
+    board = next;
+    page = 0;
+    timer = 0;
+    draw();
+  };
+
+  const update = (dt: number): void => {
+    if (!board || board.state !== "ready" || pageCount() <= 1) return;
+    timer += dt;
+    if (timer >= BOARD_PAGE_SECONDS) {
+      timer = 0;
+      page = (page + 1) % pageCount();
+      draw();
+    }
+  };
+
+  draw();
+
+  return {
+    group,
+    setBoard,
+    update,
+    dispose: () => {
+      map.dispose();
+      faceMat.dispose();
+      frameMat.dispose();
+      chalkMat.dispose();
+    },
+  };
 }
 
 export function createGarage(): GarageStage {
@@ -602,6 +897,12 @@ export function createGarage(): GarageStage {
   trophy(7.5, 2.37, -4.0, 0.6);
   trophy(7.5, 2.37, -2.9, 0.55);
 
+  // Blackboard: the local file index chalked onto the left wall.
+  const board = createChalkboard();
+  board.group.position.set(-7.68, 2.24, 2.6);
+  board.group.rotation.y = Math.PI / 2;
+  root.add(board.group);
+
   /* ------------------------------------------------------------------ */
   /* Tyre stack, shelves, bike mat, fridge                              */
   /* ------------------------------------------------------------------ */
@@ -676,6 +977,8 @@ export function createGarage(): GarageStage {
   benchLight.position.set(0, 2.6, -7.2);
   const trophyLight = addLight(new THREE.PointLight(0xffd28a, 5, 5, 2), 5);
   trophyLight.position.set(7.1, 2.3, -3.1);
+  const boardLight = addLight(new THREE.PointLight(0xffeccb, 6, 6, 2), 6);
+  boardLight.position.set(-6.7, 3.05, 2.6);
   const doorLight = addLight(new THREE.DirectionalLight(0xdfeaff, 1.1), 1.1);
   doorLight.position.set(0, 4, 14);
   doorLight.target.position.set(0, 0.8, 1);
@@ -775,6 +1078,7 @@ export function createGarage(): GarageStage {
     liftLamp.visible = Math.sin(time * 2.4) > -0.4;
     spillMat.opacity = doorOpen * (0.46 + 0.06 * Math.sin(time * 1.7));
     toolGroup.position.y = Math.sin(time * 0.5) * 0.002;
+    board.update(dt);
   };
 
   setDoor(0);
@@ -784,8 +1088,10 @@ export function createGarage(): GarageStage {
     group: root,
     setDoor,
     setLights,
+    setFiles: board.setBoard,
     update,
     dispose: () => {
+      board.dispose();
       root.traverse((object) => {
         const mesh = object as THREE.Mesh;
         if (mesh.geometry) mesh.geometry.dispose();
