@@ -117,6 +117,10 @@ export function createSupercar(): {
   stripe: THREE.Mesh;
   exhaustGlow: THREE.MeshBasicMaterial;
   headlamp: THREE.MeshBasicMaterial;
+  service: {
+    cover: THREE.Group;
+    setOpen: (t: number) => void;
+  };
   career: {
     wheelCovers: THREE.Object3D[];
     canards: THREE.Object3D[];
@@ -574,28 +578,40 @@ export function createSupercar(): {
   engineBase.position.set(0, 0.87, -1.5);
   power.add(engineBase);
 
+  // The glass power dome hinges at its rear edge so service mode can lift
+  // the cover clear and expose the V12.
+  const engineCover = new THREE.Group();
+  engineCover.position.set(0, 1.02, -1.96);
+  power.add(engineCover);
+
   const engineGlass = new THREE.Mesh(
     new RoundedBoxGeometry(0.86, 0.26, 0.92, 3, 0.06),
     glass,
   );
-  engineGlass.position.set(0, 1.02, -1.5);
-  power.add(engineGlass);
+  engineGlass.position.set(0, 0, 0.46);
+  engineCover.add(engineGlass);
 
   for (const side of [-1, 1]) {
     const rail = new THREE.Mesh(
       new THREE.BoxGeometry(0.015, 0.02, 0.94),
       acid,
     );
-    rail.position.set(side * 0.42, 1.15, -1.5);
-    power.add(rail);
+    rail.position.set(side * 0.42, 0.13, 0.46);
+    engineCover.add(rail);
   }
 
   const engineVent = new THREE.Mesh(
     new THREE.BoxGeometry(0.62, 0.012, 0.03),
     carbon,
   );
-  engineVent.position.set(0, 1.16, -1.92);
-  power.add(engineVent);
+  engineVent.position.set(0, 0.14, 0.04);
+  engineCover.add(engineVent);
+
+  const setServiceOpen = (t: number): void => {
+    const open = Math.max(0, Math.min(1, t));
+    engineCover.rotation.x = -open * 0.98;
+    engineCover.position.y = 1.02 + open * 0.04;
+  };
 
   // Mirrors
   for (const side of [-1, 1]) {
@@ -833,6 +849,7 @@ export function createSupercar(): {
     stripe,
     exhaustGlow,
     headlamp,
+    service: { cover: engineCover, setOpen: setServiceOpen },
     career: {
       wheelCovers: careerWheelCovers,
       canards: careerCanards,

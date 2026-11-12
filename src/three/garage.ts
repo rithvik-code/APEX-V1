@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { DIE_CAST_CATALOG, diecastUnlocked, type DieCastEntry } from "../lib/diecast";
 
 const ACID = 0xc8ff16;
 const ACID_HEX = "#c8ff16";
@@ -8,6 +9,18 @@ export type GarageHotspot = {
   label: string;
   position: THREE.Vector3;
   radius: number;
+};
+
+export type GarageTerminalState = {
+  cp: number;
+  licence: string;
+  unlocks: number;
+  rpm: number;
+  door: boolean;
+  lift: boolean;
+  service: boolean;
+  paint: string;
+  knowledge: number;
 };
 
 export type GarageStage = {
@@ -21,6 +34,9 @@ export type GarageStage = {
   setLift: (raised: number) => void;
   setTrophies: (count: number) => void;
   setActiveHotspot: (id: string | null) => void;
+  setTerminal: (patch: Partial<GarageTerminalState>) => void;
+  setDiecast: (unlocks: ReadonlySet<string>) => void;
+  setService: (on: boolean) => void;
   hotspots: GarageHotspot[];
 };
 
@@ -187,28 +203,68 @@ function sideSignTexture(): THREE.CanvasTexture {
   return texture(canvas);
 }
 
-function laptopTexture(): THREE.CanvasTexture {
-  const { canvas, ctx } = canvas2d(512, 320);
-  ctx.fillStyle = "#07100b";
+function terminalCanvas() {
+  return canvas2d(512, 320);
+}
+
+function drawTerminal(
+  ctx: CanvasRenderingContext2D,
+  state: GarageTerminalState,
+  time: number,
+): void {
+  ctx.fillStyle = "#050a06";
   ctx.fillRect(0, 0, 512, 320);
-  ctx.fillStyle = "rgba(200,255,22,0.9)";
-  ctx.font = "700 26px 'IBM Plex Mono', monospace";
-  ctx.fillText("APEX // BAY DIAGNOSTICS", 24, 48);
-  ctx.fillStyle = "rgba(160,175,160,0.7)";
-  ctx.font = "500 19px 'IBM Plex Mono', monospace";
-  const lines = [
-    "LIFT ........ READY",
-    "DOOR ........ LINKED",
-    "PAINT ....... LIVE",
-    "KNOWLEDGE ... SYNCING",
-    "RADIO ....... PIT FM",
+  ctx.fillStyle = "rgba(200,255,22,0.045)";
+  for (let y = 0; y < 320; y += 4) ctx.fillRect(0, y, 512, 1);
+
+  ctx.fillStyle = "rgba(200,255,22,0.92)";
+  ctx.font = "700 21px 'IBM Plex Mono', monospace";
+  ctx.fillText("APEX // BAY DIAGNOSTICS", 22, 36);
+  ctx.fillStyle = "rgba(150,170,150,0.55)";
+  ctx.font = "500 14px 'IBM Plex Mono', monospace";
+  ctx.textAlign = "right";
+  ctx.fillText("BAY 01", 490, 36);
+  ctx.textAlign = "left";
+  ctx.fillStyle = "rgba(200,255,22,0.28)";
+  ctx.fillRect(22, 48, 468, 1);
+
+  const rows: Array<[string, string, boolean]> = [
+    ["LICENCE", state.licence.toUpperCase(), false],
+    ["CAREER", `${state.cp} CP`, false],
+    ["UNLOCKS", `${state.unlocks} FITTED`, false],
+    ["LIVERY", state.paint.toUpperCase(), false],
+    ["KNOWLEDGE", `${state.knowledge} FACTS`, state.knowledge === 0],
+    ["DOOR / LIFT", `${state.door ? "OPEN" : "SHUT"} / ${state.lift ? "UP" : "DOWN"}`, false],
+    ["SERVICE", state.service ? "ENGAGED" : "IDLE", false],
   ];
-  lines.forEach((line, i) => ctx.fillText(line, 24, 100 + i * 34));
-  ctx.fillStyle = "rgba(200,255,22,0.16)";
-  ctx.fillRect(24, 282, 464, 3);
-  ctx.fillStyle = ACID_HEX;
-  ctx.fillRect(24, 282, 290 + Math.sin(Date.now() / 400) * 60, 3);
-  return texture(canvas);
+  rows.forEach(([label, value, warn], index) => {
+    const y = 80 + index * 26;
+    ctx.fillStyle = "rgba(150,170,150,0.6)";
+    ctx.font = "500 15px 'IBM Plex Mono', monospace";
+    ctx.fillText(label, 22, y);
+    ctx.fillStyle = warn ? "rgba(255,120,80,0.92)" : "rgba(232,238,230,0.92)";
+    ctx.font = "600 15px 'IBM Plex Mono', monospace";
+    ctx.textAlign = "right";
+    ctx.fillText(value, 490, y);
+    ctx.textAlign = "left";
+  });
+
+  const rpm = Math.max(0, Math.min(1.12, state.rpm));
+  ctx.fillStyle = "rgba(200,255,22,0.1)";
+  ctx.fillRect(22, 278, 468, 9);
+  ctx.fillStyle = rpm > 0.86 ? "#ff5a1f" : "#c8ff16";
+  ctx.fillRect(22, 278, 468 * Math.min(1, rpm), 9);
+  ctx.fillStyle = "rgba(150,170,150,0.55)";
+  ctx.font = "500 13px 'IBM Plex Mono', monospace";
+  ctx.fillText("REV", 22, 270);
+  ctx.textAlign = "right";
+  ctx.fillText(`${(rpm * 9).toFixed(1)}K RPM`, 490, 270);
+  ctx.textAlign = "left";
+
+  if (Math.sin(time * 6) > 0) {
+    ctx.fillStyle = "#c8ff16";
+    ctx.fillRect(22, 296, 11, 13);
+  }
 }
 
 function tachCanvas() {
@@ -788,6 +844,32 @@ export function createGarage(): GarageStage {
 
   const toolGroup = new THREE.Group();
   root.add(toolGroup);
+  // Every tool remembers where it hangs and where it gets laid down, so
+  // service mode can physically pull the wall down onto the shop floor.
+  const tools: Array<{
+    node: THREE.Object3D;
+    home: THREE.Vector3;
+    homeQuat: THREE.Quaternion;
+    rest: THREE.Vector3;
+    restQuat: THREE.Quaternion;
+  }> = [];
+  let toolIndex = 0;
+  const registerTool = (node: THREE.Object3D, restY: number): void => {
+    const index = toolIndex++;
+    const row = Math.floor(index / 5);
+    const col = index % 5;
+    const home = node.position.clone();
+    const homeQuat = node.quaternion.clone();
+    const rest = new THREE.Vector3(
+      -3.2 + col * 0.86 + row * 0.3,
+      restY,
+      -7.6 + row * 0.36,
+    );
+    const restQuat = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(0, (index % 3 - 1) * 0.14, -Math.PI / 2, "YXZ"),
+    );
+    tools.push({ node, home, homeQuat, rest, restQuat });
+  };
   const wrench = (x: number, y: number, length: number, rotate: number) => {
     const arm = new THREE.Group();
     arm.position.set(x, y, -8.6);
@@ -799,6 +881,7 @@ export function createGarage(): GarageStage {
     head.rotation.z = Math.PI * 0.2;
     arm.add(head);
     toolGroup.add(arm);
+    registerTool(arm, 0.045);
   };
   for (let i = 0; i < 5; i++) {
     wrench(-2.9 + i * 0.3, 2.5, 0.42 + i * 0.06, -0.28 + i * 0.12);
@@ -816,6 +899,7 @@ export function createGarage(): GarageStage {
     shaft.position.y = -0.05;
     group.add(shaft);
     toolGroup.add(group);
+    registerTool(group, 0.05);
   };
   screwdriver(-1.55, 2.55, 0.5, red);
   screwdriver(-1.32, 2.55, 0.44, darkSteel);
@@ -830,14 +914,18 @@ export function createGarage(): GarageStage {
   hammerHead.position.y = 0.32;
   hammer.add(hammerHead);
   toolGroup.add(hammer);
+  registerTool(hammer, 0.14);
 
   const pliers = (x: number) => {
+    const group = new THREE.Group();
+    group.position.set(x, 2.42, -8.6);
     for (const tilt of [-0.18, 0.18]) {
       const part = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.4, 0.02), darkSteel);
-      part.position.set(x, 2.42, -8.6);
       part.rotation.z = tilt;
-      toolGroup.add(part);
+      group.add(part);
     }
+    toolGroup.add(group);
+    registerTool(group, 0.04);
   };
   pliers(3.05);
   pliers(3.25);
@@ -880,36 +968,28 @@ export function createGarage(): GarageStage {
   dial.rotation.x = -0.1;
   root.add(dial);
 
-  // Die-cast display rack on the bench: three stepped tiers of 1:64 cars.
-  const diecastBlue = new THREE.MeshStandardMaterial({
-    color: 0x2255c8,
-    roughness: 0.35,
-    metalness: 0.55,
-  });
-  const diecastOrange = new THREE.MeshStandardMaterial({
-    color: 0xd9531e,
-    roughness: 0.4,
-    metalness: 0.45,
-  });
-  const diecastPlum = new THREE.MeshStandardMaterial({
-    color: 0x6b2f8a,
-    roughness: 0.4,
-    metalness: 0.45,
-  });
-  const diecastPaints = [acid, red, gold, paper, diecastBlue, diecastOrange, diecastPlum, steel];
+  // Die-cast display rack on the bench: two stepped tiers of 1:18 models.
+  // Each casting mirrors a career unlock, so the shelf fills as the ladder
+  // is climbed and empty slots stay visible until you have earned them.
   const display = new THREE.Group();
   display.position.set(0.42, 0.995, -8.2);
   root.add(display);
   const toyBody = new THREE.BoxGeometry(0.085, 0.034, 0.185);
   const toyCabin = new THREE.BoxGeometry(0.07, 0.03, 0.08);
   const toyWheel = new THREE.CylinderGeometry(0.017, 0.017, 0.014, 10);
-  for (let tier = 0; tier < 3; tier++) {
+  const diecastCars: Array<{ group: THREE.Group; entry: DieCastEntry }> = [];
+  for (let tier = 0; tier < 2; tier++) {
     const y = 0.01 + tier * 0.135;
     const z = 0.1 - tier * 0.062;
     box(0.96, 0.022, 0.21, darkSteel, 0, y, z, display);
     box(0.96, 0.012, 0.014, steel, 0, y + 0.014, z + 0.1, display);
     for (let slot = 0; slot < 4; slot++) {
-      const paint = diecastPaints[(tier * 4 + slot) % diecastPaints.length];
+      const entry = DIE_CAST_CATALOG[tier * 4 + slot];
+      const paint = new THREE.MeshStandardMaterial({
+        color: entry.hex,
+        roughness: 0.3,
+        metalness: 0.6,
+      });
       const car = new THREE.Group();
       car.position.set(-0.315 + slot * 0.21, y + 0.02, z);
       car.rotation.y = ((tier + slot) % 3 - 1) * 0.08;
@@ -928,6 +1008,7 @@ export function createGarage(): GarageStage {
         }
       }
       display.add(car);
+      diecastCars.push({ group: car, entry });
     }
   }
   for (const side of [-1, 1]) {
@@ -963,8 +1044,25 @@ export function createGarage(): GarageStage {
     box(0.05, 0.004, 0.02, steel, -1.03 + i * 0.05, 1.012, -7.94);
     box(0.05, 0.004, 0.02, steel, -1.03 + i * 0.05, 1.012, -8.22);
   }
+  const terminal = terminalCanvas();
+  const terminalTexture = texture(terminal.canvas);
+  terminalTexture.wrapS = THREE.ClampToEdgeWrapping;
+  terminalTexture.wrapT = THREE.ClampToEdgeWrapping;
+  const terminalState: GarageTerminalState = {
+    cp: 0,
+    licence: "ROOKIE",
+    unlocks: 0,
+    rpm: 0,
+    door: false,
+    lift: false,
+    service: false,
+    paint: "STOCK",
+    knowledge: 0,
+  };
+  drawTerminal(terminal.ctx, terminalState, 0);
+  terminalTexture.needsUpdate = true;
   const laptopScreenMat = new THREE.MeshBasicMaterial({
-    map: laptopTexture(),
+    map: terminalTexture,
     transparent: true,
     fog: false,
   });
