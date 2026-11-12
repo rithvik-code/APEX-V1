@@ -70,15 +70,15 @@ const PAINTS = [
   { name: "NARDO", base: "#c6c8c2", accent: "#111311" },
 ];
 
-const MILESTONES = [
-  "FIRST CLEAN SECTOR",
-  "PODIUM FINISH",
-  "LAP UNDER TARGET",
-  "PERFECT LAUNCH",
-  "DIECAST SET COMPLETE",
-  "LICENCE 03",
-  "LICENCE 05",
-  "BAY CHAMPION",
+const TROPHY_TIERS = [
+  { cp: 120, label: "FIRST TRAY OF SILVER" },
+  { cp: 240, label: "SECOND TRAY" },
+  { cp: 360, label: "PADDOCK REGULAR" },
+  { cp: 480, label: "WEEKEND WARRIOR" },
+  { cp: 600, label: "SEASON HUNTER" },
+  { cp: 720, label: "SILVER COLLECTOR" },
+  { cp: 840, label: "BAY LEGEND" },
+  { cp: 960, label: "APEX HALL OF FAME" },
 ];
 
 function LaunchPractice({
@@ -588,13 +588,13 @@ export function Garage({
           {panel === "trophies" && (
             <div className="garage__tally">
               <p>
-                {trophies} of {MILESTONES.length} trophies on the wall. Every clean
-                lap, launch and licence tick adds silver.
+                {trophies} of {TROPHY_TIERS.length} trophies on the wall. Every 120
+                CP you bank buys another tray of silver.
               </p>
               <div className="garage__tally-grid">
-                {MILESTONES.map((label, index) => (
-                  <span key={label} className={index < trophies ? "is-earned" : ""}>
-                    {index < trophies ? "◆" : "◇"} {label}
+                {TROPHY_TIERS.map((tier, index) => (
+                  <span key={tier.label} className={index < trophies ? "is-earned" : ""}>
+                    {index < trophies ? "◆" : "◇"} {tier.label} · {tier.cp} CP
                   </span>
                 ))}
               </div>

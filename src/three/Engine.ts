@@ -2084,8 +2084,16 @@ export class ApexEngine {
     } else {
       this.garageStepT = 0;
     }
-    this.garageWalk.x = THREE.MathUtils.clamp(this.garageWalk.x, -6.7, 6.7);
-    this.garageWalk.z = THREE.MathUtils.clamp(this.garageWalk.z, -6.8, 7.4);
+    // With the door up you can walk out onto the apron; shut, the bay is
+    // sealed. The doorway itself is narrow, so the thread through it is too.
+    const doorUp = this.garageDoorTarget > 0.5;
+    const maxX = doorUp ? 9.4 : 6.7;
+    const maxZ = doorUp ? 14.2 : 7.4;
+    this.garageWalk.x = THREE.MathUtils.clamp(this.garageWalk.x, -maxX, maxX);
+    this.garageWalk.z = THREE.MathUtils.clamp(this.garageWalk.z, -6.8, maxZ);
+    if (doorUp && this.garageWalk.z > 6.4 && this.garageWalk.z < 9.8) {
+      this.garageWalk.x = THREE.MathUtils.clamp(this.garageWalk.x, -2.9, 2.9);
+    }
 
     // Stay clear of the lift runways and the parked bike.
     this.pushOut(0, 0.2, 2.6);
