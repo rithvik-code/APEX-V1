@@ -899,7 +899,7 @@ export class ApexEngine {
     if (!(target instanceof Element)) return null;
     if (
       target.closest(
-        "a, button, input, textarea, select, label, [contenteditable], .terminal, .grid, .corelab, .ctl-shell, .aero-dock, .aero-launch, .drive-hud, nav, header, footer",
+        "a, button, input, textarea, select, label, [contenteditable], .terminal, .grid, .corelab, .ctl-shell, .aero-dock, .aero-launch, .drive-hud, .garage__panel, .garage__bar, .garage__hint, nav, header, footer",
       )
     ) {
       return null;

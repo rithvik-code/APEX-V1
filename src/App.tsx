@@ -157,7 +157,10 @@ export default function App() {
   const [garage, setGarage] = useState(false);
   const [garageBoard, setGarageBoard] = useState<GarageBoard | null>(null);
   const garageBoardRef = useRef(garageBoard);
-  garageBoardRef.current = garageBoard;
+
+  useEffect(() => {
+    garageBoardRef.current = garageBoard;
+  }, [garageBoard]);
   const [portalReady, setPortalReady] = useState(false);
   const [portalPhase, setPortalPhase] = useState<"dive" | "flash" | null>(null);
   const portalReadyRef = useRef(false);
