@@ -307,6 +307,73 @@ export default function App() {
     sound.tick("start");
   }, []);
 
+  const runGarageAction = useCallback((id: string) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    switch (id) {
+      case "door": {
+        const open = engine.toggleGarageDoor();
+        sound.garageDoor(open);
+        setGarageBits((prev) => ({ ...prev, door: open }));
+        break;
+      }
+      case "lift": {
+        const up = engine.toggleGarageLift();
+        sound.hydraulic();
+        setGarageBits((prev) => ({ ...prev, lift: up, service: false }));
+        break;
+      }
+      case "service": {
+        const on = !engine.garageServiceMode;
+        engine.setGarageService(on);
+        sound.hydraulic();
+        setGarageBits((prev) => ({ ...prev, service: on, lift: on }));
+        break;
+      }
+      case "stool":
+        engine.sitGarage();
+        sound.footstep();
+        break;
+      case "cat":
+        sound.meow();
+        break;
+      default:
+        break;
+    }
+    garageSeq.current += 1;
+    setGarageAction({ id, seq: garageSeq.current });
+  }, []);
+
+  const garageMove = useCallback((forward: number, strafe: number) => {
+    engineRef.current?.setGarageMove(forward, strafe);
+  }, []);
+
+  const garageCapture = useCallback(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    const data = engine.captureFrame();
+    const link = document.createElement("a");
+    link.href = data;
+    link.download = `apex-garage-${new Date()
+      .toISOString()
+      .slice(0, 19)
+      .replace(/[:T]/g, "-")}.png`;
+    link.click();
+    sound.tick("click");
+  }, []);
+
+  const garageReward = useCallback(() => {
+    award({ kind: "mission", id: `launch-${Date.now()}`, cp: 40 });
+  }, [award]);
+
+  const driveOutGarage = useCallback(
+    (vehicle: "car" | "bike") => {
+      closeGarage();
+      launchDrive(vehicle);
+    },
+    [closeGarage, launchDrive],
+  );
+
   const revStart = useCallback((vehicle: "car" | "bike") => {
     if (!audioLockedRef.current && !sound.isOn) {
       setAudioOn(sound.toggle());
@@ -568,7 +635,8 @@ export default function App() {
       unlockSet(career),
       currentLicence(career.cp).name,
     );
-  }, [career]);
+    engineRef.current?.setGarageTrophies(trophyCount);
+  }, [career, trophyCount]);
 
   useEffect(() => {
     if (!scene.aero) return;
@@ -658,6 +726,31 @@ export default function App() {
     document.body.classList.toggle("garage-open", garage);
     return () => document.body.classList.remove("garage-open");
   }, [garage]);
+
+  useEffect(() => {
+    if (!garage) return;
+    const engine = engineRef.current;
+    if (!engine) return;
+    setGarageBits({
+      door: engine.garageDoorOpen,
+      lift: engine.garageLiftRaised,
+      service: engine.garageServiceMode,
+    });
+    engine.setGarageTrophies(trophyCount);
+    engine.setGarageListener((event) => {
+      if (event.type === "focus") {
+        setGarageFocus(event.id ? { id: event.id, label: event.label } : null);
+      } else if (event.type === "action") {
+        runGarageAction(event.id);
+      } else if (event.type === "driveout") {
+        driveOutGarage(event.vehicle);
+      }
+    });
+    return () => {
+      engine.setGarageListener(null);
+      setGarageFocus(null);
+    };
+  }, [garage, runGarageAction, driveOutGarage, trophyCount]);
 
   useEffect(() => {
     if (!garage) return;
