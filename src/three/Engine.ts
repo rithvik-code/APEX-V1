@@ -1953,21 +1953,36 @@ export class ApexEngine {
       this.garageEntryT = Math.min(GARAGE_ENTRY_DURATION, this.garageEntryT + dt);
     }
     const e = this.garageEntryT;
-    const door = smoothstep((e - 0.15) / 1.4);
-    const lightsRaw = smoothstep((e - 1.0) / 1.15);
-    const flicker = e < 2.2 ? 0.5 + 0.5 * Math.abs(Math.sin(e * 47)) : 1;
-    stage.setDoor(door);
-    stage.setLights(lightsRaw * flicker);
+    if (e < GARAGE_ENTRY_DURATION) {
+      const door = smoothstep((e - 0.15) / 1.4);
+      const lightsRaw = smoothstep((e - 1.0) / 1.15);
+      const flicker = e < 2.2 ? 0.5 + 0.5 * Math.abs(Math.sin(e * 47)) : 1;
+      stage.setDoor(door);
+      stage.setLights(lightsRaw * flicker);
+      this.garageDoor = 1;
 
-    const drop = smoothstep((e - 1.9) / 1.45);
-    const bounceT = e - 3.35;
-    const bounce =
-      bounceT > 0 ? Math.sin(bounceT * 10) * Math.exp(-bounceT * 4.5) * 0.045 : 0;
-    this.carGroup.position.y =
-      GARAGE_CAR_HOVER_Y +
-      (GARAGE_CAR_LIFT_Y - GARAGE_CAR_HOVER_Y) * drop +
-      bounce;
+      const drop = smoothstep((e - 1.9) / 1.45);
+      const bounceT = e - 3.35;
+      const bounce =
+        bounceT > 0 ? Math.sin(bounceT * 10) * Math.exp(-bounceT * 4.5) * 0.045 : 0;
+      this.carGroup.position.y =
+        GARAGE_CAR_HOVER_Y +
+        (GARAGE_CAR_LIFT_Y - GARAGE_CAR_HOVER_Y) * drop +
+        bounce;
+    } else {
+      // Once the bay is live the door, lift and service lights belong to the
+      // player: ramp toward their targets instead of replaying the entry.
+      this.garageDoor +=
+        (this.garageDoorTarget - this.garageDoor) * (1 - Math.exp(-dt * 2.6));
+      stage.setDoor(this.garageDoor);
+      this.garageLift +=
+        (this.garageLiftTarget - this.garageLift) * (1 - Math.exp(-dt * 3.2));
+      stage.setLift(this.garageLift);
+      stage.setLights(this.garageService ? 0.24 : 1);
+      this.carGroup.position.y = GARAGE_CAR_LIFT_Y + this.garageLift * 1.32;
+    }
     this.carGroup.rotation.y = 0;
+    stage.setRev(this.revRpm, this.revKick);
 
     this.engineTime += dt * (1 + this.revRpm * 30);
     this.car.engine.update(this.engineTime);
@@ -2032,22 +2047,42 @@ export class ApexEngine {
     this.garageLookPitch +=
       (this.garageLookPitchT - this.garageLookPitch) * lookEase;
 
-    const forward =
+    const keyboardForward =
       (keys.has("KeyW") || keys.has("ArrowUp") ? 1 : 0) -
       (keys.has("KeyS") || keys.has("ArrowDown") ? 1 : 0);
-    const strafe =
+    const keyboardStrafe =
       (keys.has("KeyD") || keys.has("ArrowRight") ? 1 : 0) -
       (keys.has("KeyA") || keys.has("ArrowLeft") ? 1 : 0);
+    const forward = THREE.MathUtils.clamp(
+      keyboardForward + this.garageVirtualForward,
+      -1,
+      1,
+    );
+    const strafe = THREE.MathUtils.clamp(
+      keyboardStrafe + this.garageVirtualStrafe,
+      -1,
+      1,
+    );
     const sprint = keys.has("ShiftLeft") || keys.has("ShiftRight");
     const speed = sprint ? 4.8 : 2.7;
     const sin = Math.sin(this.garageLookYaw);
     const cos = Math.cos(this.garageLookYaw);
 
-    this.garageMoving = forward !== 0 || strafe !== 0;
+    if (this.garageSeated && (forward !== 0 || strafe !== 0)) {
+      this.garageSeated = false;
+    }
+    this.garageMoving = !this.garageSeated && (forward !== 0 || strafe !== 0);
     if (this.garageMoving) {
       this.garageWalk.x += (-sin * forward + cos * strafe) * speed * dt;
       this.garageWalk.z += (-cos * forward - sin * strafe) * speed * dt;
       this.garageBob += dt * (sprint ? 11 : 7.5);
+      this.garageStepT += dt * (sprint ? 1.9 : 1.35);
+      if (this.garageStepT > 1) {
+        this.garageStepT = 0;
+        sound.footstep(sprint);
+      }
+    } else {
+      this.garageStepT = 0;
     }
     this.garageWalk.x = THREE.MathUtils.clamp(this.garageWalk.x, -6.7, 6.7);
     this.garageWalk.z = THREE.MathUtils.clamp(this.garageWalk.z, -6.8, 7.4);
@@ -2056,9 +2091,38 @@ export class ApexEngine {
     this.pushOut(0, 0.2, 2.6);
     this.pushOut(5.5, 3.4, 1.7);
 
+    // Nearest hotspot in the view cone becomes the interaction target.
+    const stage = this.garageStage;
+    if (stage) {
+      const fx = -Math.sin(this.garageLookYaw);
+      const fz = -Math.cos(this.garageLookYaw);
+      let best: GarageHotspot | null = null;
+      let bestScore = 0;
+      for (const spot of stage.hotspots) {
+        const dx = spot.position.x - this.garageWalk.x;
+        const dz = spot.position.z - this.garageWalk.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > spot.radius) continue;
+        const dot = (dx * fx + dz * fz) / Math.max(dist, 0.001);
+        if (dot < 0.35) continue;
+        const score = dot - dist * 0.12;
+        if (!best || score > bestScore) {
+          best = spot;
+          bestScore = score;
+        }
+      }
+      const id = best?.id ?? null;
+      if (id !== (this.garageFocus?.id ?? null)) {
+        this.garageFocus = best;
+        stage.setActiveHotspot(id);
+        this.emitGarage({ type: "focus", id, label: best?.label ?? "" });
+      }
+    }
+
+    const eye = this.garageSeated ? 1.18 : 1.62;
     const bob = this.garageMoving ? Math.sin(this.garageBob) * 0.028 : 0;
     const sway = this.garageMoving ? Math.cos(this.garageBob * 0.5) * 0.014 : 0;
-    this.camera.position.set(this.garageWalk.x + sway, 1.62 + bob, this.garageWalk.z);
+    this.camera.position.set(this.garageWalk.x + sway, eye + bob, this.garageWalk.z);
     this.camera.rotation.order = "YXZ";
     this.camera.rotation.set(this.garageLookPitch, this.garageLookYaw, 0);
   }
