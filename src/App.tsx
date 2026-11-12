@@ -308,42 +308,57 @@ export default function App() {
     sound.tick("start");
   }, []);
 
-  const runGarageAction = useCallback((id: string) => {
-    const engine = engineRef.current;
-    if (!engine) return;
-    switch (id) {
-      case "door": {
-        const open = engine.toggleGarageDoor();
-        sound.garageDoor(open);
-        setGarageBits((prev) => ({ ...prev, door: open }));
-        break;
+  const driveOutGarage = useCallback(
+    (vehicle: "car" | "bike") => {
+      closeGarage();
+      launchDrive(vehicle);
+    },
+    [closeGarage, launchDrive],
+  );
+
+  const runGarageAction = useCallback(
+    (id: string) => {
+      const engine = engineRef.current;
+      if (!engine) return;
+      switch (id) {
+        case "door": {
+          const open = engine.toggleGarageDoor();
+          sound.garageDoor(open);
+          setGarageBits((prev) => ({ ...prev, door: open }));
+          break;
+        }
+        case "lift": {
+          const up = engine.toggleGarageLift();
+          sound.hydraulic();
+          setGarageBits((prev) => ({ ...prev, lift: up, service: false }));
+          break;
+        }
+        case "service": {
+          const on = !engine.garageServiceMode;
+          engine.setGarageService(on);
+          sound.hydraulic();
+          setGarageBits((prev) => ({ ...prev, service: on, lift: on }));
+          break;
+        }
+        case "stool":
+          engine.sitGarage();
+          sound.footstep();
+          break;
+        case "cat":
+          sound.meow();
+          break;
+        case "car":
+        case "bike":
+          driveOutGarage(id);
+          return;
+        default:
+          break;
       }
-      case "lift": {
-        const up = engine.toggleGarageLift();
-        sound.hydraulic();
-        setGarageBits((prev) => ({ ...prev, lift: up, service: false }));
-        break;
-      }
-      case "service": {
-        const on = !engine.garageServiceMode;
-        engine.setGarageService(on);
-        sound.hydraulic();
-        setGarageBits((prev) => ({ ...prev, service: on, lift: on }));
-        break;
-      }
-      case "stool":
-        engine.sitGarage();
-        sound.footstep();
-        break;
-      case "cat":
-        sound.meow();
-        break;
-      default:
-        break;
-    }
-    garageSeq.current += 1;
-    setGarageAction({ id, seq: garageSeq.current });
-  }, []);
+      garageSeq.current += 1;
+      setGarageAction({ id, seq: garageSeq.current });
+    },
+    [driveOutGarage],
+  );
 
   const garageMove = useCallback((forward: number, strafe: number) => {
     engineRef.current?.setGarageMove(forward, strafe);
@@ -366,14 +381,6 @@ export default function App() {
   const garageReward = useCallback(() => {
     award({ kind: "mission", id: `launch-${Date.now()}`, cp: 40 });
   }, [award]);
-
-  const driveOutGarage = useCallback(
-    (vehicle: "car" | "bike") => {
-      closeGarage();
-      launchDrive(vehicle);
-    },
-    [closeGarage, launchDrive],
-  );
 
   const revStart = useCallback((vehicle: "car" | "bike") => {
     if (!audioLockedRef.current && !sound.isOn) {
