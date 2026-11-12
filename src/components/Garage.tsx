@@ -220,7 +220,9 @@ export function Garage({
   const [tone, setTone] = useState(0.6);
   const [diecast, setDiecast] = useState(DIE_CAST_CATALOG[0].id);
   const [knowledge, setKnowledge] = useState<KnowledgeState>(() => knowledgeState());
-  const lastAction = useRef(0);
+  // Seed from the incoming action so a stale action held by App while the
+  // garage was closed does not replay on the next entry.
+  const lastAction = useRef(action?.seq ?? 0);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000);
