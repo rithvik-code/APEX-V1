@@ -373,12 +373,18 @@ export class ApexEngine {
   private garageKeys = new Set<string>();
   private garagePointerX = 0;
   private garagePointerY = 0;
+  private garagePointerPX = 0;
+  private garagePointerPY = 0;
   private garagePointerSeen = false;
   private garageBoard: GarageBoard | null = null;
   private garageSavedCarPos = new THREE.Vector3();
   private garageSavedCarRot = new THREE.Euler();
   private garageSavedBikePos = new THREE.Vector3();
   private garageSavedBikeRot = new THREE.Euler();
+  private garageEntryFrom = new THREE.Vector3();
+  private garageEntryEye = new THREE.Vector3();
+  private garageEntryLook = new THREE.Vector3();
+  private garageEntryTarget = new THREE.Vector3();
   private revHeld = false;
   private revWasActive = false;
   private revT = 0;
@@ -547,6 +553,7 @@ export class ApexEngine {
     window.addEventListener("pointerdown", this.onDragStart);
     window.addEventListener("pointermove", this.onDragMove, { passive: true });
     window.addEventListener("pointermove", this.onPointerLook, { passive: true });
+    window.addEventListener("pointerout", this.onPointerOut);
     window.addEventListener("pointerup", this.onDragEnd);
     window.addEventListener("pointercancel", this.onDragEnd);
     window.addEventListener("dblclick", this.onResetView);
@@ -901,16 +908,17 @@ export class ApexEngine {
   }
 
   private onDragStart = (event: PointerEvent): void => {
-    if (this.paused || this.drive || event.button !== 0 || event.pointerType === "touch") return;
+    if (this.paused || this.drive || event.button !== 0) return;
     if (this.garageOn) {
-      if (!this.orbitTarget(event)) return;
+      // Touch keeps drag-to-look; a mouse simply moves to look.
+      if (event.pointerType !== "touch" || !this.orbitTarget(event)) return;
       this.dragging = true;
       this.dragX = event.clientX;
       this.dragY = event.clientY;
       this.lastOrbitInput = performance.now();
-      document.body.classList.add("is-orbiting");
       return;
     }
+    if (event.pointerType === "touch") return;
     if (!this.heroVisible() || !this.orbitTarget(event)) return;
     this.dragging = true;
     this.dragX = event.clientX;
@@ -928,21 +936,12 @@ export class ApexEngine {
     this.dragX = event.clientX;
     this.dragY = event.clientY;
     if (this.garageOn) {
-      if (this.garageViewMode === "third") {
-        this.garageYawT -= dx * 0.005;
-        this.garagePitchT = THREE.MathUtils.clamp(
-          this.garagePitchT + dy * 0.004,
-          0.05,
-          1.02,
-        );
-      } else {
-        this.garageLookYaw -= dx * 0.004;
-        this.garageLookPitch = THREE.MathUtils.clamp(
-          this.garageLookPitch - dy * 0.003,
-          -1.15,
-          1.15,
-        );
-      }
+      this.garageLookYawT -= dx * 0.004;
+      this.garageLookPitchT = THREE.MathUtils.clamp(
+        this.garageLookPitchT - dy * 0.003,
+        -1.15,
+        1.15,
+      );
       return;
     }
     this.userYawT -= dx * 0.004;
@@ -956,6 +955,46 @@ export class ApexEngine {
     this.lastOrbitInput = performance.now();
   };
 
+  // First-person garage look: moving the pointer turns the head, no button
+  // held. Deltas are ignored over the overlay so clicking REV or the door
+  // button never yanks the camera.
+  private onPointerLook = (event: PointerEvent): void => {
+    if (!this.garageOn || this.paused || this.drive) {
+      this.garagePointerSeen = false;
+      return;
+    }
+    const overScene = this.orbitTarget(event) !== null;
+    const nx = (event.clientX / window.innerWidth) * 2 - 1;
+    const ny = (event.clientY / window.innerHeight) * 2 - 1;
+    this.garagePointerX = overScene ? THREE.MathUtils.clamp(nx, -1, 1) : 0;
+    this.garagePointerY = overScene ? THREE.MathUtils.clamp(ny, -1, 1) : 0;
+    if (event.pointerType === "touch") return;
+    if (!this.garagePointerSeen) {
+      this.garagePointerSeen = true;
+      this.garagePointerPX = event.clientX;
+      this.garagePointerPY = event.clientY;
+      return;
+    }
+    const dx = event.clientX - this.garagePointerPX;
+    const dy = event.clientY - this.garagePointerPY;
+    this.garagePointerPX = event.clientX;
+    this.garagePointerPY = event.clientY;
+    if ((!dx && !dy) || !overScene) return;
+    this.garageLookYawT -= dx * 0.003;
+    this.garageLookPitchT = THREE.MathUtils.clamp(
+      this.garageLookPitchT - dy * 0.0024,
+      -1.05,
+      1.05,
+    );
+  };
+
+  private onPointerOut = (event: PointerEvent): void => {
+    if (event.relatedTarget) return;
+    this.garagePointerX = 0;
+    this.garagePointerY = 0;
+    this.garagePointerSeen = false;
+  };
+
   private onDragEnd = (): void => {
     if (!this.dragging) return;
     this.dragging = false;
@@ -967,15 +1006,12 @@ export class ApexEngine {
     if (this.paused || this.drive) return;
     if (this.garageOn) {
       if (!this.orbitTarget(event)) return;
-      if (this.garageViewMode === "third") {
-        this.garageYawT = 0.62;
-        this.garagePitchT = 0.28;
-        this.garageDistT = 8.6;
-      } else {
-        this.garageLookYaw = 0.7;
-        this.garageLookPitch = -0.04;
-        this.garageWalk.set(4.4, 0, 5.6);
-      }
+      this.garageWalk.set(4.4, 0, 5.6);
+      this.garageBob = 0;
+      this.garageLookYaw = 0.7;
+      this.garageLookYawT = 0.7;
+      this.garageLookPitch = -0.04;
+      this.garageLookPitchT = -0.04;
       return;
     }
     if (!this.heroVisible() || !this.orbitTarget(event)) return;
@@ -986,17 +1022,8 @@ export class ApexEngine {
     this.lastOrbitInput = performance.now();
   };
 
-  private onGarageWheel = (event: WheelEvent): void => {
-    if (!this.garageOn || this.garageViewMode !== "third") return;
-    this.garageDistT = THREE.MathUtils.clamp(
-      this.garageDistT + event.deltaY * 0.004,
-      5.2,
-      9.2,
-    );
-  };
-
   private onGarageKeyDown = (event: KeyboardEvent): void => {
-    if (!this.garageOn || this.garageViewMode !== "first") return;
+    if (!this.garageOn) return;
     const target = event.target;
     if (
       target instanceof HTMLElement &&
@@ -1518,7 +1545,7 @@ export class ApexEngine {
     return this.garageOn;
   }
 
-  enterGarage(view: GarageView = "third"): void {
+  enterGarage(): void {
     if (this.drive) this.exitDrive();
     this.stopLap();
     this.stopLapReplay();
@@ -1536,20 +1563,19 @@ export class ApexEngine {
     stage.group.visible = true;
     stage.setDoor(0);
     stage.setLights(0);
+    stage.setFiles(this.garageBoard);
 
     this.garageOn = true;
-    this.garageViewMode = view;
     this.garageEntryT = 0;
-    this.garageYaw = 0.62;
-    this.garageYawT = 0.62;
-    this.garagePitch = 0.24;
-    this.garagePitchT = 0.24;
-    this.garageDist = 8.6;
-    this.garageDistT = 8.6;
     this.garageWalk.set(4.4, 0, 5.6);
     this.garageBob = 0;
     this.garageLookYaw = 0.7;
+    this.garageLookYawT = 0.7;
     this.garageLookPitch = -0.04;
+    this.garageLookPitchT = -0.04;
+    this.garagePointerX = 0;
+    this.garagePointerY = 0;
+    this.garagePointerSeen = false;
     this.garageKeys.clear();
     this.dragging = false;
     this.revHeld = false;
@@ -1653,16 +1679,9 @@ export class ApexEngine {
     this.revKick = 0;
   }
 
-  setGarageView(view: GarageView): void {
-    if (!this.garageOn || this.garageViewMode === view) return;
-    this.garageViewMode = view;
-    this.garageKeys.clear();
-    if (view === "first") {
-      this.garageWalk.set(4.4, 0, 5.6);
-      this.garageBob = 0;
-      this.garageLookYaw = 0.7;
-      this.garageLookPitch = -0.04;
-    }
+  setGarageFiles(board: GarageBoard | null): void {
+    this.garageBoard = board;
+    this.garageStage?.setFiles(board);
   }
 
   startRev(vehicle: "car" | "bike"): void {
@@ -1813,46 +1832,30 @@ export class ApexEngine {
 
     if (e < GARAGE_ENTRY_DURATION) {
       const d = smoothstep(e / 3.4);
-      const thirdFov = this.garageThirdFov();
-      this.garageStartPos.set(0, 2.1, 14.6);
-      this.garageStartTgt.set(0, 1.15, 0.2).lerp(this.garageTarget.set(0, 0.85, 0.2), d);
-      const endCos = Math.cos(0.24);
-      const endPos = new THREE.Vector3(
-        Math.sin(0.62) * endCos * 8.6,
-        0.85 + Math.sin(0.24) * 8.6,
-        0.2 + Math.cos(0.62) * endCos * 8.6,
+      const firstFov =
+        this.camera.aspect < 0.9 ? GARAGE_FIRST_FOV + 9 : GARAGE_FIRST_FOV;
+      const cosP = Math.cos(this.garageLookPitch);
+      this.garageEntryFrom.set(0, 2.1, 14.6);
+      this.garageEntryLook.set(0, 1.15, 0.2);
+      this.garageEntryEye.set(this.garageWalk.x, 1.62, this.garageWalk.z);
+      this.garageEntryTarget.set(
+        this.garageEntryEye.x - Math.sin(this.garageLookYaw) * cosP * 4,
+        this.garageEntryEye.y + Math.sin(this.garageLookPitch) * 4,
+        this.garageEntryEye.z - Math.cos(this.garageLookYaw) * cosP * 4,
       );
-      this.camera.position.lerpVectors(this.garageStartPos, endPos, d);
+      this.garageEntryLook.lerp(this.garageEntryTarget, d);
+      this.camera.position.lerpVectors(this.garageEntryFrom, this.garageEntryEye, d);
       this.camera.position.x += Math.sin(e * 0.9) * 0.25 * (1 - d);
-      this.camera.lookAt(this.garageStartTgt);
-      this.camera.fov = THREE.MathUtils.lerp(56, thirdFov, d);
+      this.camera.lookAt(this.garageEntryLook);
+      this.camera.fov = THREE.MathUtils.lerp(56, firstFov, d);
       this.camera.updateProjectionMatrix();
       return;
     }
 
-    if (this.garageViewMode === "first") {
-      this.updateGarageWalk(dt);
-      const firstFov = this.camera.aspect < 0.9 ? GARAGE_FIRST_FOV + 9 : GARAGE_FIRST_FOV;
-      this.camera.fov += (firstFov - this.camera.fov) * (1 - Math.exp(-dt * 6));
-      this.camera.updateProjectionMatrix();
-    } else {
-      this.garageYaw += (this.garageYawT - this.garageYaw) * (1 - Math.exp(-dt * 12));
-      this.garagePitch +=
-        (this.garagePitchT - this.garagePitch) * (1 - Math.exp(-dt * 12));
-      this.garageDist += (this.garageDistT - this.garageDist) * (1 - Math.exp(-dt * 8));
-      const cosP = Math.cos(this.garagePitch);
-      this.garageTarget.set(0, 0.85, 0.2);
-      this.camera.position.set(
-        this.garageTarget.x + Math.sin(this.garageYaw) * cosP * this.garageDist,
-        this.garageTarget.y + Math.sin(this.garagePitch) * this.garageDist,
-        this.garageTarget.z + Math.cos(this.garageYaw) * cosP * this.garageDist,
-      );
-      this.garageClampCam();
-      this.camera.lookAt(this.garageTarget);
-      const thirdFov = this.garageThirdFov();
-      this.camera.fov += (thirdFov - this.camera.fov) * (1 - Math.exp(-dt * 6));
-      this.camera.updateProjectionMatrix();
-    }
+    this.updateGarageWalk(dt);
+    const firstFov = this.camera.aspect < 0.9 ? GARAGE_FIRST_FOV + 9 : GARAGE_FIRST_FOV;
+    this.camera.fov += (firstFov - this.camera.fov) * (1 - Math.exp(-dt * 6));
+    this.camera.updateProjectionMatrix();
 
     if (this.revRpm > 0.02 || this.revKick > 0.02) {
       const amp =
@@ -1864,21 +1867,28 @@ export class ApexEngine {
     }
   }
 
-  private garageThirdFov(): number {
-    return this.camera.aspect < 0.9 ? GARAGE_THIRD_FOV + 13 : GARAGE_THIRD_FOV;
-  }
-
-  // The orbit target sits inside an 18 m room; keep the eye off the walls and
-  // ceiling so it can never clip through the front door plane.
-  private garageClampCam(): void {
-    const p = this.camera.position;
-    p.x = THREE.MathUtils.clamp(p.x, -7.35, 7.35);
-    p.y = THREE.MathUtils.clamp(p.y, 0.5, 4.2);
-    p.z = THREE.MathUtils.clamp(p.z, -7.5, 8.3);
-  }
-
   private updateGarageWalk(dt: number): void {
     const keys = this.garageKeys;
+    // Park the pointer near a screen edge and the head keeps turning, so the
+    // user never has to lift the mouse to keep walking around the bay.
+    const edgeX = Math.abs(this.garagePointerX);
+    if (edgeX > 0.72) {
+      const push = (edgeX - 0.72) / 0.28;
+      this.garageLookYawT -=
+        Math.sign(this.garagePointerX) * push * push * 2.2 * dt;
+    }
+    const edgeY = Math.abs(this.garagePointerY);
+    if (edgeY > 0.82) {
+      const push = (edgeY - 0.82) / 0.18;
+      this.garageLookPitchT -=
+        Math.sign(this.garagePointerY) * push * push * 1.1 * dt;
+      this.garageLookPitchT = THREE.MathUtils.clamp(this.garageLookPitchT, -1.05, 1.05);
+    }
+    const lookEase = 1 - Math.exp(-dt * 16);
+    this.garageLookYaw += (this.garageLookYawT - this.garageLookYaw) * lookEase;
+    this.garageLookPitch +=
+      (this.garageLookPitchT - this.garageLookPitch) * lookEase;
+
     const forward =
       (keys.has("KeyW") || keys.has("ArrowUp") ? 1 : 0) -
       (keys.has("KeyS") || keys.has("ArrowDown") ? 1 : 0);
@@ -2363,10 +2373,11 @@ export class ApexEngine {
     window.removeEventListener("resize", this.onResize);
     window.removeEventListener("pointerdown", this.onDragStart);
     window.removeEventListener("pointermove", this.onDragMove);
+    window.removeEventListener("pointermove", this.onPointerLook);
+    window.removeEventListener("pointerout", this.onPointerOut);
     window.removeEventListener("pointerup", this.onDragEnd);
     window.removeEventListener("pointercancel", this.onDragEnd);
     window.removeEventListener("dblclick", this.onResetView);
-    window.removeEventListener("wheel", this.onGarageWheel);
     window.removeEventListener("keydown", this.onGarageKeyDown);
     window.removeEventListener("keyup", this.onGarageKeyUp);
     document.body.classList.remove("is-orbiting");
