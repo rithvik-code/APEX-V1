@@ -5,14 +5,10 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
-type BoardState = "idle" | "loading" | "ready" | "offline";
-
 type GarageProps = {
   licence: string;
   cp: number;
   unlocks: number;
-  files: number;
-  filesState: BoardState;
   audioOn: boolean;
   onAudio: () => void;
   onRevStart: (vehicle: "car" | "bike") => void;
@@ -25,8 +21,6 @@ export function Garage({
   licence,
   cp,
   unlocks,
-  files,
-  filesState,
   audioOn,
   onAudio,
   onRevStart,
@@ -80,15 +74,6 @@ export function Garage({
           <span>{licence}</span>
           <span>{cp} CP</span>
           <span>{unlocks} UNLOCKS</span>
-          <span className={`garage__files is-${filesState}`}>
-            {filesState === "ready"
-              ? `${files} FILES LINKED`
-              : filesState === "loading"
-                ? "SYNCING FILES"
-                : filesState === "offline"
-                  ? "LOCAL LINK OFFLINE"
-                  : "LOCAL LINK"}
-          </span>
           <b>{time}</b>
         </div>
       </header>
@@ -98,21 +83,8 @@ export function Garage({
         <h2>THE GARAGE</h2>
         <p className="garage__lede">
           Door up. Lights on. The lift holds the car where you left it. Walk the
-          floor — your local files are chalked up on the left wall.
+          floor, orbit the bay, and find the die-cast shelf on the bench.
         </p>
-
-        <div className="garage__board" aria-live="polite">
-          <span>BLACKBOARD · LEFT WALL</span>
-          <b>
-            {filesState === "ready"
-              ? `${files} LOCAL FILES CHALKED`
-              : filesState === "loading"
-                ? "SCANNING HOME ROOTS"
-                : filesState === "offline"
-                  ? "RUN npm run apex TO SYNC"
-                  : "AWAITING LOCAL LINK"}
-          </b>
-        </div>
 
         <div className="garage__revs" role="group" aria-label="Hold to rev the engines">
           <button

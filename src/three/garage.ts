@@ -502,6 +502,62 @@ export function createGarage(): GarageStage {
   dial.rotation.x = -0.1;
   root.add(dial);
 
+  // Die-cast display rack on the bench: three stepped tiers of 1:64 cars.
+  const diecastBlue = new THREE.MeshStandardMaterial({
+    color: 0x2255c8,
+    roughness: 0.35,
+    metalness: 0.55,
+  });
+  const diecastOrange = new THREE.MeshStandardMaterial({
+    color: 0xd9531e,
+    roughness: 0.4,
+    metalness: 0.45,
+  });
+  const diecastPlum = new THREE.MeshStandardMaterial({
+    color: 0x6b2f8a,
+    roughness: 0.4,
+    metalness: 0.45,
+  });
+  const diecastPaints = [acid, red, gold, paper, diecastBlue, diecastOrange, diecastPlum, steel];
+  const display = new THREE.Group();
+  display.position.set(0.42, 0.995, -8.2);
+  root.add(display);
+  const toyBody = new THREE.BoxGeometry(0.085, 0.034, 0.185);
+  const toyCabin = new THREE.BoxGeometry(0.07, 0.03, 0.08);
+  const toyWheel = new THREE.CylinderGeometry(0.017, 0.017, 0.014, 10);
+  for (let tier = 0; tier < 3; tier++) {
+    const y = 0.01 + tier * 0.135;
+    const z = 0.1 - tier * 0.062;
+    box(0.96, 0.022, 0.21, darkSteel, 0, y, z, display);
+    box(0.96, 0.012, 0.014, acid, 0, y + 0.014, z + 0.1, display);
+    for (let slot = 0; slot < 4; slot++) {
+      const paint = diecastPaints[(tier * 4 + slot) % diecastPaints.length];
+      const car = new THREE.Group();
+      car.position.set(-0.315 + slot * 0.21, y + 0.02, z);
+      car.rotation.y = ((tier + slot) % 3 - 1) * 0.08;
+      const body = new THREE.Mesh(toyBody, paint);
+      body.position.y = 0.026;
+      car.add(body);
+      const cabin = new THREE.Mesh(toyCabin, paint);
+      cabin.position.set(0, 0.055, -0.012);
+      car.add(cabin);
+      for (const wx of [-0.05, 0.05]) {
+        for (const wz of [-0.062, 0.062]) {
+          const wheel = new THREE.Mesh(toyWheel, rubber);
+          wheel.rotation.z = Math.PI / 2;
+          wheel.position.set(wx, 0.015, wz);
+          car.add(wheel);
+        }
+      }
+      display.add(car);
+    }
+  }
+  for (const side of [-1, 1]) {
+    box(0.03, 0.34, 0.44, darkSteel, side * 0.495, 0.17, -0.03, display);
+  }
+  box(0.96, 0.3, 0.02, wallDark, 0, 0.17, -0.17, display);
+  box(0.34, 0.05, 0.01, acid, 0, 0.05, 0.24, display);
+
   // Paddock notes pinned to the pegboard.
   for (let i = 0; i < 3; i++) {
     const note = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.4), paper);
@@ -600,12 +656,6 @@ export function createGarage(): GarageStage {
   trophy(7.5, 2.37, -4.0, 0.6);
   trophy(7.5, 2.37, -2.9, 0.55);
 
-  // Blackboard: the local file index chalked onto the left wall.
-  const board = createChalkboard();
-  board.group.position.set(-7.68, 2.24, 2.6);
-  board.group.rotation.y = Math.PI / 2;
-  root.add(board.group);
-
   /* ------------------------------------------------------------------ */
   /* Tyre stack, shelves, bike mat, fridge                              */
   /* ------------------------------------------------------------------ */
@@ -680,8 +730,6 @@ export function createGarage(): GarageStage {
   benchLight.position.set(0, 2.6, -7.2);
   const trophyLight = addLight(new THREE.PointLight(0xffd28a, 5, 5, 2), 5);
   trophyLight.position.set(7.1, 2.3, -3.1);
-  const boardLight = addLight(new THREE.PointLight(0xffeccb, 6, 6, 2), 6);
-  boardLight.position.set(-6.7, 3.05, 2.6);
   const doorLight = addLight(new THREE.DirectionalLight(0xdfeaff, 1.1), 1.1);
   doorLight.position.set(0, 4, 14);
   doorLight.target.position.set(0, 0.8, 1);
@@ -781,7 +829,6 @@ export function createGarage(): GarageStage {
     liftLamp.visible = Math.sin(time * 2.4) > -0.4;
     spillMat.opacity = doorOpen * (0.46 + 0.06 * Math.sin(time * 1.7));
     toolGroup.position.y = Math.sin(time * 0.5) * 0.002;
-    board.update(dt);
   };
 
   setDoor(0);
@@ -791,10 +838,8 @@ export function createGarage(): GarageStage {
     group: root,
     setDoor,
     setLights,
-    setFiles: board.setBoard,
     update,
     dispose: () => {
-      board.dispose();
       root.traverse((object) => {
         const mesh = object as THREE.Mesh;
         if (mesh.geometry) mesh.geometry.dispose();

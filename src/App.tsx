@@ -19,9 +19,7 @@ import { Cursor } from "./components/Cursor";
 import { AeroDock, AeroLaunch, type DockBridge, type DockStatus } from "./components/AeroDock";
 import { DriveHUD, type TrackOutline } from "./components/DriveHUD";
 import { Garage } from "./components/Garage";
-import type { GarageBoard } from "./three/garage";
 import type { DriveHudState, DriveVehicle } from "./three/drive";
-import { getWorkspaceFiles } from "./lib/control";
 import { DEFAULT_DRIVE_SETUP, type DriveSetup } from "./lib/driveStore";
 import {
   addDistance,
@@ -155,16 +153,13 @@ export default function App() {
   const [driveSetup, setDriveSetup] = useState<DriveSetup>(DEFAULT_DRIVE_SETUP);
   const driveSetupRef = useRef(driveSetup);
   const [garage, setGarage] = useState(false);
-  const [garageBoard, setGarageBoard] = useState<GarageBoard | null>(null);
-  const garageBoardRef = useRef(garageBoard);
-
-  useEffect(() => {
-    garageBoardRef.current = garageBoard;
-  }, [garageBoard]);
   const [portalReady, setPortalReady] = useState(false);
   const [portalPhase, setPortalPhase] = useState<"dive" | "flash" | null>(null);
   const portalReadyRef = useRef(false);
   const portalTimers = useRef<number[]>([]);
+  const portalGateRef = useRef(false);
+  const portalCrossRef = useRef<() => void>(() => {});
+  const portalCooldownRef = useRef(0);
   const [career, setCareer] = useState<CareerState>(() => loadCareer());
   const careerRef = useRef(career);
   const careerDistanceRef = useRef(0);
@@ -272,40 +267,6 @@ export default function App() {
     sound.tick("click");
   }, []);
 
-  const loadGarageFiles = useCallback(async () => {
-    const cached = garageBoardRef.current;
-    if (cached?.state !== "ready") {
-      const loading: GarageBoard = {
-        files: [],
-        total: 0,
-        scannedAt: 0,
-        state: "loading",
-      };
-      setGarageBoard(loading);
-      engineRef.current?.setGarageFiles(loading);
-    }
-    try {
-      const scan = await getWorkspaceFiles(600);
-      const ready: GarageBoard = {
-        files: scan.files,
-        total: scan.total,
-        scannedAt: scan.scannedAt,
-        state: "ready",
-      };
-      setGarageBoard(ready);
-      engineRef.current?.setGarageFiles(ready);
-    } catch {
-      const offline: GarageBoard = {
-        files: [],
-        total: 0,
-        scannedAt: 0,
-        state: "offline",
-      };
-      setGarageBoard(offline);
-      engineRef.current?.setGarageFiles(offline);
-    }
-  }, []);
-
   const openGarage = useCallback(() => {
     const engine = engineRef.current;
     if (!engine) return;
@@ -324,14 +285,14 @@ export default function App() {
     if (!audioLockedRef.current && !sound.isOn) setAudioOn(sound.toggle());
     engine.enterGarage();
     setGarage(true);
-    void loadGarageFiles();
-  }, [drive, loadGarageFiles]);
+  }, [drive]);
 
   const closeGarage = useCallback(() => {
     engineRef.current?.endRev();
     sound.endRev();
     engineRef.current?.exitGarage();
     setGarage(false);
+    portalCooldownRef.current = performance.now() + 1400;
     sound.tick("click");
   }, []);
 
@@ -357,6 +318,7 @@ export default function App() {
   const crossRing = useCallback(() => {
     const engine = engineRef.current;
     if (!engine || portalPhase) return;
+    portalGateRef.current = false;
     if (!audioLockedRef.current && !sound.isOn) setAudioOn(sound.toggle());
     if (!engine.startTunnelEntry()) return;
     sound.warp();
@@ -368,6 +330,72 @@ export default function App() {
     const clear = window.setTimeout(() => setPortalPhase(null), 2150);
     portalTimers.current.push(flash, clear);
   }, [openGarage, portalPhase]);
+
+  useEffect(() => {
+    portalCrossRef.current = crossRing;
+  }, [crossRing]);
+
+  useEffect(() => {
+    portalGateRef.current =
+      portalReady &&
+      !garage &&
+      !drive &&
+      !coreView &&
+      !takeover &&
+      !scene.aero &&
+      !portalPhase;
+  }, [portalReady, garage, drive, coreView, takeover, scene.aero, portalPhase]);
+
+  // Reaching the bottom only arms the ring; pushing further scrolls you
+  // through it. Trampolining wheel or touch inertia past the page end is the
+  // deliberate gesture, so casual reading never teleports anyone.
+  useEffect(() => {
+    let push = 0;
+    let decay = 0;
+    const atBottom = () =>
+      window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+    const nudge = (amount: number) => {
+      if (
+        !portalGateRef.current ||
+        !atBottom() ||
+        performance.now() < portalCooldownRef.current
+      ) {
+        push = 0;
+        return;
+      }
+      push += amount;
+      window.clearTimeout(decay);
+      decay = window.setTimeout(() => {
+        push = 0;
+      }, 420);
+      if (push < 140) return;
+      push = 0;
+      window.clearTimeout(decay);
+      portalCrossRef.current();
+    };
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY > 0) nudge(event.deltaY);
+    };
+    let touchY = 0;
+    const onTouchStart = (event: TouchEvent) => {
+      touchY = event.touches[0]?.clientY ?? 0;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const next = event.touches[0]?.clientY ?? touchY;
+      const dy = touchY - next;
+      touchY = next;
+      if (dy > 0) nudge(dy * 2.4);
+    };
+    window.addEventListener("wheel", onWheel, { passive: true });
+    window.addEventListener("touchstart", onTouchStart, { passive: true });
+    window.addEventListener("touchmove", onTouchMove, { passive: true });
+    return () => {
+      window.clearTimeout(decay);
+      window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("touchstart", onTouchStart);
+      window.removeEventListener("touchmove", onTouchMove);
+    };
+  }, []);
 
   const switchDriveVehicle = useCallback(
     (vehicle: DriveVehicle) => {
@@ -703,7 +731,7 @@ export default function App() {
 
   useEffect(() => {
     let raf = 0;
-    const loop = () => {
+    const sync = () => {
       const max = Math.max(
         1,
         document.documentElement.scrollHeight - window.innerHeight,
@@ -722,10 +750,20 @@ export default function App() {
         portalReadyRef.current = ready;
         setPortalReady(ready);
       }
+    };
+    const loop = () => {
+      sync();
       raf = requestAnimationFrame(loop);
     };
+    window.addEventListener("scroll", sync, { passive: true });
+    window.addEventListener("resize", sync);
+    sync();
     raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", sync);
+      window.removeEventListener("resize", sync);
+    };
   }, []);
 
   useEffect(() => {
@@ -1477,18 +1515,18 @@ export default function App() {
             type="button"
             className="portal-cta"
             onClick={crossRing}
-            aria-label="Cross the tunnel ring to enter the private garage"
+            aria-label="Scroll through the tunnel ring to enter the private garage"
           >
             <span className="portal-cta__ring" aria-hidden="true">
               <i />
             </span>
             <span className="portal-cta__copy">
               <i>[ SYS.10 — OTHER SIDE ]</i>
-              <b>CROSS THE RING</b>
-              <em>INTO THE PRIVATE GARAGE</em>
+              <b>SCROLL TO CROSS</b>
+              <em>KEEP SCROLLING INTO THE PRIVATE GARAGE</em>
             </span>
             <span className="portal-cta__go" aria-hidden="true">
-              ↘
+              ↓
             </span>
           </button>
         )}
@@ -1552,8 +1590,6 @@ export default function App() {
           licence={licenceName}
           cp={career.cp}
           unlocks={unlockCount}
-          files={garageBoard?.state === "ready" ? garageBoard.files.length : 0}
-          filesState={garageBoard?.state ?? "idle"}
           audioOn={audioOn}
           onAudio={toggleAudio}
           onRevStart={revStart}

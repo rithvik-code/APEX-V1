@@ -28,7 +28,7 @@ import {
 import { killAllPowerShell } from "./control/powershell.mjs";
 import { stopCommands } from "./control/terminal.mjs";
 import { stopBrowser } from "./control/browser.mjs";
-import { scanFiles, scanWorkspace } from "./control/workspace.mjs";
+import { scanWorkspace } from "./control/workspace.mjs";
 
 const VERSION = "1.4.0";
 const PORT = Number(process.env.APEX_CONTROL_PORT || 4317);
@@ -293,15 +293,6 @@ async function route(req, res) {
 
   if (req.method === "GET" && routePath === "/api/workspace/scan") {
     json(res, 200, scanWorkspace(url.searchParams.get("refresh") === "1"));
-    return;
-  }
-
-  if (req.method === "GET" && routePath === "/api/workspace/files") {
-    json(
-      res,
-      200,
-      scanFiles(url.searchParams.get("limit"), url.searchParams.get("refresh") === "1"),
-    );
     return;
   }
 

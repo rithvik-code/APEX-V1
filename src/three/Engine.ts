@@ -7,7 +7,7 @@ import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { createSupercar, badgeTexture, numberTexture, type Assembly, type VehicleAnchor } from "./car";
 import { createSuperbike } from "./bike";
-import { createGarage, type GarageBoard, type GarageStage } from "./garage";
+import { createGarage, type GarageStage } from "./garage";
 import { AeroFlow, buildBikeStreamlines, buildCarStreamlines } from "./aero";
 import { WeatherSystem } from "./weather";
 import { buildTrack, type Track } from "./track";
@@ -376,7 +376,6 @@ export class ApexEngine {
   private garagePointerPX = 0;
   private garagePointerPY = 0;
   private garagePointerSeen = false;
-  private garageBoard: GarageBoard | null = null;
   private garageSavedCarPos = new THREE.Vector3();
   private garageSavedCarRot = new THREE.Euler();
   private garageSavedBikePos = new THREE.Vector3();
@@ -1563,7 +1562,6 @@ export class ApexEngine {
     stage.group.visible = true;
     stage.setDoor(0);
     stage.setLights(0);
-    stage.setFiles(this.garageBoard);
 
     this.garageOn = true;
     this.garageEntryT = 0;
@@ -1677,11 +1675,6 @@ export class ApexEngine {
     this.revReleaseAt = -1;
     this.revRpm = 0;
     this.revKick = 0;
-  }
-
-  setGarageFiles(board: GarageBoard | null): void {
-    this.garageBoard = board;
-    this.garageStage?.setFiles(board);
   }
 
   startRev(vehicle: "car" | "bike"): void {
