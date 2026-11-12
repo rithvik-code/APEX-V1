@@ -546,10 +546,10 @@ export class ApexEngine {
     window.addEventListener("resize", this.onResize);
     window.addEventListener("pointerdown", this.onDragStart);
     window.addEventListener("pointermove", this.onDragMove, { passive: true });
+    window.addEventListener("pointermove", this.onPointerLook, { passive: true });
     window.addEventListener("pointerup", this.onDragEnd);
     window.addEventListener("pointercancel", this.onDragEnd);
     window.addEventListener("dblclick", this.onResetView);
-    window.addEventListener("wheel", this.onGarageWheel, { passive: true });
     window.addEventListener("keydown", this.onGarageKeyDown);
     window.addEventListener("keyup", this.onGarageKeyUp);
     this.onScroll();
