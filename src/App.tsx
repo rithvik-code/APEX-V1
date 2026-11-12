@@ -19,8 +19,9 @@ import { Cursor } from "./components/Cursor";
 import { AeroDock, AeroLaunch, type DockBridge, type DockStatus } from "./components/AeroDock";
 import { DriveHUD, type TrackOutline } from "./components/DriveHUD";
 import { Garage } from "./components/Garage";
-import type { GarageView } from "./three/garage";
+import type { GarageBoard } from "./three/garage";
 import type { DriveHudState, DriveVehicle } from "./three/drive";
+import { getWorkspaceFiles } from "./lib/control";
 import { DEFAULT_DRIVE_SETUP, type DriveSetup } from "./lib/driveStore";
 import {
   addDistance,
@@ -153,7 +154,10 @@ export default function App() {
   const [driveTrack, setDriveTrack] = useState<TrackOutline | null>(null);
   const [driveSetup, setDriveSetup] = useState<DriveSetup>(DEFAULT_DRIVE_SETUP);
   const driveSetupRef = useRef(driveSetup);
-  const [garage, setGarage] = useState<GarageView | null>(null);
+  const [garage, setGarage] = useState(false);
+  const [garageBoard, setGarageBoard] = useState<GarageBoard | null>(null);
+  const garageBoardRef = useRef(garageBoard);
+  garageBoardRef.current = garageBoard;
   const [portalReady, setPortalReady] = useState(false);
   const [portalPhase, setPortalPhase] = useState<"dive" | "flash" | null>(null);
   const portalReadyRef = useRef(false);
@@ -265,6 +269,40 @@ export default function App() {
     sound.tick("click");
   }, []);
 
+  const loadGarageFiles = useCallback(async () => {
+    const cached = garageBoardRef.current;
+    if (cached?.state !== "ready") {
+      const loading: GarageBoard = {
+        files: [],
+        total: 0,
+        scannedAt: 0,
+        state: "loading",
+      };
+      setGarageBoard(loading);
+      engineRef.current?.setGarageFiles(loading);
+    }
+    try {
+      const scan = await getWorkspaceFiles(600);
+      const ready: GarageBoard = {
+        files: scan.files,
+        total: scan.total,
+        scannedAt: scan.scannedAt,
+        state: "ready",
+      };
+      setGarageBoard(ready);
+      engineRef.current?.setGarageFiles(ready);
+    } catch {
+      const offline: GarageBoard = {
+        files: [],
+        total: 0,
+        scannedAt: 0,
+        state: "offline",
+      };
+      setGarageBoard(offline);
+      engineRef.current?.setGarageFiles(offline);
+    }
+  }, []);
+
   const openGarage = useCallback(() => {
     const engine = engineRef.current;
     if (!engine) return;
@@ -281,23 +319,16 @@ export default function App() {
     sound.tick("start");
     sound.whoosh();
     if (!audioLockedRef.current && !sound.isOn) setAudioOn(sound.toggle());
-    engine.enterGarage("third");
-    setGarage("third");
-  }, [drive]);
+    engine.enterGarage();
+    setGarage(true);
+    void loadGarageFiles();
+  }, [drive, loadGarageFiles]);
 
   const closeGarage = useCallback(() => {
     engineRef.current?.endRev();
     sound.endRev();
     engineRef.current?.exitGarage();
-    setGarage(null);
-    sound.tick("click");
-  }, []);
-
-  const switchGarageView = useCallback((view: GarageView) => {
-    engineRef.current?.endRev();
-    sound.endRev();
-    engineRef.current?.setGarageView(view);
-    setGarage(view);
+    setGarage(false);
     sound.tick("click");
   }, []);
 
@@ -1515,13 +1546,13 @@ export default function App() {
 
       {garage && (
         <Garage
-          view={garage}
           licence={licenceName}
           cp={career.cp}
           unlocks={unlockCount}
+          files={garageBoard?.state === "ready" ? garageBoard.files.length : 0}
+          filesState={garageBoard?.state ?? "idle"}
           audioOn={audioOn}
           onAudio={toggleAudio}
-          onView={switchGarageView}
           onRevStart={revStart}
           onRevEnd={revEnd}
           onReplay={replayGarage}
