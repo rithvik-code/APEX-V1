@@ -622,7 +622,7 @@ export default function App() {
   }, [drive]);
 
   useEffect(() => {
-    document.body.classList.toggle("garage-open", garage !== null);
+    document.body.classList.toggle("garage-open", garage);
     return () => document.body.classList.remove("garage-open");
   }, [garage]);
 
