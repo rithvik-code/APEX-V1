@@ -633,29 +633,6 @@ class SoundEngine {
     }
   }
 
-    if (!this.enabled || !this.ctx || !this.master) return;
-    const ctx = this.ctx;
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    osc.type = "sawtooth";
-    osc.frequency.setValueAtTime(560, now);
-    osc.frequency.exponentialRampToValueAtTime(920, now + 0.09);
-    osc.frequency.exponentialRampToValueAtTime(470, now + 0.3);
-    const filter = ctx.createBiquadFilter();
-    filter.type = "bandpass";
-    filter.frequency.value = 1200;
-    filter.Q.value = 2.4;
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.09, now + 0.04);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.master);
-    osc.start(now);
-    osc.stop(now + 0.36);
-  }
-
   hydraulic(): void {
     this.noiseBurst(820, 0.8, 0.13, 0.85, "bandpass", 1.1);
     if (!this.enabled || !this.ctx || !this.master) return;

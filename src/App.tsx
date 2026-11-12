@@ -347,6 +347,12 @@ export default function App() {
         case "cat":
           sound.meow();
           break;
+        case "dog":
+          sound.bark();
+          break;
+        case "turtles":
+          sound.tick("click");
+          break;
         case "car":
         case "bike":
           driveOutGarage(id);

@@ -269,7 +269,13 @@ export function Garage({
         setPhoto(true);
         break;
       case "cat":
-        setToast("THE BAY CAT — MISO BLINKS, ROLLS OVER, DEMANDS ATTENTION");
+        setToast("MARIO — WHITE PERSIAN · BLINKS SLOWLY, STILL JUDGING YOU");
+        break;
+      case "dog":
+        setToast("SCOTCH — WHITE LABRADOR · TAIL GOING, EARS UP, GOOD BOY");
+        break;
+      case "turtles":
+        setToast("MR & MRS TURTLE — IN NO HURRY WHATSOEVER");
         break;
       case "stool":
         setPanel(null);
