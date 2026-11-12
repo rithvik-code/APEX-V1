@@ -282,13 +282,13 @@ export function Garage({
         setToast("SEATED — VIEW UNLOCKS FROM THE STOOL");
         break;
       case "door":
-        setToast(doorOpen ? "DOOR CLOSING — MOTOR WINDING DOWN" : "DOOR OPENING — DRIVE LIGHT SPILLS IN");
+        setToast(doorOpen ? "DOOR OPENING — DRIVE LIGHT SPILLS IN" : "DOOR CLOSING — MOTOR WINDING DOWN");
         break;
       case "lift":
-        setToast(liftUp ? "LIFT LOWERING — HYDRAULIC BLEED" : "LIFT RAISING — PUMPS ENGAGED");
+        setToast(liftUp ? "LIFT RAISING — PUMPS ENGAGED" : "LIFT LOWERING — HYDRAULIC BLEED");
         break;
       case "service":
-        setToast(service ? "SERVICE MODE OFF" : "SERVICE MODE — LANE LIGHTS DIM, LIFT UP");
+        setToast(service ? "SERVICE MODE — LANE LIGHTS DIM, LIFT UP" : "SERVICE MODE OFF");
         break;
       default:
         break;
