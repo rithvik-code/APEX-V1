@@ -14,6 +14,7 @@ import {
   type KnowledgeState,
 } from "../lib/knowledge";
 import { sound } from "../lib/sound";
+import { DIE_CAST_CATALOG, diecastUnlocked } from "../lib/diecast";
 
 type GarageAction = { id: string; seq: number };
 
@@ -21,6 +22,7 @@ type GarageProps = {
   licence: string;
   cp: number;
   unlocks: number;
+  unlockIds: ReadonlySet<string>;
   audioOn: boolean;
   onAudio: () => void;
   onRevStart: (vehicle: "car" | "bike") => void;
@@ -44,21 +46,11 @@ type GarageProps = {
 
 type Panel = null | "shelf" | "computer" | "trophies" | "radio" | "launch";
 
-const DIE_CAST = [
-  { id: "dtm", name: "M3 DTM", year: "1992", series: "Deutsche Tourenwagen", spec: "2.5L I4 · 340 hp" },
-  { id: "groupb", name: "037 RALLY", year: "1983", series: "Group B", spec: "2.1L I5 turbo · 476 hp" },
-  { id: "lm", name: "962 C", year: "1987", series: "Le Mans", spec: "3.0L flat-6 turbo · 700 hp" },
-  { id: "f1", name: "FW14B", year: "1992", series: "Formula One", spec: "3.5L V10 · 750 hp" },
-  { id: "gt", name: "GT-ONE", year: "1999", series: "GT Endurance", spec: "3.6L V8 turbo · 600 hp" },
-  { id: "wrc", name: "QUATTRO S1", year: "1985", series: "World Rally", spec: "2.1L I5 turbo · 550 hp" },
-  { id: "indy", name: "86C INDY", year: "1986", series: "IndyCar", spec: "2.65L V8 turbo · 800 hp" },
-  { id: "hyper", name: "V12 LM", year: "1995", series: "Hypercar", spec: "6.0L V12 · 670 hp" },
-];
-
 const STATIONS = [
   { name: "PIT FM", note: "race control + team radio" },
   { name: "SYNTH 88", note: "midnight drive synthwave" },
   { name: "V12 AM", note: "engine mic, no commentary" },
+  { name: "LO-FI BAY", note: "tape hiss, crackle, midnight chords" },
 ];
 
 const PAINTS = [
@@ -198,6 +190,7 @@ export function Garage({
   licence,
   cp,
   unlocks,
+  unlockIds,
   audioOn,
   onAudio,
   onRevStart,
@@ -224,7 +217,8 @@ export function Garage({
   const [flash, setFlash] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [station, setStation] = useState(0);
-  const [diecast, setDiecast] = useState(DIE_CAST[0].id);
+  const [tone, setTone] = useState(0.6);
+  const [diecast, setDiecast] = useState(DIE_CAST_CATALOG[0].id);
   const [knowledge, setKnowledge] = useState<KnowledgeState>(() => knowledgeState());
   const lastAction = useRef(0);
 
@@ -338,6 +332,12 @@ export function Garage({
     }
     if (!sound.isOn) onAudio();
     sound.setStation(index);
+    sound.setStationMix(tone);
+  };
+
+  const pickTone = (value: number) => {
+    setTone(value);
+    sound.setStationMix(value);
   };
 
   const capture = () => {
@@ -347,7 +347,8 @@ export function Garage({
     setToast("FRAME SAVED — PNG DOWNLOADED TO THIS MACHINE");
   };
 
-  const selectedCar = DIE_CAST.find((entry) => entry.id === diecast) ?? DIE_CAST[0];
+  const selectedCar =
+    DIE_CAST_CATALOG.find((entry) => entry.id === diecast) ?? DIE_CAST_CATALOG[0];
   const lastSync = knowledge.lastSync
     ? new Date(knowledge.lastSync).toLocaleTimeString("en-GB", { hour12: false })
     : "NOT YET";
@@ -483,28 +484,44 @@ export function Garage({
           {panel === "shelf" && (
             <div className="garage__shelf">
               <p>
-                Eight 1:18 die-casts on the lit shelf. Pick one to read its plate.
+                Eight 1:18 die-casts on the lit shelf. Each casting is earned with
+                the career part it represents — pick one to read its plate.
               </p>
               <div className="garage__shelf-grid">
-                {DIE_CAST.map((entry) => (
-                  <button
-                    key={entry.id}
-                    type="button"
-                    className={entry.id === diecast ? "is-active" : ""}
-                    onClick={() => {
-                      setDiecast(entry.id);
-                      sound.tick("click");
-                    }}
-                  >
-                    <b>{entry.name}</b>
-                    <span>{entry.year}</span>
-                  </button>
-                ))}
+                {DIE_CAST_CATALOG.map((entry) => {
+                  const open = diecastUnlocked(entry, unlockIds);
+                  return (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      className={`${entry.id === diecast ? "is-active" : ""}${
+                        open ? "" : " is-locked"
+                      }`}
+                      onClick={() => {
+                        setDiecast(entry.id);
+                        sound.tick("click");
+                      }}
+                    >
+                      <span
+                        className="garage__shelf-swatch"
+                        style={{ background: entry.css }}
+                        aria-hidden="true"
+                      />
+                      <b>{entry.name}</b>
+                      <span>{open ? entry.year : "LOCKED"}</span>
+                    </button>
+                  );
+                })}
               </div>
               <div className="garage__spec">
                 <b>{selectedCar.name}</b>
                 <span>{selectedCar.series}</span>
                 <i>{selectedCar.spec}</i>
+                {selectedCar.unlock && !diecastUnlocked(selectedCar, unlockIds) && (
+                  <em>
+                    Locked — earn the {selectedCar.unlock.replace(/([A-Z])/g, " $1").toUpperCase()} unlock.
+                  </em>
+                )}
               </div>
             </div>
           )}
@@ -623,6 +640,18 @@ export function Garage({
                   <span>{entry.note}</span>
                 </button>
               ))}
+              <label className="garage__dial">
+                <span>TONE</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round(tone * 100)}
+                  onChange={(event) => pickTone(Number(event.target.value) / 100)}
+                  aria-label="Radio tone"
+                />
+                <b>{tone < 0.34 ? "TAPE" : tone < 0.7 ? "WARM" : "OPEN"}</b>
+              </label>
             </div>
           )}
 

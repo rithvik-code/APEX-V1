@@ -12,6 +12,7 @@ class SoundEngine {
   private windGain: GainNode | null = null;
   private windFilter: BiquadFilterNode | null = null;
   private noiseBuffer: AudioBuffer | null = null;
+  private crackleBuffer: AudioBuffer | null = null;
   private engineGain: GainNode | null = null;
   private engineOscA: OscillatorNode | null = null;
   private engineOscB: OscillatorNode | null = null;
@@ -32,7 +33,11 @@ class SoundEngine {
   private station: {
     gain: GainNode;
     sources: AudioScheduledSourceNode[];
+    tone: BiquadFilterNode;
+    noise: GainNode;
   } | null = null;
+  private stationIndex = 0;
+  private stationDial = 0.6;
 
   private init(): AudioContext {
     if (this.ctx) return this.ctx;
@@ -69,6 +74,21 @@ class SoundEngine {
     const data = noiseBuffer.getChannelData(0);
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
     this.noiseBuffer = noiseBuffer;
+
+    // Sparse pops for the lo-fi deck: short decaying clicks over silence.
+    const crackleBuffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+    const crackleData = crackleBuffer.getChannelData(0);
+    for (let i = 0; i < crackleData.length; i++) crackleData[i] = 0;
+    for (let pop = 0; pop < 260; pop++) {
+      const start = Math.floor(Math.random() * (crackleData.length - 400));
+      const strength = 0.25 + Math.random() * 0.75;
+      const length = 20 + Math.floor(Math.random() * 120);
+      for (let i = 0; i < length; i++) {
+        crackleData[start + i] +=
+          (Math.random() * 2 - 1) * strength * Math.pow(1 - i / length, 3);
+      }
+    }
+    this.crackleBuffer = crackleBuffer;
     const noise = ctx.createBufferSource();
     noise.buffer = noiseBuffer;
     noise.loop = true;
@@ -664,29 +684,40 @@ class SoundEngine {
     }
   }
 
-  // 0 off · 1 pit wall · 2 synth wave · 3 engine radio.
+  // 0 off · 1 pit wall · 2 synth wave · 3 engine radio · 4 lo-fi deck.
   setStation(index: number): void {
     this.silenceStation();
+    this.stationIndex = index;
     if (index <= 0 || !this.enabled || !this.ctx || !this.master) return;
     const ctx = this.ctx;
     const gain = ctx.createGain();
     gain.gain.value = 0.0001;
     gain.connect(this.master);
+    // The dial trims the top end of the whole station and opens up the noise
+    // floor, so one knob walks from muffled tape to open broadcast.
+    const tone = ctx.createBiquadFilter();
+    tone.type = "lowpass";
+    tone.frequency.value = 420 + this.stationDial * 8600;
+    tone.Q.value = 0.7;
+    tone.connect(gain);
+    const noise = ctx.createGain();
+    noise.gain.value = 0.35 + (1 - this.stationDial) * 0.55;
+    noise.connect(tone);
     const sources: AudioScheduledSourceNode[] = [];
-    const tone = (freq: number, type: OscillatorType, level: number) => {
+    const tone2 = (freq: number, type: OscillatorType, level: number) => {
       const osc = ctx.createOscillator();
       osc.type = type;
       osc.frequency.value = freq;
       const g = ctx.createGain();
       g.gain.value = level;
       osc.connect(g);
-      g.connect(gain);
+      g.connect(tone);
       osc.start();
       sources.push(osc);
     };
     if (index === 1) {
-      tone(392, "sine", 0.5);
-      tone(523, "sine", 0.3);
+      tone2(392, "sine", 0.5);
+      tone2(523, "sine", 0.3);
       const src = ctx.createBufferSource();
       if (this.noiseBuffer) {
         src.buffer = this.noiseBuffer;
@@ -700,20 +731,89 @@ class SoundEngine {
         noiseGain.gain.value = 0.05;
         src.connect(filter);
         filter.connect(noiseGain);
-        noiseGain.connect(gain);
+        noiseGain.connect(noise);
         src.start();
         sources.push(src);
       }
     } else if (index === 2) {
-      tone(110, "sawtooth", 0.35);
-      tone(164.8, "sawtooth", 0.28);
-      tone(220, "triangle", 0.22);
+      tone2(110, "sawtooth", 0.35);
+      tone2(164.8, "sawtooth", 0.28);
+      tone2(220, "triangle", 0.22);
+    } else if (index === 3) {
+      tone2(55, "sawtooth", 0.5);
+      tone2(82.5, "sawtooth", 0.3);
     } else {
-      tone(55, "sawtooth", 0.5);
-      tone(82.5, "sawtooth", 0.3);
+      // Lo-fi: a warm chord that drifts under tape hiss and vinyl crackle.
+      const chord = [174.61, 220, 261.63, 329.63];
+      chord.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        osc.type = i % 2 ? "triangle" : "sine";
+        osc.frequency.value = freq;
+        const g = ctx.createGain();
+        g.gain.value = 0.13;
+        osc.connect(g);
+        g.connect(tone);
+        osc.start();
+        sources.push(osc);
+        // Wow and flutter: a slow detune wobble, faster on the top strings.
+        const wow = ctx.createOscillator();
+        wow.frequency.value = 0.21 + i * 0.07;
+        const wowGain = ctx.createGain();
+        wowGain.gain.value = freq * 0.009;
+        wow.connect(wowGain);
+        wowGain.connect(osc.frequency);
+        wow.start();
+        sources.push(wow);
+      });
+      if (this.noiseBuffer) {
+        const hiss = ctx.createBufferSource();
+        hiss.buffer = this.noiseBuffer;
+        hiss.loop = true;
+        hiss.playbackRate.value = 0.85;
+        const hissFilter = ctx.createBiquadFilter();
+        hissFilter.type = "highpass";
+        hissFilter.frequency.value = 2200;
+        const hissGain = ctx.createGain();
+        hissGain.gain.value = 0.05;
+        hiss.connect(hissFilter);
+        hissFilter.connect(hissGain);
+        hissGain.connect(noise);
+        hiss.start();
+        sources.push(hiss);
+      }
+      if (this.crackleBuffer) {
+        const crackle = ctx.createBufferSource();
+        crackle.buffer = this.crackleBuffer;
+        crackle.loop = true;
+        const crackleGain = ctx.createGain();
+        crackleGain.gain.value = 0.5;
+        crackle.connect(crackleGain);
+        crackleGain.connect(noise);
+        crackle.start();
+        sources.push(crackle);
+      }
     }
     gain.gain.setTargetAtTime(0.035, ctx.currentTime, 0.3);
-    this.station = { gain, sources };
+    this.station = { gain, sources, tone, noise };
+  }
+
+  // 0 muffled tape · 1 open broadcast.
+  setStationMix(dial: number): void {
+    const value = Math.max(0, Math.min(1, dial));
+    this.stationDial = value;
+    const station = this.station;
+    if (!station || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    station.tone.frequency.setTargetAtTime(420 + value * 8600, now, 0.06);
+    station.noise.gain.setTargetAtTime(0.35 + (1 - value) * 0.55, now, 0.06);
+  }
+
+  get stationTone(): number {
+    return this.stationDial;
+  }
+
+  get currentStation(): number {
+    return this.stationIndex;
   }
 
   tick(kind: "start" | "click" | "hover" | "key" = "click"): void {
