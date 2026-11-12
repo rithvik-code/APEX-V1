@@ -397,6 +397,7 @@ export class ApexEngine {
   private garageLiftTarget = 0;
   private garageService = false;
   private garageServiceOpen = 0;
+  private garageLiveT = 0;
   private garageSeated = false;
   private garageVirtualForward = 0;
   private garageVirtualStrafe = 0;
@@ -1752,6 +1753,7 @@ export class ApexEngine {
 
     this.garageOn = true;
     this.garageEntryT = 0;
+    this.garageLiveT = 0;
     this.garageWalk.set(4.4, 0, 5.6);
     this.garageBob = 0;
     this.garageLookYaw = 0.7;
@@ -1859,6 +1861,7 @@ export class ApexEngine {
   replayGarageEntry(): void {
     if (!this.garageOn) return;
     this.garageEntryT = 0;
+    this.garageLiveT = 0;
     this.garageStage?.setDoor(0);
     this.garageStage?.setLights(0);
     this.carGroup.position.set(0, GARAGE_CAR_HOVER_Y, 0.2);
@@ -1989,7 +1992,10 @@ export class ApexEngine {
   private updateGarage(dt: number): void {
     const stage = this.garageStage;
     if (!stage) return;
-    stage.update(dt, this.clockTime);
+    // The pets hold their glare from the walk-in for a few beats, then let go.
+    this.garageLiveT += dt;
+    const stare = Math.max(0, 1 - Math.max(0, this.garageLiveT - 4.4) / 3.4);
+    stage.update(dt, this.clockTime, { x: this.garageWalk.x, z: this.garageWalk.z }, stare);
     this.weather.update(dt);
 
     if (this.garageEntryT < GARAGE_ENTRY_DURATION) {

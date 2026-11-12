@@ -27,7 +27,12 @@ export type GarageStage = {
   group: THREE.Group;
   setDoor: (open: number) => void;
   setLights: (level: number) => void;
-  update: (dt: number, time: number) => void;
+  update: (
+    dt: number,
+    time: number,
+    player: { x: number; z: number } | null,
+    stare: number,
+  ) => void;
   dispose: () => void;
   setRev: (rpm: number, kick: number) => void;
   setWeather: (wet: boolean, night: boolean) => void;
@@ -342,6 +347,21 @@ function drawTach(ctx: CanvasRenderingContext2D, rpm: number, kick: number): voi
   ctx.fillText("BAY 01 / LIVE TELEMETRY", 24, 24);
 }
 
+
+function nameplateTexture(name: string): THREE.CanvasTexture {
+  const { canvas, ctx } = canvas2d(320, 72);
+  ctx.fillStyle = "#0b0d09";
+  ctx.fillRect(0, 0, 320, 72);
+  ctx.strokeStyle = "rgba(200,255,22,0.85)";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(4, 4, 312, 64);
+  ctx.fillStyle = "#e9ede8";
+  ctx.font = "700 30px 'IBM Plex Mono', monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(name, 160, 37);
+  return texture(canvas);
+}
 
 function hazardTexture(): THREE.CanvasTexture {
   const { canvas, ctx } = canvas2d(128, 64);
@@ -1116,17 +1136,50 @@ export function createGarage(): GarageStage {
     cylinder(0.06, 0.06, acid, px, 0.54, pz, root, 10);
   }
 
-  // The bay cat, asleep by the tyre stack until it decides otherwise.
+  // The bay pets. Every one of them turns to glare at whoever just walked
+  // through the door, then goes back to minding its own business.
+  const petNameplate = (name: string, x: number, z: number, ry: number) => {
+    const holder = new THREE.Group();
+    holder.position.set(x, 0.02, z);
+    holder.rotation.y = ry;
+    root.add(holder);
+    const plate = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.46, 0.105),
+      new THREE.MeshBasicMaterial({
+        map: nameplateTexture(name),
+        transparent: true,
+        fog: false,
+      }),
+    );
+    plate.rotation.x = -Math.PI / 2;
+    holder.add(plate);
+  };
+
+  const eyeMat = new THREE.MeshStandardMaterial({
+    color: 0x14100c,
+    roughness: 0.25,
+  });
+
+  // MARIO — white Persian, owns the tyre-stack corner.
   const cat = new THREE.Group();
   cat.position.set(6.05, 0, 2.6);
   root.add(cat);
-  const fur = new THREE.MeshStandardMaterial({ color: 0x2b2c26, roughness: 0.92 });
-  const furLight = new THREE.MeshStandardMaterial({ color: 0x4a4b40, roughness: 0.9 });
+  const fur = new THREE.MeshStandardMaterial({ color: 0xf3f1e9, roughness: 0.95 });
+  const furLight = new THREE.MeshStandardMaterial({ color: 0xdcd9cd, roughness: 0.95 });
   const catBody = box(0.24, 0.17, 0.46, fur, 0, 0.2, 0, cat);
-  box(0.17, 0.14, 0.15, fur, 0, 0.27, 0.26, cat);
+  box(0.19, 0.15, 0.16, fur, 0, 0.27, 0.26, cat);
   const catHead = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), fur);
   catHead.position.set(0, 0.34, 0.33);
   cat.add(catHead);
+  const catMuzzle = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), furLight);
+  catMuzzle.position.set(0, -0.03, 0.085);
+  catMuzzle.scale.set(1, 0.75, 0.65);
+  catHead.add(catMuzzle);
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.016, 8, 8), eyeMat);
+    eye.position.set(side * 0.042, 0.015, 0.082);
+    catHead.add(eye);
+  }
   const catEars: THREE.Mesh[] = [];
   for (const side of [-1, 1]) {
     const ear = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.07, 6), furLight);
@@ -1140,13 +1193,133 @@ export function createGarage(): GarageStage {
   const catTail = new THREE.Group();
   catTail.position.set(0, 0.2, -0.24);
   cat.add(catTail);
-  const tailSeg = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.028, 0.34, 8), fur);
+  const tailSeg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.038, 0.36, 8), fur);
   tailSeg.position.set(0, 0.12, -0.04);
   tailSeg.rotation.x = -0.6;
   catTail.add(tailSeg);
   const catBed = cylinder(0.42, 0.09, red, 6.3, 0.045, 3.5, root, 20);
   catBed.scale.z = 0.8;
   catBed.rotation.y = 0.4;
+  petNameplate("MARIO", 6.3, 4.1, 0.4);
+
+  // SCOTCH — white Labrador, parked on his bed by the launch pad.
+  const dog = new THREE.Group();
+  dog.position.set(-4.6, 0, 4.8);
+  dog.rotation.y = 0.9;
+  root.add(dog);
+  const dogBody = box(0.32, 0.22, 0.66, fur, 0, 0.17, 0, dog);
+  const dogHead = new THREE.Group();
+  dogHead.position.set(0, 0.36, 0.38);
+  dog.add(dogHead);
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 10), fur);
+  dogHead.add(skull);
+  const muzzle = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), furLight);
+  muzzle.position.set(0, -0.05, 0.12);
+  muzzle.scale.set(1, 0.8, 1.5);
+  dogHead.add(muzzle);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 8), eyeMat);
+  nose.position.set(0, -0.02, 0.19);
+  dogHead.add(nose);
+  const dogEars: THREE.Mesh[] = [];
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 8), eyeMat);
+    eye.position.set(side * 0.045, 0.035, 0.1);
+    dogHead.add(eye);
+    const ear = box(0.055, 0.16, 0.09, furLight, side * 0.115, -0.02, 0.03, dogHead);
+    ear.rotation.z = side * 0.45;
+    dogEars.push(ear);
+  }
+  for (const side of [-1, 1]) {
+    box(0.075, 0.07, 0.32, fur, side * 0.105, 0.06, 0.42, dog);
+    box(0.075, 0.09, 0.11, fur, side * 0.105, 0.075, -0.3, dog);
+  }
+  const dogTail = new THREE.Group();
+  dogTail.position.set(0, 0.19, -0.34);
+  dog.add(dogTail);
+  const dogTailSeg = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.02, 0.3, 8), fur);
+  dogTailSeg.position.set(0, 0.07, -0.09);
+  dogTailSeg.rotation.x = 0.95;
+  dogTail.add(dogTailSeg);
+  const dogBed = cylinder(0.58, 0.09, red, -4.6, 0.045, 4.8, root, 22);
+  dogBed.scale.z = 1.25;
+  petNameplate("SCOTCH", -4.6, 5.7, 0.9);
+
+  // MR & MRS TURTLE — ambling on their pebble tray in the back corner.
+  const shellMat = new THREE.MeshStandardMaterial({
+    color: 0x43553a,
+    roughness: 0.5,
+    metalness: 0.05,
+  });
+  const skinMat = new THREE.MeshStandardMaterial({
+    color: 0x7c8f56,
+    roughness: 0.75,
+  });
+  const turtleTray = cylinder(0.78, 0.07, darkSteel, 6.35, 0.035, -6.05, root, 26);
+  turtleTray.scale.z = 1.1;
+  for (let i = 0; i < 7; i++) {
+    const pebble = new THREE.Mesh(
+      new THREE.SphereGeometry(0.05 + (i % 3) * 0.015, 8, 6),
+      i % 2 ? paper : steel,
+    );
+    const a = (i / 7) * Math.PI * 2;
+    pebble.position.set(6.35 + Math.cos(a) * 0.6, 0.075, -6.05 + Math.sin(a) * 0.55);
+    pebble.scale.y = 0.55;
+    root.add(pebble);
+  }
+  const waterDish = cylinder(0.12, 0.035, steel, 5.75, 0.09, -6.5, root, 16);
+  waterDish.scale.y = 1;
+  const turtles: Array<{
+    group: THREE.Group;
+    head: THREE.Group;
+    baseX: number;
+    baseZ: number;
+    phase: number;
+  }> = [];
+  const buildTurtle = (x: number, z: number, scale: number, phase: number) => {
+    const t = new THREE.Group();
+    t.position.set(x, 0, z);
+    t.scale.setScalar(scale);
+    root.add(t);
+    const shell = new THREE.Mesh(
+      new THREE.SphereGeometry(0.09, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2),
+      shellMat,
+    );
+    shell.position.y = 0.055;
+    shell.scale.set(1.15, 0.75, 1.3);
+    t.add(shell);
+    for (let seg = 0; seg < 5; seg++) {
+      const ridge = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.01, 0.12), darkSteel);
+      ridge.position.set(-0.04 + seg * 0.02, 0.115, -0.02 + (seg % 2) * 0.05);
+      t.add(ridge);
+    }
+    const head = new THREE.Group();
+    head.position.set(0, 0.05, 0.115);
+    t.add(head);
+    const neck = new THREE.Mesh(new THREE.SphereGeometry(0.032, 10, 8), skinMat);
+    neck.position.set(0, 0.005, 0.02);
+    head.add(neck);
+    const turtleEye = new THREE.Mesh(new THREE.SphereGeometry(0.006, 6, 6), eyeMat);
+    turtleEye.position.set(0.012, 0.02, 0.042);
+    head.add(turtleEye);
+    const turtleEye2 = new THREE.Mesh(new THREE.SphereGeometry(0.006, 6, 6), eyeMat);
+    turtleEye2.position.set(-0.012, 0.02, 0.042);
+    head.add(turtleEye2);
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const leg = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), skinMat);
+        leg.position.set(sx * 0.085, 0.02, sz * 0.075);
+        leg.scale.set(1, 0.65, 1.25);
+        t.add(leg);
+      }
+    }
+    const tailNub = new THREE.Mesh(new THREE.SphereGeometry(0.014, 8, 6), skinMat);
+    tailNub.position.set(0, 0.03, -0.13);
+    t.add(tailNub);
+    turtles.push({ group: t, head, baseX: x, baseZ: z, phase });
+  };
+  buildTurtle(6.15, -5.8, 1, 0);
+  buildTurtle(6.6, -6.35, 0.8, 2.4);
+  petNameplate("MR & MRS TURTLE", 6.35, -5.15, 0.2);
 
   // Wall tachometer: live rpm off the rev rig.
   const tach = tachCanvas();
@@ -1410,7 +1583,9 @@ export function createGarage(): GarageStage {
     { id: "radio", label: "RADIO TUNER", position: new THREE.Vector3(2.05, 1.2, -8.15), radius: 1.35 },
     { id: "stool", label: "SIT ON STOOL", position: new THREE.Vector3(2.85, 0.7, -7.2), radius: 1.4 },
     { id: "trophies", label: "TROPHY WALL", position: new THREE.Vector3(7.1, 2.1, -3.1), radius: 1.9 },
-    { id: "cat", label: "THE BAY CAT", position: new THREE.Vector3(6.05, 0.3, 2.6), radius: 1.7 },
+    { id: "cat", label: "MARIO / PERSIAN CAT", position: new THREE.Vector3(6.05, 0.3, 2.6), radius: 1.7 },
+    { id: "dog", label: "SCOTCH / LABRADOR", position: new THREE.Vector3(-4.6, 0.3, 4.8), radius: 1.6 },
+    { id: "turtles", label: "MR & MRS TURTLE", position: new THREE.Vector3(6.35, 0.15, -6.0), radius: 1.3 },
     { id: "launch", label: "LAUNCH PRACTICE", position: new THREE.Vector3(3.6, 0.3, 6.0), radius: 2 },
     { id: "car", label: "TAKE THE CAR OUT", position: new THREE.Vector3(0, 1.1, 0.2), radius: 3.1 },
     { id: "bike", label: "TAKE THE BIKE OUT", position: new THREE.Vector3(5.5, 0.9, 3.4), radius: 2.1 },
@@ -1512,7 +1687,12 @@ export function createGarage(): GarageStage {
     pylonMat.opacity = wet ? 0.7 : 0.95;
   };
 
-  const update = (dt: number, time: number): void => {
+  const update = (
+    dt: number,
+    time: number,
+    player: { x: number; z: number } | null = null,
+    stare = 0,
+  ): void => {
     const now = new Date();
     const seconds = now.getSeconds() + now.getMilliseconds() / 1000;
     const minutes = now.getMinutes() + seconds / 60;
@@ -1579,21 +1759,39 @@ export function createGarage(): GarageStage {
       positions.needsUpdate = true;
     }
 
-    // The cat patrols its corner and never hurries — until the V12 wakes up.
+    // The pets glare at whoever just walked through the door, then relax.
+    // Step close and they glance over again — and the cat still bolts for
+    // the car whenever the V12 wakes up.
+    const px = player?.x ?? cat.position.x;
+    const pz = player?.z ?? cat.position.z;
+    const attention = (x: number, z: number, radius: number): number => {
+      const distance = Math.hypot(px - x, pz - z);
+      return Math.min(1, Math.max(stare, 1 - distance / radius));
+    };
+    const aimYaw = (baseYaw: number, x: number, z: number): number => {
+      const rel = Math.atan2(px - x, pz - z) - baseYaw;
+      return Math.atan2(Math.sin(rel), Math.cos(rel));
+    };
+
     const alertTarget = Math.min(1, revRpm * 1.25 + revKick * 0.6);
     catAlert += (alertTarget - catAlert) * (1 - Math.exp(-dt * 6));
+    const catPlayerAttn = attention(cat.position.x, cat.position.z, 4.2);
+    const catAttn = Math.max(catAlert, catPlayerAttn);
     const drift = 1 - catAlert * 0.75;
     cat.position.x = 6.05 + Math.sin(time * 0.17) * 0.55 * drift;
     cat.position.z = 2.6 + Math.cos(time * 0.23) * 0.85 * drift;
     cat.rotation.y = Math.sin(time * 0.17) * 0.7 * drift;
     catBody.position.y = 0.2 - catAlert * 0.035 + Math.sin(time * 1.7) * 0.006;
-    const toCar = Math.atan2(0 - cat.position.x, 0.2 - cat.position.z);
+    const toCar = Math.atan2(-cat.position.x, 0.2 - cat.position.z);
+    const catTargetYaw = catAlert > catPlayerAttn
+      ? toCar - cat.rotation.y
+      : aimYaw(cat.rotation.y, cat.position.x, cat.position.z);
     catHead.rotation.y = THREE.MathUtils.lerp(
       Math.sin(time * 0.6) * 0.4,
-      toCar - cat.rotation.y,
-      catAlert,
+      catTargetYaw,
+      catAttn,
     );
-    catHead.rotation.x = catAlert * 0.12;
+    catHead.rotation.x = Math.min(0.14, catAttn * 0.1);
     catTail.rotation.z = Math.sin(time * 2.6) * 0.42;
     catTail.rotation.x = THREE.MathUtils.lerp(
       Math.sin(time * 1.3) * 0.18,
@@ -1601,7 +1799,38 @@ export function createGarage(): GarageStage {
       catAlert,
     );
     for (const ear of catEars) {
-      ear.rotation.x = catAlert * -0.45;
+      ear.rotation.x = -(catAlert * 0.45 + catPlayerAttn * 0.22);
+    }
+
+    const dogAttn = attention(dog.position.x, dog.position.z, 5.2);
+    dogHead.rotation.y = THREE.MathUtils.lerp(
+      Math.sin(time * 0.4) * 0.45,
+      aimYaw(dog.rotation.y, dog.position.x, dog.position.z),
+      dogAttn,
+    );
+    dogHead.rotation.x = THREE.MathUtils.lerp(
+      0.03 + Math.sin(time * 0.9) * 0.03,
+      -0.04,
+      dogAttn,
+    );
+    dogBody.scale.y = 1 + Math.sin(time * 1.5) * 0.02;
+    dogTail.rotation.y = Math.sin(time * (2.2 + dogAttn * 9)) * (0.12 + dogAttn * 0.55);
+    for (const ear of dogEars) {
+      ear.rotation.z = Math.sign(ear.position.x) * (0.45 - dogAttn * 0.2);
+    }
+
+    for (const t of turtles) {
+      const wob = time * 0.1 + t.phase;
+      t.group.position.x = t.baseX + Math.cos(wob) * 0.1;
+      t.group.position.z = t.baseZ + Math.sin(wob * 0.8) * 0.09;
+      t.group.rotation.y = wob * 0.5;
+      const attn = attention(t.group.position.x, t.group.position.z, 3.6);
+      t.head.rotation.y = THREE.MathUtils.lerp(
+        Math.sin(time * 0.5 + t.phase) * 0.55,
+        aimYaw(t.group.rotation.y, t.group.position.x, t.group.position.z),
+        attn,
+      );
+      t.head.position.y = 0.05 + Math.sin(time * 1.1 + t.phase) * 0.004;
     }
 
     if (activeRing) activeRing.rotation.z += dt * 0.5;

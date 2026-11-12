@@ -594,6 +594,49 @@ class SoundEngine {
     const ctx = this.ctx;
     const now = ctx.currentTime;
     const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(720, now);
+    osc.frequency.exponentialRampToValueAtTime(480, now + 0.18);
+    osc.frequency.exponentialRampToValueAtTime(640, now + 0.34);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.05, now + 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.36);
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start(now);
+    osc.stop(now + 0.38);
+  }
+
+  bark(): void {
+    if (!this.enabled || !this.ctx || !this.master) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    for (const offset of [0, 0.22]) {
+      const osc = ctx.createOscillator();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(340, now + offset);
+      osc.frequency.exponentialRampToValueAtTime(120, now + offset + 0.13);
+      const filter = ctx.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.value = 520;
+      filter.Q.value = 1.3;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, now + offset);
+      gain.gain.exponentialRampToValueAtTime(0.11, now + offset + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.16);
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.master);
+      osc.start(now + offset);
+      osc.stop(now + offset + 0.18);
+    }
+  }
+
+    if (!this.enabled || !this.ctx || !this.master) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
     osc.type = "sawtooth";
     osc.frequency.setValueAtTime(560, now);
     osc.frequency.exponentialRampToValueAtTime(920, now + 0.09);
