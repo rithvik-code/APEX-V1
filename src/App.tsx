@@ -32,6 +32,7 @@ import {
 } from "./lib/career";
 import { useControl } from "./hooks/useControl";
 import { sound } from "./lib/sound";
+import { knowledgeState } from "./lib/knowledge";
 import { downloadBlob } from "./lib/clip";
 import {
   aeroTelemetry,
@@ -637,6 +638,28 @@ export default function App() {
     );
     engineRef.current?.setGarageTrophies(trophyCount);
   }, [career, trophyCount]);
+
+  const [knowledgeFacts, setKnowledgeFacts] = useState(0);
+
+  useEffect(() => {
+    if (!garage) return;
+    const read = () => setKnowledgeFacts(knowledgeState().facts.length);
+    read();
+    const id = window.setInterval(read, 5000);
+    return () => window.clearInterval(id);
+  }, [garage]);
+
+  // The bench terminal in the bay is a live readout of the whole career.
+  useEffect(() => {
+    if (!garage) return;
+    engineRef.current?.setGarageTerminal({
+      cp: career.cp,
+      licence: currentLicence(career.cp).name,
+      unlocks: unlockCount,
+      paint: scene.paint.enabled ? scene.paint.base.toUpperCase() : "STOCK",
+      knowledge: knowledgeFacts,
+    });
+  }, [garage, career.cp, unlockCount, scene.paint, knowledgeFacts]);
 
   useEffect(() => {
     if (!scene.aero) return;
@@ -1689,6 +1712,7 @@ export default function App() {
           licence={licenceName}
           cp={career.cp}
           unlocks={unlockCount}
+          unlockIds={unlockSet(career)}
           audioOn={audioOn}
           onAudio={toggleAudio}
           onRevStart={revStart}
