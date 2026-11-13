@@ -1176,6 +1176,19 @@
   50% { transform: rotate(45deg) scale(0.94); opacity: 0.35; }
 }
 
+.mesh-preview--standby.is-live .mesh-standby__sigil span {
+  border-color: rgba(200, 255, 22, 0.75);
+  box-shadow: 0 0 18px rgba(200, 255, 22, 0.25), inset 0 0 12px rgba(200, 255, 22, 0.15);
+  animation: mesh-sigil-live 2.2s linear infinite;
+}
+
+.mesh-preview--standby.is-live .mesh-standby__sigil span:nth-child(2) { animation-direction: reverse; }
+
+@keyframes mesh-sigil-live {
+  from { transform: rotate(45deg); }
+  to { transform: rotate(405deg); }
+}
+
 .mesh-standby__copy {
   margin: 0;
   max-width: 560px;
@@ -1211,5 +1224,6 @@
   .mesh-ear__ring,
   .mesh-dot--live,
   .mesh-standby__sigil span,
+  .mesh-preview--standby.is-live .mesh-standby__sigil span,
   .mesh-gauge__spin { animation: none; }
 }

@@ -42,7 +42,7 @@ const SERVICES: Record<string, Service> = {
   voiceforge: {
     url: "http://127.0.0.1:5000/",
     detail: () => "SERVICE UP",
-    steps: ["pip install piper-tts", "python -m piper.http_http_server -m voice.onnx --port 5000"],
+    steps: ["pip install piper-tts", "python -m piper.http_server -m voice.onnx --port 5000"],
   },
   restore: {
     url: null,
@@ -69,15 +69,18 @@ export function Standby({ node }: { node: MeshNode }) {
   useEffect(() => {
     if (!service?.url) return;
     let alive = true;
+    let misses = 0;
+    let online = false;
     const probe = async () => {
-      setState((prev) => (prev === "probing" ? prev : "probing"));
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 1500);
+      const timer = setTimeout(() => controller.abort(), 4000);
       try {
         const res = await fetch(service.url, { signal: controller.signal });
         const body = await res.text().catch(() => "");
         if (!alive) return;
         if (res.ok) {
+          misses = 0;
+          online = true;
           setState("online");
           setDetail(service.detail(body));
         } else {
@@ -86,6 +89,10 @@ export function Standby({ node }: { node: MeshNode }) {
         }
       } catch {
         if (!alive) return;
+        // A busy tab can stall one fetch; only go dark after two straight misses.
+        misses += 1;
+        if (online && misses < 2) return;
+        online = false;
         setState("offline");
         setDetail("NO ANSWER ON LOOPBACK");
       } finally {
@@ -101,7 +108,7 @@ export function Standby({ node }: { node: MeshNode }) {
   }, [service]);
 
   return (
-    <div className="mesh-preview mesh-preview--standby">
+    <div className={`mesh-preview mesh-preview--standby${state === "online" ? " is-live" : ""}`}>
       <div className="mesh-standby__sigil" aria-hidden="true">
         <span />
         <span />
@@ -114,7 +121,7 @@ export function Standby({ node }: { node: MeshNode }) {
         <span className="mesh-status__target">{node.runtime}</span>
       </div>
       <p className="mesh-standby__copy">{node.blurb}</p>
-      {service && (
+      {service && state !== "online" && (
         <div className="mesh-standby__steps">
           <b>WAKE IT WITH</b>
           {service.steps.map((step) => (
@@ -123,9 +130,9 @@ export function Standby({ node }: { node: MeshNode }) {
         </div>
       )}
       <p className="mesh-fine">
-        THIS NODE RUNS NOTHING UNTIL ITS SERVICE EXISTS. THE MESH DOES NOT
-        INSTALL SOFTWARE WITHOUT YOU — WHEN THE PORT ANSWERS, THE NODE GOES LIVE
-        ON ITS OWN.
+        {state === "online"
+          ? "SERVICE ANSWERED ON LOOPBACK — THIS NODE IS LIVE. RE-PROBED EVERY 12 SECONDS."
+          : "THIS NODE RUNS NOTHING UNTIL ITS SERVICE EXISTS. THE MESH DOES NOT INSTALL SOFTWARE WITHOUT YOU — WHEN THE PORT ANSWERS, THE NODE GOES LIVE ON ITS OWN."}
       </p>
     </div>
   );

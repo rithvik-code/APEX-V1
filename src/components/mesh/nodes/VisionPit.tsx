@@ -8,6 +8,7 @@ export function VisionPit(_props: MeshNodeProps) {
   const [error, setError] = useState("");
   const [source, setSource] = useState<string | null>(null);
   const [detections, setDetections] = useState<Detection[]>([]);
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const [scanline, setScanline] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const scanRaf = useRef(0);
@@ -20,6 +21,7 @@ export function VisionPit(_props: MeshNodeProps) {
   const onFile = async (file: File) => {
     setError("");
     setDetections([]);
+    setDims(null);
     setScanline(0);
     const url = URL.createObjectURL(file);
     setSource(url);
@@ -47,18 +49,18 @@ export function VisionPit(_props: MeshNodeProps) {
   return (
     <div className="mesh-preview">
       <div className="mesh-camframe mesh-camframe--static">
-        {source && <img src={source} alt="scan subject" className="mesh-cam" />}
-        {source && detections.map((detection, i) => {
+        {source && <img src={source} alt="scan subject" className="mesh-cam" onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })} />}
+        {source && dims && detections.map((detection, i) => {
           const [xmin, ymin, xmax, ymax] = detection.box;
           return (
             <div
               key={`${detection.label}-${i}`}
               className="mesh-box"
               style={{
-                left: `${xmin * 100}%`,
-                top: `${ymin * 100}%`,
-                width: `${(xmax - xmin) * 100}%`,
-                height: `${(ymax - ymin) * 100}%`,
+                left: `${(xmin / dims.w) * 100}%`,
+                top: `${(ymin / dims.h) * 100}%`,
+                width: `${((xmax - xmin) / dims.w) * 100}%`,
+                height: `${((ymax - ymin) / dims.h) * 100}%`,
                 animationDelay: `${i * 120}ms`,
               }}
             >
@@ -95,6 +97,12 @@ export function VisionPit(_props: MeshNodeProps) {
             </div>
           ))}
         </div>
+      )}
+
+      {source && state === "done" && detections.length === 0 && (
+        <p className="mesh-fine mesh-fine--pad">
+          SCAN COMPLETE · 0 OBJECTS ABOVE 55% — TRY A CLEARER, WELL-LIT FRAME.
+        </p>
       )}
 
       {source && state !== "loading" && state !== "scanning" && (
