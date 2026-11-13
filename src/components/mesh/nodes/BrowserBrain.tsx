@@ -1,3 +1,4 @@
+import type { MeshNodeProps } from "../types";
 import { useEffect, useRef, useState } from "react";
 
 type ModelOption = { id: string; name: string; size: string };
@@ -9,7 +10,7 @@ const MODELS: ModelOption[] = [
 
 type Phase = "probe" | "ready" | "loading" | "live" | "nogpu" | "error";
 
-export function BrowserBrain(_props: Record<string, never>) {
+export function BrowserBrain(_props: MeshNodeProps) {
   const [phase, setPhase] = useState<Phase>("probe");
   const [gpu, setGpu] = useState(false);
   const [modelId, setModelId] = useState(MODELS[0].id);

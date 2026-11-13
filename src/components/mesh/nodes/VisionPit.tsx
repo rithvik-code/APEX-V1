@@ -1,7 +1,8 @@
+import type { MeshNodeProps } from "../types";
 import { useRef, useState } from "react";
 import { loadDetector, type Detection, type LoadEvent } from "../embed";
 
-export function VisionPit(_props: Record<string, never>) {
+export function VisionPit(_props: MeshNodeProps) {
   const [loads, setLoads] = useState<Record<string, LoadEvent>>({});
   const [state, setState] = useState<"idle" | "loading" | "scanning" | "done" | "error">("idle");
   const [error, setError] = useState("");

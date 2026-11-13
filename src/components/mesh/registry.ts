@@ -1,11 +1,6 @@
-import type { SceneConfigLike } from "./types";
+import type { MeshNodeProps } from "./types";
 
-export type { SceneConfigLike };
-export type MeshNodeProps = {
-  scene: SceneConfigLike;
-  onTune: (patch: Record<string, unknown>) => void;
-  onDrive: () => void;
-};
+export type { MeshNodeProps };
 
 export type NodeTier = "live" | "link" | "consent";
 

@@ -1,3 +1,4 @@
+import type { MeshNodeProps } from "../types";
 import { useRef, useState } from "react";
 import { loadNer, type Entity, type LoadEvent } from "../embed";
 import { knowledgeState, type KnowledgeFact } from "../../../lib/knowledge";
@@ -11,7 +12,7 @@ const TYPE_LABEL: Record<string, string> = {
 
 type Chip = { word: string; entity: string; count: number };
 
-export function DossierParser(_props: Record<string, never>) {
+export function DossierParser(_props: MeshNodeProps) {
   const [loads, setLoads] = useState<Record<string, LoadEvent>>({});
   const [state, setState] = useState<"idle" | "loading" | "scanning" | "done" | "error">("idle");
   const [error, setError] = useState("");

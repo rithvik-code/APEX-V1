@@ -1,3 +1,4 @@
+import type { MeshNodeProps } from "../types";
 import { useEffect, useRef, useState } from "react";
 import { loadPose, type PoseHandle } from "../embed";
 
@@ -7,7 +8,7 @@ const POSE_LINKS: Array<[number, number]> = [
   [27, 31], [28, 32], [0, 11], [0, 12],
 ];
 
-export function PoseCoach(_props: Record<string, never>) {
+export function PoseCoach(_props: MeshNodeProps) {
   const [state, setState] = useState<"idle" | "loading" | "live" | "error">("idle");
   const [error, setError] = useState("");
   const [readout, setReadout] = useState({ energy: 0, stability: 100, poses: 0 });

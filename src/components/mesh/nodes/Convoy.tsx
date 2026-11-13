@@ -1,3 +1,4 @@
+import type { MeshNodeProps } from "../types";
 import { useEffect, useRef, useState } from "react";
 import {
   DEFAULT_SETTINGS,
@@ -39,7 +40,7 @@ const AGENTS: Array<Omit<Column, "text" | "busy" | "error">> = [
 const emptyColumns = (): Column[] =>
   AGENTS.map((agent) => ({ ...agent, text: "", busy: false, error: "" }));
 
-export function Convoy(_props: Record<string, never>) {
+export function Convoy(_props: MeshNodeProps) {
   const [probe, setProbe] = useState<"cold" | "probing" | "online" | "offline">("cold");
   const [models, setModels] = useState<string[]>([]);
   const [question, setQuestion] = useState("");

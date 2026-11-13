@@ -1,3 +1,4 @@
+import type { MeshNodeProps } from "../types";
 import { useEffect, useRef, useState } from "react";
 import { buildMemoryIndex, hash01, kmeans, type MemoryIndex } from "../memoryIndex";
 import type { KnowledgeFact } from "../../../lib/knowledge";
@@ -11,7 +12,7 @@ type Star = {
   tw: number;
 };
 
-export function SemanticGrid(_props: Record<string, never>) {
+export function SemanticGrid(_props: MeshNodeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const starsRef = useRef<Star[]>([]);
   const hoverRef = useRef(-1);

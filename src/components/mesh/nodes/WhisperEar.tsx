@@ -1,9 +1,10 @@
+import type { MeshNodeProps } from "../types";
 import { useEffect, useRef, useState } from "react";
 import { loadAsr, openMic, type LoadEvent, type MicRecorder } from "../embed";
 
 type Phase = "idle" | "loading" | "ready" | "recording" | "transcribing" | "done" | "error";
 
-export function WhisperEar(_props: Record<string, never>) {
+export function WhisperEar(_props: MeshNodeProps) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [loads, setLoads] = useState<Record<string, LoadEvent>>({});
   const [text, setText] = useState("");

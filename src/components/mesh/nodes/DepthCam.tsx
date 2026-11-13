@@ -1,9 +1,10 @@
+import type { MeshNodeProps } from "../types";
 import { useRef, useState } from "react";
 import { loadDepth, type LoadEvent } from "../embed";
 
 type DepthResult = { url: string; width: number; height: number };
 
-export function DepthCam(_props: Record<string, never>) {
+export function DepthCam(_props: MeshNodeProps) {
   const [loads, setLoads] = useState<Record<string, LoadEvent>>({});
   const [state, setState] = useState<"idle" | "loading" | "inferring" | "done" | "error">("idle");
   const [error, setError] = useState("");

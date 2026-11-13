@@ -1,3 +1,4 @@
+import type { MeshNodeProps } from "../types";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { knowledgeState } from "../../../lib/knowledge";
 
@@ -111,7 +112,7 @@ function Gauge({ state, index }: { state: ProbeState; index: number }) {
   );
 }
 
-export function MeshStatus(_props: Record<string, never>) {
+export function MeshStatus(_props: MeshNodeProps) {
   const [results, setResults] = useState<Record<string, ProbeResult>>({});
   const [cycle, setCycle] = useState(0);
   const facts = knowledgeState();

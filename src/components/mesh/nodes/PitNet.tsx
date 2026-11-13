@@ -1,3 +1,4 @@
+import type { MeshNodeProps } from "../types";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { dynoPoint, dynoSweep } from "../../../lib/scene";
 
@@ -125,7 +126,7 @@ function trainEpoch(net: Net, xs: number[], ys: Float64Array[]): number {
   return loss / (n * 2);
 }
 
-export function PitNet(_props: Record<string, never>) {
+export function PitNet(_props: MeshNodeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const netRef = useRef<Net | null>(null);
   const rafRef = useRef(0);
