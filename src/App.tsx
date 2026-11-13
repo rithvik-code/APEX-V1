@@ -13,6 +13,7 @@ import type { ApexEngine } from "./three/Engine";
 import { Terminal } from "./components/Terminal";
 import type { CoreVariant } from "./components/CoreLab";
 import { GridDeck } from "./components/GridDeck";
+import { ModelMesh } from "./components/mesh/ModelMesh";
 import { Takeover } from "./components/Takeover";
 import { Preloader } from "./components/Preloader";
 import { Cursor } from "./components/Cursor";
@@ -1437,12 +1438,37 @@ export default function App() {
           <GridDeck onTakeControl={openTakeover} control={control} />
         </section>
 
+        <section className="section mesh-section" id="mesh">
+          <SectionHead index="05" title="MODEL MESH" meta="20 NODES · ONE MIND" />
+
+          <div className="grid__intro" data-reveal>
+            <h2>
+              A MESH OF
+              <br />
+              <em>MINDS.</em>
+            </h2>
+            <p>
+              Twenty AI nodes orbit one core. Eight run entirely inside this tab
+              right now — speech, memory, vision, gestures, a neural net learning
+              your engine. The rest stand armed on loopback, waiting for services
+              you choose to install. Nothing is faked; click any node and its bay
+              opens.
+            </p>
+          </div>
+
+          <ModelMesh
+            scene={scene}
+            onTune={tuneScene}
+            onDrive={() => launchDrive("car")}
+          />
+        </section>
+
         <section className="section vast" id="vast">
           <span className="vast__infinity" aria-hidden="true">
             ∞
           </span>
           <div className="vast__top" data-reveal>
-            <span className="micro">05 / THE VAST</span>
+            <span className="micro">06 / THE VAST</span>
             <span className="micro">NO END OF LINE</span>
           </div>
 
@@ -1488,7 +1514,7 @@ export default function App() {
         </section>
 
         <section className="section install" id="install">
-          <SectionHead index="06" title="SPAWN IT" meta="NODE 18+ / OLLAMA" />
+          <SectionHead index="07" title="SPAWN IT" meta="NODE 18+ / OLLAMA" />
 
           <div className="install__grid">
             <div className="install__copy" data-reveal>
