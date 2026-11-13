@@ -291,6 +291,46 @@ export function loadDepth(onEvent?: ProgressSink): Promise<DepthHandle> {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Named entities — BERT-NER for the DOSSIER PARSER.                           */
+/* -------------------------------------------------------------------------- */
+
+export type Entity = { word: string; entity: string; score: number };
+
+export type NerHandle = {
+  scan(text: string): Promise<Entity[]>;
+};
+
+let nerPromise: Promise<NerHandle> | null = null;
+
+export function loadNer(onEvent?: ProgressSink): Promise<NerHandle> {
+  nerPromise ??= (async () => {
+    const mod = await lib();
+    const ner = await mod.pipeline("token-classification", "Xenova/bert-base-NER", {
+      progress_callback: (info: unknown) => forward(info, onEvent),
+    });
+    onEvent?.({ file: "bert-base-NER", status: "ready", pct: 100 });
+    return {
+      async scan(text: string): Promise<Entity[]> {
+        const raw = (await ner(text, { aggregation_strategy: "simple" })) as Array<{
+          word: string;
+          entity_group?: string;
+          score: number;
+        }>;
+        return raw.map((entry) => ({
+          word: entry.word,
+          entity: entry.entity_group ?? "?",
+          score: entry.score,
+        }));
+      },
+    };
+  })();
+  return nerPromise.catch((error: unknown) => {
+    nerPromise = null;
+    throw error;
+  });
+}
+
+/* -------------------------------------------------------------------------- */
 /* Object detection — YOLOs-tiny, 80 COCO classes.                             */
 /* -------------------------------------------------------------------------- */
 

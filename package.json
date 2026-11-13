@@ -17,6 +17,7 @@
     "@fontsource/ibm-plex-mono": "^5.2.6",
     "@huggingface/transformers": "^4.3.2",
     "@mediapipe/tasks-vision": "^1.2.3",
+    "@mlc-ai/web-llm": "^0.2.88",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "three": "^0.179.1"
