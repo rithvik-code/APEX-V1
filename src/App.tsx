@@ -509,6 +509,12 @@ export default function App() {
     });
   }, []);
 
+  const toggleDriveAssist = useCallback((enabled: boolean) => {
+    engineRef.current?.setDriveAssist(enabled);
+    setDriveHud(engineRef.current?.getDriveState() ?? null);
+    sound.tick("click");
+  }, []);
+
   const toggleDriveGhost = useCallback((enabled: boolean) => {
     engineRef.current?.setDriveGhost(enabled);
     setDriveHud(engineRef.current?.getDriveState() ?? null);
@@ -1742,6 +1748,7 @@ export default function App() {
           onVehicle={switchDriveVehicle}
           onSetup={updateDriveSetup}
           onGhost={toggleDriveGhost}
+          onAssist={toggleDriveAssist}
           onTouch={(touch) => engineRef.current?.setDriveTouch(touch)}
         />
       )}

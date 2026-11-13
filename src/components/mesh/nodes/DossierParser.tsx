@@ -1,6 +1,6 @@
 import type { MeshNodeProps } from "../types";
 import { useRef, useState } from "react";
-import { loadNer, type Entity, type LoadEvent } from "../embed";
+import { loadNer, type LoadEvent } from "../embed";
 import { knowledgeState, type KnowledgeFact } from "../../../lib/knowledge";
 
 const TYPE_LABEL: Record<string, string> = {

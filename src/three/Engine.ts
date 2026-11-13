@@ -2231,10 +2231,9 @@ export class ApexEngine {
     const bike = this.driveVehicle === "bike";
     const group = bike ? this.bikeGroup : this.carGroup;
 
-    group.position.set(drive.pos.x, 0, drive.pos.z);
-    group.rotation.y = drive.heading;
-    group.rotation.z = drive.lean;
-    group.rotation.x = drive.accelPitch;
+    this.track?.update(dt);
+    group.position.set(drive.pos.x, drive.y, drive.pos.z);
+    group.rotation.set(drive.pitch + drive.accelPitch, drive.heading, drive.lean + drive.roll, "YXZ");
 
     if (bike) {
       this.bike.engine.update(this.clockTime * 2 + Math.abs(drive.speed) * 0.04);
@@ -2261,13 +2260,13 @@ export class ApexEngine {
       this.driveCamPos.lerp(
         new THREE.Vector3(
           drive.pos.x + Math.sin(angle) * orbit,
-          mobile ? 4 : 3.4,
+          drive.y + (mobile ? 4 : 3.4),
           drive.pos.z + Math.cos(angle) * orbit,
         ),
         1 - Math.exp(-dt * 3),
       );
       this.driveCamTgt.lerp(
-        new THREE.Vector3(drive.pos.x, 1.1, drive.pos.z),
+        new THREE.Vector3(drive.pos.x, drive.y + 1.1, drive.pos.z),
         1 - Math.exp(-dt * 3),
       );
     } else {
@@ -2275,7 +2274,7 @@ export class ApexEngine {
       const height = (bike ? 3 : 3.7) + (mobile ? 1.4 : 0);
       const desired = new THREE.Vector3(
         drive.pos.x - this.driveForward.x * dist,
-        height,
+        drive.y + height,
         drive.pos.z - this.driveForward.z * dist,
       );
       this.driveCamPos.lerp(desired, 1 - Math.exp(-dt * 6));
@@ -2283,7 +2282,7 @@ export class ApexEngine {
       this.driveCamTgt.lerp(
         new THREE.Vector3(
           drive.pos.x + this.driveForward.x * ahead,
-          1.35,
+          drive.y + 1.35,
           drive.pos.z + this.driveForward.z * ahead,
         ),
         1 - Math.exp(-dt * 7),
@@ -2291,8 +2290,12 @@ export class ApexEngine {
     }
 
     this.camera.position.copy(this.driveCamPos);
+    if (!this.reducedMotion && drive.impact > 0) {
+      this.camera.position.y += Math.sin(this.clockTime * 57) * drive.impact * 0.18;
+      this.camera.position.x += Math.cos(this.clockTime * 43) * drive.impact * 0.08;
+    }
     this.camera.lookAt(this.driveCamTgt);
-    const targetFov = (drive.countingDown ? 52 : 56 + sn * 16) + (mobile ? 17 : 0);
+    const targetFov = (drive.countingDown ? 52 : 56 + sn * 16 + drive.boost * 9 + (drive.airborne ? 4 : 0)) + (mobile ? 17 : 0);
     this.camera.fov += (targetFov - this.camera.fov) * (1 - Math.exp(-dt * 4));
     this.camera.updateProjectionMatrix();
     if (!this.reducedMotion) this.camera.rotateZ(-drive.lean * 0.12);
@@ -2313,10 +2316,12 @@ export class ApexEngine {
     points: Array<[number, number]>;
     bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
     start: { x: number; z: number; heading: number };
+    features: Array<{ kind: "ramp" | "hop" | "boost"; x: number; z: number }>;
   } | null {
     if (!this.track) return null;
     return {
       points: this.track.minimap.map((p) => [p[0], p[1]]),
+      features: this.track.minimapFeatures,
       bounds: { ...this.track.bounds },
       start: {
         x: this.track.start.pos.x,
@@ -2336,6 +2341,10 @@ export class ApexEngine {
 
   setDriveGhost(enabled: boolean): void {
     this.drive?.setGhostEnabled(enabled);
+  }
+
+  setDriveAssist(enabled: boolean): void {
+    this.drive?.setAssist(enabled);
   }
 
   restartDrive(): void {

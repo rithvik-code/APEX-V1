@@ -1,6 +1,6 @@
 import type { MeshNodeProps } from "../types";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { dynoPoint, dynoSweep } from "../../../lib/scene";
+import { dynoSweep } from "../../../lib/scene";
 
 /* A tiny 1-16-16-2 MLP with real backprop. It never sees the torque formula —
  * only samples — and learns the engine's power band by gradient descent. */
@@ -66,7 +66,6 @@ function trainEpoch(net: Net, xs: number[], ys: Float64Array[]): number {
   const out1 = new Float64Array(H);
   const out2 = new Float64Array(H);
   const out = new Float64Array(2);
-  const g1 = new Float64Array(H);
   const g2 = new Float64Array(H * H);
   const gb1 = new Float64Array(H);
   const gb2 = new Float64Array(H);

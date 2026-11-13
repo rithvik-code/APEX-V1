@@ -7,6 +7,7 @@ export type TrackOutline = {
   points: Array<[number, number]>;
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
   start: { x: number; z: number; heading: number };
+  features: Array<{ kind: "ramp" | "hop" | "boost"; x: number; z: number }>;
 };
 
 type DriveHUDProps = {
@@ -20,6 +21,7 @@ type DriveHUDProps = {
   onVehicle: (vehicle: DriveVehicle) => void;
   onSetup: (patch: Partial<DriveSetup>) => void;
   onGhost: (enabled: boolean) => void;
+  onAssist: (enabled: boolean) => void;
   onTouch: (touch: DriveTouch) => void;
 };
 
@@ -57,6 +59,17 @@ function Minimap({ state, track }: { state: DriveHudState; track: TrackOutline |
     ctx.lineWidth = 2;
     ctx.strokeStyle = "rgba(200,255,22,0.55)";
     ctx.stroke();
+
+    for (const feature of track.features) {
+      const x = px(feature.x);
+      const y = py(feature.z);
+      ctx.fillStyle = feature.kind === "boost" ? "#6ff9ff" : "#ffb21f";
+      ctx.beginPath();
+      if (feature.kind === "boost") ctx.rect(x - 2.5, y - 2.5, 5, 5);
+      else { ctx.moveTo(x, y - 4); ctx.lineTo(x + 3.5, y + 3); ctx.lineTo(x - 3.5, y + 3); }
+      ctx.closePath();
+      ctx.fill();
+    }
 
     // Start / finish tick.
     ctx.fillStyle = "#e9efe6";
@@ -123,6 +136,7 @@ export function DriveHUD({
   onVehicle,
   onSetup,
   onGhost,
+  onAssist,
   onTouch,
 }: DriveHUDProps) {
   const countdownNumber = Math.max(0, Math.ceil(state.countdown));
@@ -195,6 +209,18 @@ export function DriveHUD({
           <Minimap state={state} track={track} />
         </div>
       </div>
+
+      {state.assist.on && (
+        <div className={`dhud__assist is-${state.assist.mode}`}>
+          <div className="dhud__assist-top"><span>CIRCUIT CO-PILOT</span><b>{state.assist.mode.toUpperCase()}</b></div>
+          <div className="dhud__assist-next">
+            <i>{state.assist.next?.dir === "L" ? "↰" : state.assist.next?.dir === "R" ? "↱" : state.assist.next?.kind === "boost" ? "»" : "↗"}</i>
+            <div><strong>{state.assist.next?.label ?? "CLEAR TRACK"}</strong><span>{state.assist.next?.active ? "NOW" : state.assist.next ? `${Math.round(state.assist.next.distM / 5) * 5} M AHEAD` : "FOLLOW THE LINE"}</span></div>
+            <div className="dhud__assist-limit"><b>{Math.round(state.assist.next?.kmh ?? state.assist.targetKmh)}</b><span>KM/H SUGGESTED</span></div>
+          </div>
+          <div className="dhud__assist-key"><span>PUSH</span><span>LIFT</span><span>BRAKE</span></div>
+        </div>
+      )}
 
       <div className="dhud__board">
         <div className="dhud__board-head">
@@ -279,6 +305,14 @@ export function DriveHUD({
         <div className="dhud__ghost">
           <button
             type="button"
+            className={`dhud__toggle${state.assist.on ? " is-on" : ""}`}
+            onClick={() => onAssist(!state.assist.on)}
+            aria-pressed={state.assist.on}
+          >
+            LINE {state.assist.on ? "ON" : "OFF"}<em>L</em>
+          </button>
+          <button
+            type="button"
             className={`dhud__toggle${state.ghostEnabled ? " is-on" : ""}`}
             onClick={() => onGhost(!state.ghostEnabled)}
             aria-pressed={state.ghostEnabled}
@@ -298,6 +332,8 @@ export function DriveHUD({
           <b>{speed}</b>
           <span>KM/H</span>
         </div>
+        <div className={`dhud__air${state.airborne ? " is-on" : ""}`}><span>{state.airborne ? "AIR TIME" : "BEST AIR"}</span><b>{(state.airborne ? state.airTime : state.bestAir).toFixed(2)} S</b></div>
+        <div className={`dhud__boost${state.boost > 0 ? " is-on" : ""}`}><span>BOOST</span><div><i style={{ width: `${state.boost * 100}%` }} /></div></div>
         <div className="dhud__tach">
           <i style={{ width: `${Math.round(state.rpmNorm * 100)}%` }} />
         </div>
@@ -323,7 +359,7 @@ export function DriveHUD({
         <button type="button" className="dhud__btn dhud__btn--exit" onClick={onExit}>
           EXIT <kbd>ESC</kbd>
         </button>
-        <span className="dhud__hint">WASD / ARROWS · SPACE DRIFT</span>
+        <span className="dhud__hint">WASD / ARROWS · SPACE DRIFT · L LINE</span>
       </div>
 
       <div className="dhud__touch" aria-hidden="true">

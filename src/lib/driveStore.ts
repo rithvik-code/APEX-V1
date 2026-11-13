@@ -39,6 +39,7 @@ export type GhostSample = {
   x: number;
   z: number;
   h: number;
+  y?: number;
 };
 
 export type GhostLap = {
@@ -47,8 +48,8 @@ export type GhostLap = {
   samples: GhostSample[];
 };
 
-const BOARD_KEY = "apex.drive.board.v2";
-const GHOST_KEY = "apex.drive.ghost.v2";
+const BOARD_KEY = "apex.drive.board.v3";
+const GHOST_KEY = "apex.drive.ghost.v3";
 const BOARD_LIMIT = 10;
 
 type BoardMap = Record<DriveVehicle, DriveEntry[]>;
@@ -111,7 +112,8 @@ function sanitizeGhost(raw: unknown): GhostLap | null {
     const z = finite(sample.z);
     const h = finite(sample.h);
     if (t === null || x === null || z === null || h === null || t < 0) continue;
-    samples.push({ t, x, z, h });
+    const y = finite(sample.y);
+    samples.push({ t, x, z, h, ...(y === null ? {} : { y }) });
   }
   if (samples.length < 2) return null;
   samples.sort((a, b) => a.t - b.t);

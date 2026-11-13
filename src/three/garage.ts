@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { DIE_CAST_CATALOG, diecastUnlocked, type DieCastEntry } from "../lib/diecast";
+import { planCircuit, radialTexture } from "./track";
 
 const ACID = 0xc8ff16;
 const ACID_HEX = "#c8ff16";
@@ -157,18 +158,6 @@ function asphaltTexture(): THREE.CanvasTexture {
   return texture(canvas, 6, 10);
 }
 
-function portalGlowTexture(): THREE.CanvasTexture {
-  const { canvas, ctx } = canvas2d(512, 512);
-  const grad = ctx.createRadialGradient(256, 256, 30, 256, 256, 256);
-  grad.addColorStop(0, "rgba(226,255,208,0.03)");
-  grad.addColorStop(0.6, "rgba(200,255,22,0.07)");
-  grad.addColorStop(0.86, "rgba(200,255,22,0.26)");
-  grad.addColorStop(1, "rgba(200,255,22,0)");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 512, 512);
-  return texture(canvas);
-}
-
 function wordmarkTexture(): THREE.CanvasTexture {
   const { canvas, ctx } = canvas2d(1400, 420);
   ctx.clearRect(0, 0, 1400, 420);
@@ -181,7 +170,7 @@ function wordmarkTexture(): THREE.CanvasTexture {
   ctx.fillRect(320, 222, 760, 2);
   ctx.font = "600 38px 'IBM Plex Mono', monospace";
   ctx.fillStyle = "rgba(200,255,22,0.82)";
-  ctx.fillText("TERMINAL INTELLIGENCE / THE OTHER SIDE", 700, 348);
+  ctx.fillText("NIGHT CIRCUIT / PRIVATE PRACTICE", 700, 348);
   return texture(canvas);
 }
 
@@ -583,22 +572,43 @@ export function createGarage(): GarageStage {
   drum.rotation.z = Math.PI / 2;
 
   /* ------------------------------------------------------------------ */
-  /* Tunnel approach beyond the door                                     */
+  /* Floodlit circuit overlook beyond the door                          */
   /* ------------------------------------------------------------------ */
 
   const asphaltMap = asphaltTexture();
-  const portalMap = portalGlowTexture();
   const wordmarkMap = wordmarkTexture();
+  const circuitHaloMap = radialTexture("rgba(255,246,220,1)");
 
   const exterior = new THREE.Group();
+  exterior.name = "circuit-overlook";
   exterior.position.set(0, 0, 9.2);
   root.add(exterior);
 
-  const roadMat = new THREE.MeshBasicMaterial({ map: asphaltMap, color: 0xdfe7da });
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(64, 72), roadMat);
-  road.rotation.x = -Math.PI / 2;
-  road.position.set(0, -0.012, 32);
-  exterior.add(road);
+  const roadMat = new THREE.MeshBasicMaterial({ map: asphaltMap, color: 0xdfe7da, fog: false });
+  // A 30 x 15 m terrace, not a road continuing into the valley. The central
+  // glass viewing deck leaves the low garage eye-line clear of the apron.
+  for (const x of [-12.5, 12.5]) {
+    const road = new THREE.Mesh(new THREE.PlaneGeometry(5, 15), roadMat);
+    road.rotation.x = -Math.PI / 2;
+    road.position.set(x, -0.012, 7.5);
+    exterior.add(road);
+  }
+  const threshold = new THREE.Mesh(new THREE.PlaneGeometry(20, 0.6), roadMat);
+  threshold.rotation.x = -Math.PI / 2;
+  threshold.position.set(0, -0.012, 0.3);
+  exterior.add(threshold);
+  const glassMat = new THREE.MeshBasicMaterial({
+    color: 0x8cb8bf,
+    transparent: true,
+    opacity: 0.035,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    fog: false,
+  });
+  const viewingDeck = new THREE.Mesh(new THREE.PlaneGeometry(20, 14.4), glassMat);
+  viewingDeck.rotation.x = -Math.PI / 2;
+  viewingDeck.position.set(0, -0.01, 7.8);
+  exterior.add(viewingDeck);
 
   const laneMat = new THREE.MeshBasicMaterial({
     color: ACID,
@@ -607,115 +617,304 @@ export function createGarage(): GarageStage {
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     fog: false,
+    toneMapped: false,
   });
-  for (const x of [-3.3, 3.3]) {
-    const lane = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 56), laneMat);
+  for (const side of [-1, 1]) {
+    const lane = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 14), laneMat);
     lane.rotation.x = -Math.PI / 2;
-    lane.position.set(x, 0.012, 30);
+    lane.position.set(side * 10, 0.012, 7);
     exterior.add(lane);
+    box(0.12, 0.18, 15, darkSteel, side * 10.1, -0.11, 7.5, exterior);
+    box(0.16, 2.5, 0.16, darkSteel, side * 6.2, 1.25, 3.2, exterior);
+    box(0.05, 1.7, 0.05, acid, side * 6.12, 1.3, 3.2, exterior);
   }
+  const railMat = new THREE.MeshBasicMaterial({ color: 0x26342e, fog: false });
+  const railGlowMat = new THREE.MeshBasicMaterial({ color: ACID, fog: false, toneMapped: false });
+  for (let x = -15; x <= 15; x += 5) {
+    box(0.09, 0.92, 0.09, railMat, x, 0.46, 14, exterior);
+  }
+  box(30, 0.09, 0.14, railMat, 0, 0.92, 14, exterior);
+  box(30, 0.025, 0.16, railGlowMat, 0, 0.975, 14, exterior);
 
-  // Guide lights marching down the approach.
-  for (let i = 0; i < 5; i++) {
-    const z = 4 + i * 7;
-    for (const side of [-1, 1]) {
-      box(0.16, 3.1, 0.16, darkSteel, side * 4.7, 1.55, z, exterior);
-      box(0.05, 2.1, 0.05, acid, side * 4.62, 1.5, z, exterior);
+  const valleyMat = new THREE.MeshBasicMaterial({ color: 0x050b10, fog: false, side: THREE.DoubleSide });
+  const valley = new THREE.Mesh(new THREE.PlaneGeometry(760, 660), valleyMat);
+  valley.rotation.x = -Math.PI / 2;
+  valley.position.set(0, -65, 190);
+  exterior.add(valley);
+
+  // Use the exact cached driving plan, without modifying its arrays or
+  // constructing the heavyweight interactive track. Rotate, don't mirror,
+  // so the main straight, hairpins, spurs, banking and ramp lips all match.
+  const plan = planCircuit();
+  const { count, xs, zs, nx, nz, height, bank } = plan;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (let i = 0; i < count; i++) {
+    minX = Math.min(minX, xs[i]);
+    maxX = Math.max(maxX, xs[i]);
+    minZ = Math.min(minZ, zs[i]);
+    maxZ = Math.max(maxZ, zs[i]);
+  }
+  const centerX = (minX + maxX) / 2;
+  const centerZ = (minZ + maxZ) / 2;
+  const circuit = new THREE.Group();
+  circuit.name = "shared-driving-circuit-vista";
+  circuit.position.set(0, -25, 164);
+  circuit.scale.setScalar(0.46);
+  circuit.rotation.set(-THREE.MathUtils.degToRad(18), Math.PI, 0);
+  exterior.add(circuit);
+  const wrapCircuit = (i: number) => ((i % count) + count) % count;
+  const circuitPoint = (i: number, off: number, lift: number, out: THREE.Vector3): THREE.Vector3 => {
+    const at = wrapCircuit(i);
+    return out.set(
+      xs[at] - centerX + nx[at] * off,
+      height[at] + bank[at] * off + lift,
+      zs[at] - centerZ + nz[at] * off,
+    );
+  };
+  const ribbon = (
+    edgeA: number,
+    edgeB: number,
+    lift: number,
+    from = 0,
+    to = count,
+    shade?: (i: number, out: THREE.Color) => void,
+  ): THREE.BufferGeometry => {
+    const rows = to - from + 1;
+    const positions = new Float32Array(rows * 6);
+    const colors = shade ? new Float32Array(rows * 6) : null;
+    const uvs = new Float32Array(rows * 4);
+    const indices: number[] = [];
+    const point = new THREE.Vector3();
+    const color = new THREE.Color();
+    for (let k = 0; k < rows; k++) {
+      const i = wrapCircuit(from + k);
+      circuitPoint(i, edgeA, lift, point).toArray(positions, k * 6);
+      circuitPoint(i, edgeB, lift, point).toArray(positions, k * 6 + 3);
+      uvs.set([0, k / Math.max(1, rows - 1), 1, k / Math.max(1, rows - 1)], k * 4);
+      if (colors && shade) {
+        shade(i, color);
+        color.toArray(colors, k * 6);
+        color.toArray(colors, k * 6 + 3);
+      }
+      if (k < rows - 1) {
+        const q = k * 2;
+        indices.push(q, q + 1, q + 2, q + 1, q + 3, q + 2);
+      }
     }
-  }
-
-  // Three arches straddle the road, growing as they recede into the tunnel.
-  // Half-torus arches keep their crowns inside the door's view cone.
-  const archSpecs: Array<[number, number, number, number]> = [
-    [4.2, 8, 0.1, 0.34],
-    [5.2, 22, 0.13, 0.5],
-    [6.4, 36, 0.16, 0.68],
-  ];
-  for (const [radius, z, tube, strength] of archSpecs) {
-    const arch = new THREE.Mesh(
-      new THREE.TorusGeometry(radius, tube, 10, 72, Math.PI),
-      new THREE.MeshBasicMaterial({
-        color: ACID,
-        transparent: true,
-        opacity: strength,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        fog: false,
-      }),
-    );
-    arch.position.set(0, 0.16, z);
-    exterior.add(arch);
-    const halo = new THREE.Mesh(
-      new THREE.TorusGeometry(radius + 0.35, 0.028, 8, 72, Math.PI),
-      new THREE.MeshBasicMaterial({
-        color: 0xe9f6e2,
-        transparent: true,
-        opacity: strength * 0.3,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        fog: false,
-      }),
-    );
-    halo.position.set(0, 0.16, z + 0.02);
-    exterior.add(halo);
-  }
-
-  const glowMat = new THREE.MeshBasicMaterial({
-    map: portalMap,
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+    if (colors) geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    return geometry;
+  };
+  const luminous = (color: number, opacity: number): THREE.MeshBasicMaterial => new THREE.MeshBasicMaterial({
+    color,
     transparent: true,
-    depthWrite: false,
+    opacity,
     blending: THREE.AdditiveBlending,
+    depthWrite: false,
     side: THREE.DoubleSide,
     fog: false,
+    toneMapped: false,
   });
-  const glow = new THREE.Mesh(new THREE.PlaneGeometry(12.6, 11), glowMat);
-  glow.position.set(0, 4.6, 40.5);
-  exterior.add(glow);
+  const addRibbon = (
+    a: number, b: number, lift: number, material: THREE.Material,
+    from = 0, to = count, shade?: (i: number, out: THREE.Color) => void,
+  ): void => {
+    circuit.add(new THREE.Mesh(ribbon(a, b, lift, from, to, shade), material));
+  };
 
-  // Distant skyline flanking the tunnel.
-  const towerMat = new THREE.MeshBasicMaterial({ color: 0x111a14, fog: false });
-  const windowMat = new THREE.MeshBasicMaterial({
-    color: 0xbfe6ff,
-    transparent: true,
-    opacity: 0.08,
-    fog: false,
+  // A dark, gently broken hillside under the elevated tarmac; no billboard
+  // or planar track image. The larger valley continues well past its edges.
+  const hillsideGeo = new THREE.PlaneGeometry(maxX - minX + 64, maxZ - minZ + 32, 32, 26);
+  hillsideGeo.rotateX(-Math.PI / 2);
+  const hillsidePositions = hillsideGeo.getAttribute("position") as THREE.BufferAttribute;
+  for (let i = 0; i < hillsidePositions.count; i++) {
+    const x = hillsidePositions.getX(i);
+    const z = hillsidePositions.getZ(i);
+    hillsidePositions.setY(i, -4 - 2 * (1 + Math.sin(x * 0.046) * Math.cos(z * 0.037)));
+  }
+  hillsideGeo.computeVertexNormals();
+  circuit.add(new THREE.Mesh(hillsideGeo, new THREE.MeshBasicMaterial({ color: 0x0a1519, fog: false, side: THREE.DoubleSide })));
+
+  const surfaceMat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false, side: THREE.DoubleSide });
+  const surfaceDark = new THREE.Color(0x233b40);
+  const surfaceLit = new THREE.Color(0xa7b8ba);
+  addRibbon(4.6, -4.6, 0, surfaceMat, 0, count, (i, out) => {
+    // The pools align with the evenly spaced floodlight masts below.
+    const phase = ((i - 60 + count) % 180) / 180;
+    out.copy(surfaceDark).lerp(surfaceLit, Math.pow(Math.abs(Math.cos(phase * Math.PI)), 10) * 0.72);
   });
-  const towers: Array<[number, number, number, number, number]> = [
-    [-24, 46, 7, 16, 8],
-    [-17, 57, 5, 11, 6],
-    [20, 44, 8, 19, 9],
-    [27, 55, 6, 12, 7],
-    [12, 61, 5, 9, 5],
-  ];
-  for (const [x, z, w, h, d] of towers) {
-    box(w, h, d, towerMat, x, h / 2, z, exterior);
-    for (let i = 0; i < 4; i++) {
-      box(
-        w * 0.72,
-        0.035,
-        0.02,
-        windowMat,
-        x,
-        2.4 + i * (h * 0.18),
-        z - d / 2 - 0.02,
-        exterior,
-      );
+  const runoffMat = new THREE.MeshBasicMaterial({ color: 0x122427, fog: false, side: THREE.DoubleSide });
+  const curbMat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false, side: THREE.DoubleSide });
+  const curbAcid = new THREE.Color(ACID);
+  const curbDark = new THREE.Color(0x1d2a25);
+  const curbShade = (i: number, out: THREE.Color) => out.copy(Math.floor(i / 6) % 2 === 0 ? curbAcid : curbDark);
+  const edgeMat = luminous(ACID, 0.92);
+  const edgeHaloMat = luminous(ACID, 0.1);
+  const embankmentMat = new THREE.MeshBasicMaterial({ color: 0x152023, fog: false, side: THREE.DoubleSide });
+  for (const side of [-1, 1]) {
+    addRibbon(side * 7.2, side * 5.4, -0.01, runoffMat);
+    addRibbon(side * 5.4, side * 4.6, 0.015, curbMat, 0, count, curbShade);
+    addRibbon(side * 5.25, side * 3.95, 0.035, edgeHaloMat);
+    addRibbon(side * 4.76, side * 4.6, 0.045, edgeMat);
+    // Grounded retaining faces make the real ramp elevation legible.
+    const positions = new Float32Array((count + 1) * 6);
+    const indices: number[] = [];
+    const point = new THREE.Vector3();
+    for (let k = 0; k <= count; k++) {
+      circuitPoint(k, side * 7.2, 0, point);
+      positions.set([point.x, -8, point.z, point.x, point.y, point.z], k * 6);
+      if (k < count) {
+        const q = k * 2;
+        indices.push(q, q + 1, q + 2, q + 1, q + 3, q + 2);
+      }
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geometry.setIndex(indices);
+    circuit.add(new THREE.Mesh(geometry, embankmentMat));
+  }
+  const centerlineMat = new THREE.LineDashedMaterial({
+    color: 0xd2e2dd, transparent: true, opacity: 0.35,
+    dashSize: 2.2, gapSize: 4, depthWrite: false, fog: false,
+  });
+  const centerlinePoints: THREE.Vector3[] = [];
+  for (let i = 0; i <= count; i++) centerlinePoints.push(circuitPoint(i, 0, 0.035, new THREE.Vector3()));
+  const centerline = new THREE.Line(new THREE.BufferGeometry().setFromPoints(centerlinePoints), centerlineMat);
+  centerline.computeLineDistances();
+  circuit.add(centerline);
+
+  const boostMat = luminous(0x6ff9ff, 0.8);
+  const boostGlowMat = luminous(0x6ff9ff, 0.13);
+  const rampMat = luminous(ACID, 0.22);
+  const rampLipMat = luminous(0xf5ffe2, 0.95);
+  for (const feature of plan.features) {
+    const end = feature.end <= feature.start ? feature.end + count : feature.end;
+    if (feature.kind === "boost") {
+      addRibbon(2, -2, 0.065, boostMat, feature.start, end);
+      addRibbon(5.8, -5.8, 0.055, boostGlowMat, feature.start - 5, end + 5);
+      for (let i = feature.start + 2; i < end; i += 6) {
+        addRibbon(4.1, -4.1, 0.075, boostMat, i, i + 1);
+      }
+    } else {
+      const lip = feature.lip < feature.start ? feature.lip + count : feature.lip;
+      addRibbon(4.5, -4.5, 0.045, rampMat, feature.start, lip);
+      addRibbon(4.6, -4.6, 0.085, rampLipMat, lip - 2, lip);
+      for (let i = lip + 4; i < end; i += 9) {
+        addRibbon(4.2, -4.2, 0.055, rampMat, i, i + 1);
+      }
+    }
+  }
+  // The actual lap seam gets a small, physical start / finish checker.
+  const checkerWhite = new THREE.MeshBasicMaterial({ color: 0xdcebe6, fog: false, side: THREE.DoubleSide });
+  const checkerDark = new THREE.MeshBasicMaterial({ color: 0x10191c, fog: false, side: THREE.DoubleSide });
+  for (let row = 0; row < 2; row++) {
+    for (let col = 0; col < 8; col++) {
+      addRibbon(-4.6 + col * 1.15, -4.6 + (col + 1) * 1.15, 0.08,
+        (row + col) % 2 === 0 ? checkerWhite : checkerDark, row * 2, row * 2 + 2);
     }
   }
 
-  // The showroom wordmark hanging in the mouth of the tunnel.
+  const floodPoleMat = new THREE.MeshBasicMaterial({ color: 0x48616a, fog: false });
+  const floodHeadMat = new THREE.MeshBasicMaterial({ color: 0xfff3d6, fog: false, toneMapped: false });
+  const floodHaloMat = new THREE.SpriteMaterial({
+    map: circuitHaloMap, color: 0xffefd5, transparent: true, opacity: 0.48,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false, toneMapped: false,
+  });
+  const floodPoolMat = luminous(0xffefd5, 0.18);
+  floodPoolMat.map = circuitHaloMap;
+  for (let k = 0, j = 0; k < count; k += 180, j++) {
+    const i = wrapCircuit(k + 60);
+    const side = j % 2 === 0 ? 1 : -1;
+    const point = circuitPoint(i, side * 9.6, 0, new THREE.Vector3());
+    const top = point.y + 10;
+    cylinder(0.15, top + 6, floodPoleMat, point.x, (top - 6) / 2, point.z, circuit, 6);
+    const head = box(2.6, 0.4, 0.65, floodHeadMat, point.x, top, point.z, circuit);
+    head.rotation.y = Math.atan2(nz[i], -nx[i]);
+    const halo = new THREE.Sprite(floodHaloMat);
+    halo.position.set(point.x, top, point.z);
+    halo.scale.setScalar(7);
+    circuit.add(halo);
+    addRibbon(5.2, -5.2, 0.07, floodPoolMat, i - 28, i + 28);
+  }
+
+  // Race lights lap this same sampled ribbon, including its height/bank.
+  const raceCars: Array<{ group: THREE.Group; distance: number; speed: number; offset: number }> = [];
+  const raceBodyMat = new THREE.MeshBasicMaterial({ color: 0x718c95, fog: false });
+  const raceHeadMat = new THREE.MeshBasicMaterial({ color: 0xfff6d8, fog: false, toneMapped: false });
+  const raceTailMat = new THREE.MeshBasicMaterial({ color: 0xff4e2b, fog: false, toneMapped: false });
+  const raceHaloMat = new THREE.SpriteMaterial({
+    map: circuitHaloMap, color: 0xf2fbff, transparent: true, opacity: 0.75,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false, toneMapped: false,
+  });
+  const placeRaceCar = (car: typeof raceCars[number]): void => {
+    const sample = car.distance / plan.step;
+    const a = Math.floor(sample);
+    const b = wrapCircuit(a + 1);
+    const i = wrapCircuit(a);
+    const u = sample - a;
+    const lateralX = nx[i] + (nx[b] - nx[i]) * u;
+    const lateralZ = nz[i] + (nz[b] - nz[i]) * u;
+    const camber = bank[i] + (bank[b] - bank[i]) * u;
+    car.group.position.set(
+      xs[i] + (xs[b] - xs[i]) * u - centerX + lateralX * car.offset,
+      height[i] + (height[b] - height[i]) * u + camber * car.offset + 0.35,
+      zs[i] + (zs[b] - zs[i]) * u - centerZ + lateralZ * car.offset,
+    );
+    car.group.rotation.set(
+      -Math.atan2(height[b] - height[i], plan.step),
+      Math.atan2(lateralZ, -lateralX),
+      -Math.atan(camber),
+      "YXZ",
+    );
+  };
+  for (let i = 0; i < 7; i++) {
+    const car = new THREE.Group();
+    box(1.45, 0.42, 2.8, raceBodyMat, 0, 0, 0, car);
+    box(1.1, 0.26, 1.15, raceBodyMat, 0, 0.32, -0.15, car);
+    for (const side of [-1, 1]) {
+      box(0.3, 0.14, 0.1, raceHeadMat, side * 0.49, 0.04, 1.43, car);
+      box(0.32, 0.12, 0.1, raceTailMat, side * 0.49, 0.04, -1.43, car);
+      const halo = new THREE.Sprite(raceHaloMat);
+      halo.position.set(side * 0.49, 0.09, 1.48);
+      halo.scale.setScalar(2.4);
+      car.add(halo);
+    }
+    circuit.add(car);
+    const racer = { group: car, distance: plan.length * i / 7, speed: 37 + i * 2.1, offset: (i % 3 - 1) * 1.15 };
+    raceCars.push(racer);
+    placeRaceCar(racer);
+  }
+
+  // Skyline and branding live beyond the entire circuit, not across it.
+  const towerMat = new THREE.MeshBasicMaterial({ color: 0x111a14, fog: false });
+  const windowMat = new THREE.MeshBasicMaterial({
+    color: 0xbfe6ff, transparent: true, opacity: 0.16, fog: false,
+  });
+  const towers: Array<[number, number, number, number, number]> = [
+    [-178, 316, 22, 42, 18], [-140, 354, 18, 34, 16], [-95, 370, 12, 28, 14],
+    [164, 328, 24, 46, 20], [205, 360, 20, 32, 18], [112, 386, 16, 30, 14],
+  ];
+  for (const [x, z, w, h, d] of towers) {
+    box(w, h, d, towerMat, x, -30 + h / 2, z, exterior);
+    for (let i = 0; i < 5; i++) {
+      box(w * 0.72, 0.11, 0.04, windowMat, x, -27 + i * h * 0.16, z - d / 2 - 0.03, exterior);
+    }
+  }
   const wordmark = new THREE.Mesh(
-    new THREE.PlaneGeometry(16, 4.8),
+    new THREE.PlaneGeometry(62, 18.6),
     new THREE.MeshBasicMaterial({
-      map: wordmarkMap,
-      transparent: true,
-      opacity: 0.9,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      fog: false,
+      map: wordmarkMap, transparent: true, opacity: 0.62, depthWrite: false,
+      side: THREE.DoubleSide, fog: false,
     }),
   );
-  wordmark.position.set(0, 8.6, 39.6);
+  wordmark.position.set(0, 17, 358);
   wordmark.rotation.y = Math.PI;
   exterior.add(wordmark);
 
@@ -758,32 +957,7 @@ export function createGarage(): GarageStage {
   haze.position.set(0, 1.75, 8.55);
   root.add(haze);
 
-  // Tunnel traffic. Opposing streams: headlights coming in, tail lights leaving.
-  const traffic: Array<{ group: THREE.Group; dir: number; speed: number }> = [];
-  const trafficBody = new THREE.MeshBasicMaterial({ color: 0x0d120e, fog: false });
-  const headlightMat = new THREE.MeshBasicMaterial({ color: 0xfff6d8, fog: false });
-  const taillightMat = new THREE.MeshBasicMaterial({ color: 0xff3b1f, fog: false });
-  for (let i = 0; i < 5; i++) {
-    const car = new THREE.Group();
-    const direction = i % 2 === 0 ? -1 : 1;
-    car.position.set(direction > 0 ? 1.9 : -1.9, 0.34, 6 + i * 11);
-    car.rotation.y = direction > 0 ? 0 : Math.PI;
-    box(1.5, 0.5, 2.9, trafficBody, 0, 0, 0, car);
-    box(1.2, 0.32, 1.3, trafficBody, 0, 0.38, -0.1, car);
-    for (const side of [-1, 1]) {
-      const head = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.14), headlightMat);
-      head.position.set(side * 0.5, 0.04, 1.48);
-      car.add(head);
-      const tail = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.12), taillightMat);
-      tail.position.set(side * 0.5, 0.06, -1.48);
-      tail.rotation.y = Math.PI;
-      car.add(tail);
-    }
-    exterior.add(car);
-    traffic.push({ group: car, dir: direction, speed: 8 + Math.random() * 9 });
-  }
-
-  // Illuminated pylon beside the tunnel mouth.
+  // Illuminated pylon beside the overlook.
   const pylonMat = new THREE.MeshBasicMaterial({
     map: sideSignTexture(),
     transparent: true,
@@ -1833,7 +2007,6 @@ export function createGarage(): GarageStage {
     spillMat.opacity = doorOpen * (0.27 + 0.04 * Math.sin(time * 1.7));
     shaftMat.opacity = doorOpen * (0.05 + 0.014 * Math.sin(time * 0.9));
     hazeMat.opacity = doorOpen * (0.026 + 0.008 * Math.sin(time * 1.3));
-    glowMat.opacity = 0.84 + 0.09 * Math.sin(time * 1.15);
     pylonMat.opacity = 0.82 + 0.16 * Math.sin(time * 1.4);
     toolGroup.position.y = Math.sin(time * 0.5) * 0.002;
 
@@ -1868,13 +2041,12 @@ export function createGarage(): GarageStage {
       mat.color.setHex(point <= fuel ? (hot && point > 0.7 ? 0xff5a1f : ACID) : 0x141a11);
     });
 
-    // Traffic down the approach and rain through the door.
-    for (const trafficCar of traffic) {
-      const group = trafficCar.group;
-      group.position.z += trafficCar.dir * trafficCar.speed * dt;
-      if (group.position.z > 64) group.position.z = 2;
-      if (group.position.z < 2) group.position.z = 64;
+    // Continuous circuit laps, never random traffic crossing the vista.
+    for (const car of raceCars) {
+      car.distance = ((car.distance + car.speed * dt) % plan.length + plan.length) % plan.length;
+      placeRaceCar(car);
     }
+    boostGlowMat.opacity = 0.12 + 0.035 * Math.sin(time * 2.2);
     if (rain.visible) {
       const positions = rainGeo.getAttribute("position") as THREE.BufferAttribute;
       const array = positions.array as Float32Array;
@@ -2054,7 +2226,7 @@ export function createGarage(): GarageStage {
       for (const { light } of garageLights) light.dispose();
       concrete.map?.dispose();
       asphaltMap.dispose();
-      portalMap.dispose();
+      circuitHaloMap.dispose();
       wordmarkMap.dispose();
       spillMat.map?.dispose();
       stripMat.dispose();

@@ -68,6 +68,7 @@ export function Standby({ node }: { node: MeshNode }) {
 
   useEffect(() => {
     if (!service?.url) return;
+    const url = service.url;
     let alive = true;
     let misses = 0;
     let online = false;
@@ -75,7 +76,7 @@ export function Standby({ node }: { node: MeshNode }) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 4000);
       try {
-        const res = await fetch(service.url, { signal: controller.signal });
+        const res = await fetch(url, { signal: controller.signal });
         const body = await res.text().catch(() => "");
         if (!alive) return;
         if (res.ok) {
