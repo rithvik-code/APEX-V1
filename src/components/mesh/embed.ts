@@ -258,6 +258,40 @@ export async function loadHands(onEvent?: ProgressSink): Promise<VisionHandle> {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Pose — full-body landmarks (33 points) for the POSE COACH.                  */
+/* -------------------------------------------------------------------------- */
+
+export type PoseHandle = {
+  detect(video: HTMLVideoElement, timestamp: number): Array<Array<{ x: number; y: number; z: number }>>;
+  close(): void;
+};
+
+export async function loadPose(onEvent?: ProgressSink): Promise<PoseHandle> {
+  onEvent?.({ file: "pose_landmarker.task", status: "download", pct: 20 });
+  const vision = await import("@mediapipe/tasks-vision");
+  const fileset = await vision.FilesetResolver.forVisionTasks(VISION_WASM);
+  const landmarker = await vision.PoseLandmarker.createFromOptions(fileset, {
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+      delegate: "GPU",
+    },
+    runningMode: "VIDEO",
+    numPoses: 1,
+  });
+  onEvent?.({ file: "pose_landmarker.task", status: "ready", pct: 100 });
+  return {
+    detect(video, timestamp) {
+      const result = landmarker.detectForVideo(video, timestamp);
+      return result.landmarks ?? [];
+    },
+    close() {
+      landmarker.close();
+    },
+  };
+}
+
+/* -------------------------------------------------------------------------- */
 /* Depth anything — monocular depth for the DEPTH CAM node.                    */
 /* -------------------------------------------------------------------------- */
 
