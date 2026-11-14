@@ -113,10 +113,15 @@ function appName(raw) {
 }
 
 function normalizeChord(raw) {
-  const parts = String(raw)
+  const text = String(raw)
     .toLowerCase()
+    .replace(/\bpage\s+up\b/g, "pageup")
+    .replace(/\bpage\s+down\b/g, "pagedown")
+    .replace(/\bcaps\s+lock\b/g, "capslock")
+    .replace(/\bprint\s+screen\b/g, "printscreen");
+  const parts = text
     .split(/\s*(?:\+|,|\band\b)\s*/)
-    .map((part) => part.trim())
+    .flatMap((part) => part.trim().split(/\s+/))
     .filter(Boolean);
   if (!parts.length) return "";
   return parts.map((part) => KEYS[part] || part).join("+");

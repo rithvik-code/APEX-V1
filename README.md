@@ -506,6 +506,51 @@ between observations.
 - `--readonly` grants only `screen` + `accessibility` and caps at 3 steps.
 - File, command and page content is wrapped as untrusted before it reaches the planner.
 
+### Cyrus on the desktop
+
+Cyrus is not limited to the page. `apex cyrus` sends a spoken-style command to the
+daemon, which routes it to the same gated executor the console uses:
+
+```bash
+apex cyrus "open notepad"
+apex cyrus "switch to chrome"
+apex cyrus "take a screenshot"
+apex cyrus "type this into the report"
+apex cyrus --yes "run ipconfig"          # skip the approval prompt
+```
+
+The router is deterministic — no model round trip, so commands land in milliseconds.
+It understands open/launch, switch to, type, press (`ctrl+s`, `alt+f4`), scroll, click,
+screenshot, read the screen, what windows are open, search for, run, close, lock, shut
+down and restart.
+
+Low-risk actions run immediately. **Typing, key presses and shell commands return an
+approval card** (`needsApproval`) and only run when the caller repeats the request with
+`confirm: true`; `--yes` does that for you. Every action still passes the armed
+capabilities, the audit log and the session lock, and a manual-only session stays
+`idle` so it never blocks a real mission.
+
+### Phone remote
+
+```bash
+npm run apexd -- --lan
+```
+
+The daemon prints a pairing URL and token:
+
+```
+remote  http://192.168.1.24:4317/m?token=…
+token   …
+```
+
+Open it on the phone. `/m` is a self-contained remote — mic button using the phone's
+own speech recognition, a text box, spoken replies, and an ALLOW ONCE / DENY card for
+high-risk actions. The token is stored on the phone and stripped from the address bar.
+
+LAN mode binds `0.0.0.0`, and **the token is the only gate**: every API request is 401
+without it. Pin your own with `APEX_CONTROL_TOKEN`. Loopback mode is unchanged and
+needs no token.
+
 ### API
 
 Everything under `http://127.0.0.1:4317`. Vite proxies `/api` to `4317`, so the console
@@ -574,6 +619,8 @@ precision, not creativity. `shadow` enables rollback. Set anything with
 | `APEX_CMD_TIMEOUT` | Shell timeout, ms (default 180000) |
 | `NO_COLOR` | Plain output |
 | `APEX_CONTROL_READONLY=1` | Daemon in observe-only mode |
+| `APEX_CONTROL_LAN=1` | Bind the daemon to the LAN with a pairing token |
+| `APEX_CONTROL_TOKEN` | Pin the LAN pairing token instead of generating one |
 
 Streaming uses Ollama's `/api/chat`. If the daemon is down, `apex` prints the endpoint,
 the model and the exact commands to start it — not a stack trace. For a **non-localhost**

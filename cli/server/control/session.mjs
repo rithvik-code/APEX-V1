@@ -103,6 +103,7 @@ export class ControlSession {
     endpoint = DEFAULT_ENDPOINT,
     maxSteps = 20,
     fileRoots,
+    manualOnly = false,
     onEvent,
   }) {
     this.id = `CTL-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
@@ -116,7 +117,9 @@ export class ControlSession {
     this.visionModel = visionModel;
     this.endpoint = endpoint;
     this.maxSteps = Math.max(1, Math.min(60, Number(maxSteps) || 20));
-    this.status = "running";
+    // A manual-only session (Cyrus) is idle until something is executed, so
+    // it never blocks or masquerades as a running mission.
+    this.status = manualOnly ? "idle" : "running";
     this.step = 0;
     this.startedAt = Date.now();
     this.endedAt = null;
@@ -670,9 +673,10 @@ export class ControlSession {
           signal,
         );
         await sleep(1100);
+        const name = result.process || result.title || args.app;
         return {
-          display: `pid ${result.pid} · ${result.process}`,
-          forModel: `Launched ${result.process} (pid ${result.pid}). Wait for its window before interacting.`,
+          display: `pid ${result.pid} · ${name}`,
+          forModel: `Launched ${name} (pid ${result.pid}). Wait for its window before interacting.`,
         };
       }
       case "move_mouse": {

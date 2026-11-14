@@ -65,6 +65,22 @@ apex do --steps 12 --minutes 5 --ctx 32768 "…"
 
 Repeated identical calls stop the loop rather than burning your GPU.
 
+## Cyrus — desktop commands
+
+`apex cyrus "open notepad"` sends a command to the TAKE CONTROL daemon. It is a
+deterministic router, not a model call: open, switch to, type, press, scroll, click,
+screenshot, read the screen, list windows, search for, run, close, lock, shut down.
+
+```bash
+npm run apexd                       # from the repo root
+apex cyrus "switch to chrome"
+apex cyrus "take a screenshot"
+apex cyrus --yes "run ipconfig"     # skip the approval prompt
+```
+
+Typing, key chords and shell commands ask first unless `--yes`. Phone: run
+`npm run apexd -- --lan` and open the `/m?token=…` URL it prints.
+
 ## Audit
 
 `apex history` tails `~/.apex/actions.log` — tier, target, exit code, and whether you

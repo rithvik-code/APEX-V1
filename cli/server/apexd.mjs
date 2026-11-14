@@ -224,6 +224,7 @@ function ensureSession() {
       };
   session = new ControlSession({
     goal: "Cyrus desktop control",
+    manualOnly: true,
     permissions,
     autoApprove: READ_ONLY ? false : Boolean(config.autoApprove),
     vision: Boolean(config.vision),
