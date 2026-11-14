@@ -27,16 +27,18 @@
 > a real terminal, an agent that edits your machine, and a desktop engine that
 > drives it. No account. No API key. No billing page waiting at the end.
 
-Two things live in this repo, and they share one brain:
+Four surfaces live in this repo, and they share one brain:
 
 ```
-                    ┌──────────────────────────────────────────┐
-   BROWSER  ───────▶│  THE SITE     3D · HUD · TERMINAL · LAB   │
-                    │                                          │
-   TERMINAL ───────▶│  THE CLI      chat · agent · undo · audit │──▶ Ollama
-                    │                                          │    127.0.0.1
-   DESKTOP  ───────▶│  TAKE CONTROL screen · mouse · keyboard   │    :11434
-                    └──────────────────────────────────────────┘
+                    ┌────────────────────────────────────────────┐
+   BROWSER  ───────▶│  THE SITE    3D · HUD · MESH · GARAGE · ARC │
+                    │                                            │
+   TERMINAL ───────▶│  THE CLI     chat · agent · undo · audit    │──▶ Ollama
+                    │                                            │    127.0.0.1
+   DESKTOP  ───────▶│  TAKE CONTROL  screen · mouse · keyboard    │    :11434
+                    │                                            │
+   IN-BROWSER ─────▶│  THE MESH    20 nodes · WASM · WebGPU        │
+                    └────────────────────────────────────────────┘
 ```
 
 ---
@@ -46,13 +48,16 @@ Two things live in this repo, and they share one brain:
 | # | Do this | What happens |
 | - | ------- | ------------ |
 | 01 | `npm install && npm run dev` | The 3D world boots at `127.0.0.1:5173` — car, bike, light tunnel, HUD. |
-| 02 | Scroll | The camera flies a keyframed route through seven sectors. |
+| 02 | Scroll | The camera flies a keyframed route through nine sectors. |
 | 03 | Press `A` | Wind tunnel. Live aero, dyno, livery, rain, night, screenshot, WebM clip. |
 | 04 | Click **TIME ATTACK** | You are driving the car, timed laps, sectors, ghost, local leaderboard. |
 | 05 | **X-RAY THE V12 BITURBO** | CORE LAB: cutaway V12 with animated pistons, cams, valves, turbos. |
-| 06 | Ask the PIT WALL terminal anything | Auto-detects Ollama, streams locally, grounds live facts, tunes the car. |
-| 07 | `apex do "fix the failing tests"` | Real agent loop: reads, edits, runs, snapshots every write, `apex undo` puts it back. |
-| 08 | `npm run apexd` → **TAKE CONTROL** | The model gets eyes and hands on the desktop. Approval on every high-risk move. |
+| 06 | **SCROLL TO CROSS** at the bottom | The ring opens into the walkable garage — lift, door, die-casts, pets, trophies. |
+| 07 | Press `5` → **MODEL MESH** | Twenty nodes orbit one core. Open any bay; eight run inside the tab. |
+| 08 | Say **"Hey Cyrus"** | Wake word, voice intent, spoken reply, real machine actions. |
+| 09 | Ask the PIT WALL terminal anything | Auto-detects Ollama, streams locally, grounds live facts, tunes the car, deals arcade cards. |
+| 10 | `apex do "fix the failing tests"` | Real agent loop: reads, edits, runs, snapshots every write, `apex undo` puts it back. |
+| 11 | `npm run apexd` → **TAKE CONTROL** | The model gets eyes and hands on the desktop. Approval on every high-risk move. |
 
 ---
 
@@ -63,26 +68,28 @@ Two things live in this repo, and they share one brain:
 `src/` — Vite 7 · React 19 · TypeScript · Three.js
 
 Full-bleed canvas, mono type, acid `#c8ff16` on near-black `#050607`, custom cursor,
-CRT grain, synthesized audio, resizable HUD. Every pixel is procedural — **nothing is
-downloaded** except the fonts.
+CRT grain, synthesized audio, resizable HUD. Every vehicle pixel is procedural — no
+models, no textures. The mesh downloads AI weights only when you open those bays.
 
 ### Sectors
 
 | Sector | Name | What's in it |
 | ------ | ---- | ------------ |
-| `00` | **IGNITION** | Hero. Drag to orbit, double-click to reset, copy the install command. |
+| `00` | **IGNITION** | Hero, 360° orbit, rev-hold, car/bike compare, clean showroom, garage. |
 | `01` | **MANIFESTO** | `∞` ceiling · `0.00` per token · `100%` local · `01` command. |
 | `02` | **MACHINE** | Spec bars, exploded blueprint, and the entrance to CORE LAB. |
-| `03` | **PIT WALL** | The live terminal, race engineer, radio, web grounding. |
+| `03` | **PIT WALL** | Live terminal, race engineer, radio, web grounding, arcade. |
 | `04` | **GRID** | Six lanes in — chat, agent, control, drive, lab, install. |
-| `05` | **VAST** | The infinity readout. Requests `∞`, queue `00`, hard limit `NONE`. |
-| `06` | **SPAWN** | Four-step install, config panel, copy buttons. |
+| `05` | **MESH** | Twenty-node orbital map: speech, memory, vision, gestures, WebLLM. |
+| `06` | **CREW** | Thirty specialist roles mapped onto the mesh and the agent. |
+| `07` | **VAST** | The infinity readout. Requests `∞`, queue `00`, hard limit `NONE`. |
+| `08` | **SPAWN** | Four-step install, config panel, copy buttons. |
 
 ### Keyboard
 
 | Key | Action |
 | --- | ------ |
-| `0`–`6` | Jump to sector |
+| `0`–`8` | Jump to sector |
 | `A` | Toggle wind tunnel |
 | `Esc` | Close tunnel / leave drive mode |
 | `C` | Cycle camera preset |
@@ -157,6 +164,78 @@ The terminal in the page is the same idea as the CLI, in the browser:
 - **Speed.** The model is warmed on load and kept resident for 30 minutes; streamed
   tokens paint in 45 ms batches; standings questions answer from the live block with
   no model pass at all.
+
+### MODEL MESH — twenty nodes, one core
+
+The orbital map in section 05. Every node is a real bay with a real runtime, and the
+ring is honest about what is installed: green runs now, amber wants a local service,
+white downloads open weights on your click.
+
+| Tier | Count | Nodes |
+| ---- | ----- | ----- |
+| **live** | 8 | Whisper Ear (WASM speech-to-text), Mesh Memory (MiniLM 384-d embeddings), Semantic Grid, Gesture Deck (MediaPipe hands), Mesh Status (real loopback probes), Pit Net (an MLP trained live on dyno samples), Command Deck, Multi-Agent Convoy |
+| **link** | 7 | Race Engineer, Livery Forge (`:7860`), Raw Link (llama.cpp `:8080`), Voice Forge (Piper `:5000`), Restore Bay, Time Stretch, Radio Stems |
+| **consent** | 5 | Browser Brain (WebLLM/WebGPU), Vision Pit, Pose Coach, Depth Cam, Dossier Parser |
+
+The `link` nodes probe loopback and say so when nothing answers. The `consent` nodes
+download their weights once, cache them in the browser, then run offline. Nothing in
+the mesh calls a server you did not point it at.
+
+**Crew Workbench** opens the same bays from CREW, where thirty specialist roles map
+onto the tools above — and onto the CLI's agent and workspace scan when a role needs
+to touch files.
+
+### CYRUS — the co-driver
+
+Cyrus is the always-listening layer over the terminal. Say **"Hey Cyrus"** (or tap the
+mic) and the wake word opens an 18-second window; Chrome's continuous recogniser is
+the fast path, and an offline Whisper ear takes over where Web Speech is missing or
+blocked. Replies stream from the same local model and can be spoken over the radio
+voice.
+
+It is not a chat toy: intents drive the machine. Scroll the page, open the garage,
+raise the lift, open the door, rev the V12, start a drive, switch vehicle, set weather,
+turn the racing line or ghost on, read your best lap, play music, take a photo, or
+report your licence and CP. Unknown requests fall through to the model with the
+current section, drive or garage state attached as context.
+
+### THE GARAGE — walkable, not a menu
+
+Keep scrolling past the end of the page and the tunnel ring arms; push further and you
+cross into a full 3D bay. Close the door, raise the lift, enter service mode, sit on
+the stool, cycle paint, tune the radio, take a photo, replay your entrance, or walk the
+floor.
+
+- **Die-cast shelf** — eight castings unlocked by career progress.
+- **Trophy wall** — a trophy every 120 CP, eight tiers.
+- **Bay computer** — live CP, licence, unlocks, paint and knowledge readout.
+- **Launch practice** — reaction-time runs that pay CP.
+- **The residents** — Scotch the Labrador, Mario the Persian cat, Mr & Mrs Turtle.
+- **Drive out** — the car or bike leaves the bay straight into a timed session.
+
+### CAREER & ARCADE — the ladder
+
+Usage is the currency. Chat, quizzes, clean laps, missions, setups and ghosts all pay
+**CP (Constructor Points)**, and CP unlocks parts of the car and the garage itself.
+
+| Licence | CP | Unlocks |
+| ------- | -- | ------- |
+| ROOKIE | 0 | Base spec |
+| BRONZE | 150 | Titanium livery · wheel covers |
+| SILVER | 400 | Front canards · headlamp tint |
+| GOLD | 800 | Exhaust flame · plate frame |
+| PLATINUM | 1,400 | Sector livery · ghost trail · tail strip |
+| SUPER LICENCE | 2,200 | Rear gurney · cockpit glow |
+| WORLD CHAMPION | 3,200 | Full aero kit · chrome finish |
+| LEGEND | 4,500 | Pulsing accent · wing badge |
+
+Distance adds wear, soot and finally the veteran finish. Everything is stored locally
+and capped per day, so the ladder cannot be farmed by leaving a script running.
+
+**Arcade Mode** (`/arcade on|off`) turns plain replies into one of three cards — a
+**quiz** with four answers, a **mission** brief with risk and steps, or an **intel**
+poster. The full model text is always one click away, so presentation never hides the
+answer. Correct answers earn XP and streaks; missions feed the career.
 
 ---
 
@@ -518,7 +597,7 @@ browser terminal — current Ollama builds stream their chain-of-thought into th
 
 ```
 src/
-  App.tsx                 sectors, chapters, aero dock, drive mode, launchers
+  App.tsx                 nine chapters, overlays, drive/garage launchers
   styles.css              full visual system + responsive rules
   styles.control.css      control console styling
   three/
@@ -527,32 +606,48 @@ src/
     bike.ts               wireframe superbike + in-line four
     engines.ts            V12 biturbo and I4 DOHC 16V, animated
     drive.ts              time attack: physics, track, ghost, HUD state
+    garage.ts             walkable bay: tools, die-casts, pets, trophies
+    track.ts              circuit generator, probes, racing line
+    aero.ts               streamlines and flow color maps
+    weather.ts            rain system
   components/
-    Terminal.tsx          pit wall terminal, engineer, radio, grounding
+    Terminal.tsx          pit wall terminal, engineer, radio, grounding, arcade
+    CyrusHUD.tsx          wake-word co-driver overlay
+    Garage.tsx            bay UI: tools, paint, radio, launch practice
     CoreLab.tsx           full-screen engine cutaway + flythrough
     AeroDock.tsx          wind tunnel controls, clips, laps, share code
     DriveHUD.tsx          lap timer, sectors, gear, ghost, setup
     GridDeck.tsx          six lanes in
     Takeover.tsx          desktop control console: HUD, approvals, stream
     ControlDock.tsx       grid-lane control dock
+    mesh/
+      registry.ts         20 node definitions and tiers
+      ModelMesh.tsx       orbital canvas map
+      embed.ts            lazy transformers, Whisper, MiniLM
+      nodes/              14 real bays (speech, vision, memory, MLP, …)
     Preloader.tsx · Cursor.tsx
   hooks/useControl.ts     control state, SSE, mission actions
   lib/
     ai.ts                 demo / Ollama / OpenAI-compatible streaming
+    cyrus.ts              wake word, intent routing, speech
+    knowledge.ts          self-refreshing local RAG
+    career.ts             CP, licences, unlocks, paddock
+    arcade.ts             quiz / mission / intel cards
     web.ts                Wikipedia + Jolpica grounding
     scene.ts              scene config, presets, aero + dyno math, share codes
     driveStore.ts         tire compounds, lap boards, ghosts
     clip.ts               WebM capture + lap recordings
     engineer.ts           natural-language tuning
     radio.ts              push-to-talk + speech synthesis
+    diecast.ts            die-cast catalogue and unlocks
     playbooks.ts          saved missions
     control.ts            typed daemon client
     sound.ts              synthesized ambience
 cli/
   apex.mjs                chat, agent loop, tiers, rollback, audit log
   server/apexd.mjs        desktop-control daemon
-  server/control/         session, planner, permissions, desktop,
-                          browser, files, terminal, PowerShell bridge
+  server/control/         session, planner, permissions, desktop, browser,
+                          files, workspace, terminal, PowerShell bridge
 ```
 
 ---
@@ -579,9 +674,13 @@ cli/
   `project` tier and snapshots bound the damage.
 - **TAKE CONTROL is Windows-first.** Input, accessibility and screen paths use Win32 via
   PowerShell. The planner, browser and filesystem engines are portable.
+- **The mesh downloads only on request.** Eight nodes run entirely in-tab; the five
+  consent nodes fetch their weights (tens to hundreds of MB) on first click, then work
+  offline. The WASM speech and vision bundles are most of `dist`.
 - **The site is not deployed.** `npm run build` produces `dist/` for any static host.
-  The bundle is ~835 kB (~230 kB gzipped) because Three.js is in it — that is the cost of
-  the 3D world, not a framework problem.
+  The main chunk is several MB because Three.js and the in-browser model stack ship with
+  it, and `dist` also carries the WASM runtimes the mesh can load. That is the cost of a
+  3D world that also runs speech and vision locally, not a framework problem.
 
 ---
 
