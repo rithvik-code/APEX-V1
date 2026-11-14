@@ -98,7 +98,7 @@ export function parseIntent(raw: string): CyrusIntent {
   const on = (yes: RegExp, no: RegExp): boolean | null =>
     no.test(t) ? false : yes.test(t) ? true : null;
 
-  if (/^(?:ok |okay )?(?:stop|cancel|never ?mind|shut up|quiet|be quiet|silence|enough|thats enough)\b/.test(t))
+  if (/^(?:ok |okay )?(?:stop|cancel|never ?mind|shut up|quiet|be quiet|silence|enough|thats enough)(?: please)?$/.test(t))
     return { kind: "stop" };
   if (/\b(stop listening|turn yourself off|mic off|microphone off|shut down|power down)\b/.test(t))
     return { kind: "off" };
@@ -106,6 +106,11 @@ export function parseIntent(raw: string): CyrusIntent {
     return { kind: "sleep" };
   if (/\b(thank you|thanks|cheers|nice one|good job|well done)\b/.test(t) && words <= 5)
     return { kind: "thanks" };
+
+  if (
+    /^(what|whats|who|whos|why|how|when|where|explain|tell me about|do you know|can you explain|can you tell me about)\b/.test(t) &&
+    !/\b(what time|whats the time|time is it|what day|whats the date|todays date|what date|what can you do|help me out|commands|what do you do|who are you|what are you|your name|how are you|best lap|fastest lap|personal best|lap time|lap record)\b/.test(t)
+  ) return { kind: "ask", text: raw.trim() };
 
   if (/\b(scotch|scotty|scottie|scott|scot|doggo|doggy|puppy|the dog|my dog|good boy)\b/.test(t))
     return { kind: "pet", pet: "dog" };
@@ -131,13 +136,6 @@ export function parseIntent(raw: string): CyrusIntent {
   )
     return { kind: "garage" };
 
-  if (
-    (/\b(take|drive|grab|get in|hop in|jump in|lets go|go for|race|ride|hit the|head out|go out|go to the|start a)\b/.test(t) &&
-      /\b(car|bike|motorbike|motorcycle|track|circuit|lap|laps|spin|drive|ride|race|road)\b/.test(t)) ||
-    /^(lets (go|drive|race|ride|roll)|drive|race)\b/.test(t)
-  )
-    return { kind: "drive", vehicle: bike ? "bike" : "car" };
-
   if (/^(exit|leave|quit|get out|back out)\b|\b(leave|exit|quit)( the)? (garage|bay|drive|track|game)\b|\bstop driving\b/.test(t))
     return { kind: "exit" };
 
@@ -149,6 +147,12 @@ export function parseIntent(raw: string): CyrusIntent {
     return { kind: "ghost", on: on(/\b(on|show|enable|race)\b/, /\b(off|hide|disable|remove)\b/) };
   if (/\b(best|fastest|personal best|pb|record|top)\b.*\b(lap|laps|time|times)\b|\blap (record|time)s?\b|\bleaderboard\b/.test(t))
     return { kind: "bestLap" };
+
+  if (
+    (/\b(take|drive|grab|get in|hop in|jump in|lets go|go for|race|ride|hit the|head out|go out|go to the|start a)\b/.test(t) &&
+      /\b(car|bike|motorbike|motorcycle|track|circuit|lap|laps|spin|drive|ride|race|road)\b/.test(t)) ||
+    /^(lets (go|drive|race|ride|roll)|drive|race)\b/.test(t)
+  ) return { kind: "drive", vehicle: bike ? "bike" : "car" };
 
   if (/\b(die ?cast|diecast|shelf|collection|model cars)\b/.test(t)) return { kind: "panel", panel: "shelf" };
   if (/\b(computer|workstation|livery|paint)\b/.test(t)) return { kind: "panel", panel: "computer" };
@@ -553,6 +557,8 @@ class Cyrus {
     this.recLive = false;
     if (this.rec) {
       this.rec.onend = null;
+      this.rec.onresult = null;
+      this.rec.onerror = null;
       try {
         this.rec.abort();
       } catch {
@@ -575,13 +581,15 @@ class Cyrus {
     try {
       const { loadAsr } = await import("../components/mesh/embed");
       asr = await loadAsr((event) => {
-        if (event.status !== "ready") this.set({ status: `LOADING OFFLINE EAR ${Math.round(event.pct)}%` });
+        if (generation === this.earGen && event.status !== "ready") this.set({ status: `LOADING OFFLINE EAR ${Math.round(event.pct)}%` });
       });
     } catch {
+      if (generation !== this.earGen) return;
+      this.disable(false);
       this.set({ status: "EAR OFFLINE", error: "The offline speech model failed to load. Type to CYRUS instead." });
       return;
     }
-    if (this.snap.phase === "off" || !this.stream) return;
+    if (generation !== this.earGen || !this.listening || this.stream !== stream) return;
     this.set({ status: "SAY “HEY CYRUS”" });
 
     const source = ctx.createMediaStreamSource(this.stream);
@@ -612,6 +620,7 @@ class Cyrus {
       void asr
         .transcribe(pcm)
         .then((text) => {
+          if (generation !== this.earGen || !this.listening) return;
           const clean = text.replace(/\[[^\]]*\]|\([^)]*\)/g, "").trim();
           if (clean.length > 1 && !/^(you|thank you\.?|\.+)$/i.test(clean)) this.onFinal(clean);
         })
@@ -651,6 +660,7 @@ class Cyrus {
   /* ---- Turn handling ---- */
 
   private onInterim(text: string): void {
+    if (!this.listening) return;
     const phase = this.snap.phase;
     const { woke, rest } = splitWake(text);
     if (phase === "standby") {
@@ -677,6 +687,7 @@ class Cyrus {
   private onFinal(raw: string): void {
     const text = raw.trim();
     if (!text) return;
+    if (!this.listening) return;
     const phase = this.snap.phase;
     const { woke, rest } = splitWake(text);
 
@@ -692,7 +703,10 @@ class Cyrus {
       return;
     }
     if (phase === "standby") {
-      if (!woke) return;
+      if (!woke) {
+        if (/^(hi|hey|hello)[\s,]+(scotch|scotty|mario)\b/i.test(text)) this.command(text);
+        return;
+      }
       if (rest) this.command(rest);
       else this.goAwake();
       return;
@@ -1048,3 +1062,5 @@ export function useCyrus(): CyrusSnapshot {
 if (import.meta.env.DEV) {
   (window as unknown as { __cyrus?: Cyrus }).__cyrus = cyrus;
 }
+
+if (import.meta.hot) import.meta.hot.dispose(() => cyrus.disable(false));

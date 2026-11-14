@@ -24,6 +24,46 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
 
   useEffect(() => {
     const root = rootRef.current;
+    if (!root || !visible || mode === "page") return;
+    const host = document.querySelector(mode === "garage" ? ".garage" : ".drive-hud");
+    if (!host) return;
+    const selector = mode === "garage"
+      ? ".garage__panel, .garage__sheet, .garage__pad, .garage__focus, .garage__photo-actions"
+      : ".dhud__setup, .dhud__controls, .dhud__touch-steer, .dhud__touch-pedals";
+    let controls: Element[] = [];
+    const place = () => {
+      const bounds = root.getBoundingClientRect();
+      let floor = 22;
+      for (const control of controls) {
+        const box = control.getBoundingClientRect();
+        if (box.width && box.height && box.left < bounds.right && box.right > bounds.left) {
+          floor = Math.max(floor, window.innerHeight - box.top + 12);
+        }
+      }
+      root.style.setProperty("--cyrus-hud-floor", `${floor}px`);
+    };
+    const resize = new ResizeObserver(place);
+    const watch = () => {
+      resize.disconnect();
+      controls = Array.from(host.querySelectorAll(selector));
+      resize.observe(root);
+      controls.forEach((control) => resize.observe(control));
+      place();
+    };
+    const mutation = new MutationObserver(watch);
+    mutation.observe(host, { childList: true });
+    window.addEventListener("resize", place);
+    watch();
+    return () => {
+      resize.disconnect();
+      mutation.disconnect();
+      window.removeEventListener("resize", place);
+      root.style.removeProperty("--cyrus-hud-floor");
+    };
+  }, [mode, visible]);
+
+  useEffect(() => {
+    const root = rootRef.current;
     if (!root || !visible) return;
     const bars = root.querySelectorAll<HTMLElement>(".cyrus-hud__bars i");
     const samples = Array<number>(bars.length).fill(0);
