@@ -5,7 +5,7 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
-import { createSupercar, badgeTexture, numberTexture, type Assembly, type VehicleAnchor } from "./car";
+import { createSupercar, badgeTexture, numberTexture, type VehicleAnchor } from "./car";
 import { createSuperbike } from "./bike";
 import { createGarage, type CyrusVisual, type GarageHotspot, type GarageStage, type GarageTerminalState } from "./garage";
 import { AeroFlow, buildBikeStreamlines, buildCarStreamlines } from "./aero";
@@ -325,17 +325,12 @@ export class ApexEngine {
   private focusDistCurrent = 1;
   private weather: WeatherSystem;
   private floorMat: THREE.MeshStandardMaterial;
-  private explodeTarget = 0;
-  private explodeCurrent = 0;
-  private bikeExplodeTarget = 0;
-  private bikeExplodeCurrent = 0;
   private assemblyPulse = 0;
   private rpmTarget = 0.32;
   private rpmCurrent = 0.32;
   private dynoOn = false;
   private engineTime = 0;
   private carRoundels: THREE.Object3D[] = [];
-  private assemblyLabels: Array<{ el: HTMLElement; assembly: Assembly }> = [];
   private clip: ClipRecorder | null = null;
   private envTarget: THREE.WebGLRenderTarget | null = null;
   private lapSamples: CameraSample[] = [];
@@ -472,26 +467,7 @@ export class ApexEngine {
       this.reducedMotion,
     );
 
-    for (const assembly of this.car.assemblies) {
-      const el = document.createElement("div");
-      el.className = "assembly-label";
-      el.dataset.vehicle = "car";
-      el.textContent = assembly.label;
-      el.style.opacity = "0";
-      this.labelsEl.appendChild(el);
-      this.assemblyLabels.push({ el, assembly });
-    }
-
     this.bike = createSuperbike();
-    for (const assembly of this.bike.assemblies) {
-      const el = document.createElement("div");
-      el.className = "assembly-label";
-      el.dataset.vehicle = "bike";
-      el.textContent = assembly.label;
-      el.style.opacity = "0";
-      this.labelsEl.appendChild(el);
-      this.assemblyLabels.push({ el, assembly });
-    }
     this.bikeGroup.add(this.bike.group);
     this.bikeGroup.position.set(-9, 0, -6);
     this.bikeGroup.rotation.y = 0.18;
@@ -1194,29 +1170,6 @@ export class ApexEngine {
     if (!value) this.clock.getDelta();
   }
 
-  private updateAssemblyLabels(): void {
-    const show = Math.max(this.explodeCurrent, this.bikeExplodeCurrent) > 0.04;
-    const activeVehicle = this.lastConfig?.focus === "bike" ? "bike" : "car";
-    const v = new THREE.Vector3();
-    for (const { el, assembly } of this.assemblyLabels) {
-      if (!show || el.dataset.vehicle !== activeVehicle) {
-        el.style.opacity = "0";
-        continue;
-      }
-      assembly.group.getWorldPosition(v);
-      v.y += 0.35;
-      v.project(this.camera);
-      const x = (v.x * 0.5 + 0.5) * window.innerWidth;
-      const y = (-v.y * 0.5 + 0.5) * window.innerHeight;
-      const inFront = v.z < 1 && v.z > -1;
-      const progress = assembly.id.startsWith("bike-") ? this.bikeExplodeCurrent : this.explodeCurrent;
-      el.style.opacity = inFront
-        ? String(Math.min(1, progress * 1.5))
-        : "0";
-      el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`;
-    }
-  }
-
   configure(config: SceneConfig): void {
     this.lastConfig = config;
     this.aeroCar.setEnabled(config.aero && config.focus !== "bike");
@@ -1234,8 +1187,6 @@ export class ApexEngine {
     this.bloom.strength = 0.18 + config.glow * 0.6;
     this.lightTargets = LIGHTING_TARGETS[config.lighting];
     this.presetTarget = CAMERA_TARGETS[config.camera];
-    this.explodeTarget = config.explode;
-    this.bikeExplodeTarget = config.explode;
     this.rpmTarget = config.rpm;
     this.dynoOn = config.dyno;
     this.weather.configure(this.garageOn ? { ...config, weather: "clear" } : config);
@@ -1941,10 +1892,6 @@ export class ApexEngine {
     this.track.group.visible = true;
     this.driveVehicle = vehicle;
 
-    this.explodeTarget = 0;
-    this.explodeCurrent = 0;
-    this.bikeExplodeTarget = 0;
-    this.bikeExplodeCurrent = 0;
     this.revHeld = false;
     this.revWasActive = false;
     this.revReleaseAt = -1;
@@ -2546,20 +2493,11 @@ export class ApexEngine {
 
     this.carGroup.rotation.y = Math.sin(this.clockTime * 0.08) * 0.012;
 
-    // Exploded view stages every subassembly like a precision teardown: each
-    // assembly follows its own vector with a slight cinematic timing stagger.
-    this.explodeCurrent +=
-      (this.explodeTarget - this.explodeCurrent) * (1 - Math.exp(-dt * 8));
-    this.bikeExplodeCurrent +=
-      (this.bikeExplodeTarget - this.bikeExplodeCurrent) * (1 - Math.exp(-dt * 8));
+    // Keep all panels and wheels in their normal assembled positions.
     this.assemblyPulse = Math.max(0, this.assemblyPulse - dt * 1.6);
-    for (const [index, assembly] of this.car.assemblies.entries()) {
-      const stagger = index * 0.035;
-      const amount = THREE.MathUtils.clamp(this.explodeCurrent - stagger, 0, 1);
-      assembly.group.position
-        .copy(assembly.offset)
-        .multiplyScalar(amount);
-      assembly.group.rotation.y = (index % 2 ? -1 : 1) * amount * 0.045;
+    for (const assembly of this.car.assemblies) {
+      assembly.group.position.set(0, 0, 0);
+      assembly.group.rotation.set(0, 0, 0);
     }
 
     // Dyno: RPM drives a continuously accumulated engine clock so the crank
@@ -2570,15 +2508,11 @@ export class ApexEngine {
     const wheelSpin = 0.55 + (this.dynoOn ? this.rpmCurrent * 9 : 0);
     for (const wheel of this.car.wheels) {
       wheel.rotation.x += adt * wheelSpin;
-      const side = wheel.userData.side as number;
-      wheel.position.x =
-        (wheel.userData.baseX as number) + side * 2.15 * this.explodeCurrent;
+      wheel.position.x = wheel.userData.baseX as number;
     }
-    for (const [index, assembly] of this.bike.assemblies.entries()) {
-      const delay = index * 0.045;
-      const amount = THREE.MathUtils.clamp(this.bikeExplodeCurrent - delay, 0, 1);
-      assembly.group.position.copy(assembly.offset).multiplyScalar(amount);
-      assembly.group.rotation.y = (index % 2 ? -1 : 1) * amount * 0.035;
+    for (const assembly of this.bike.assemblies) {
+      assembly.group.position.set(0, 0, 0);
+      assembly.group.rotation.set(0, 0, 0);
     }
     this.car.engine.update(this.engineTime);
     this.bike.engine.update(this.dynoOn ? this.engineTime : this.clockTime);
@@ -2591,7 +2525,6 @@ export class ApexEngine {
     this.animateRev(dt);
 
     this.weather.update(dt);
-    this.updateAssemblyLabels();
     this.bikeGroup.position.y = Math.sin(this.clockTime * 0.6) * 0.008;
     this.bike.scan.position.y = 0.35 + ((this.clockTime * 0.42) % 1.4);
     this.bike.scan.material.opacity =
@@ -2715,7 +2648,6 @@ export class ApexEngine {
     window.removeEventListener("keydown", this.onGarageKeyDown);
     window.removeEventListener("keyup", this.onGarageKeyUp);
     document.body.classList.remove("is-orbiting");
-    for (const { el } of this.assemblyLabels) el.remove();
     this.weather.dispose();
     this.clearGhostLine();
     this.drive?.dispose();

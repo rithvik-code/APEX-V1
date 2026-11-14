@@ -361,7 +361,7 @@ export default function App() {
     [closeGarage, launchDrive],
   );
 
-  const summonVehicle = useCallback((vehicle: "car" | "bike", assembled = true) => {
+  const summonVehicle = useCallback((vehicle: "car" | "bike") => {
     if (!garage) openGarage();
     sound.whoosh();
     setScene((prev) => ({
@@ -369,9 +369,8 @@ export default function App() {
       focus: vehicle,
       camera: "hero",
       autoOrbit: false,
-      explode: assembled ? 0 : 1,
     }));
-    if (assembled) window.setTimeout(() => sound.tick("start"), garage ? 80 : 950);
+    window.setTimeout(() => sound.tick("start"), garage ? 80 : 950);
   }, [garage, openGarage]);
 
   const runGarageAction = useCallback(
@@ -600,10 +599,6 @@ export default function App() {
           else if (driving) switchDriveVehicle(intent.vehicle);
           else launchDrive(intent.vehicle);
           return `Taking the ${intent.vehicle} to the circuit. You're at the wheel.`;
-        case "explode":
-          if (!inGarage) openGarage();
-          window.setTimeout(() => summonVehicle(intent.vehicle, intent.assembled), inGarage ? 80 : 950);
-          return intent.assembled ? `Reassembling the ${intent.vehicle}.` : `Exploding the ${intent.vehicle} into its linked assemblies.`;
         case "garage":
           if (inGarage) return "You're already home. What do you need?";
           openGarage();
@@ -1534,7 +1529,7 @@ export default function App() {
           {blueprintOpen && (
             <div className="blueprint">
               <div className="blueprint__head">
-                <span>EXPLODED VIEW / APEX V1</span>
+                <span>VEHICLE BLUEPRINT / APEX V1</span>
                 <span>8 ASSEMBLIES</span>
               </div>
               <div className="blueprint__grid">

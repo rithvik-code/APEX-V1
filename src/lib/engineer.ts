@@ -22,11 +22,11 @@ const round5 = (value: number) => Math.round(value / 5) * 5;
 // "can", "please" or "want" are deliberately absent: "can you explain
 // wet-weather downforce?" is a question and belongs to the model, not the tuner.
 const TOPIC_RE =
-  /\b(downforce|drag|grip|wet|rain|storm|drizzle|night|dark|daylight|dyno|rev|redline|throttle|power curve|torque|horsepower|explode|exploded|apart|assemble|paint|livery|colou?r|stripe|wind|faster|slower|camera|overhead|neon|studio|midnight|grid|superbike|motorcycle|reset|stock|factory|random|shuffle|pressure|velocity|orbit)\b/i;
+  /\b(downforce|drag|grip|wet|rain|storm|drizzle|night|dark|daylight|dyno|rev|redline|throttle|power curve|torque|horsepower|paint|livery|colou?r|stripe|wind|faster|slower|camera|overhead|neon|studio|midnight|grid|superbike|motorcycle|reset|stock|factory|random|shuffle|pressure|velocity|orbit)\b/i;
 const ACTION_RE =
-  /\b(set|setup|switch|turn|make|give|add|drop|raise|lower|increase|decrease|run|go|put|paint|show|enable|disable|start|stop|kill|reset|change|trim|load|apply|fit|arm|engage|launch|crank|rev|clear|hide|explode|assemble|roll|bring)\b/i;
+  /\b(set|setup|switch|turn|make|give|add|drop|raise|lower|increase|decrease|run|go|put|paint|show|enable|disable|start|stop|kill|reset|change|trim|load|apply|fit|arm|engage|launch|crank|rev|clear|hide|roll|bring)\b/i;
 const STRONG_RE =
-  /\b(more downforce|less drag|more grip|less grip|more wing|less wing|wet setup|night race|rain mode|run the dyno|redline it|rev it|explode the car|paint it|top speed|flat out|surprise me|show me the engine|take it apart|put it back)\b/i;
+  /\b(more downforce|less drag|more grip|less grip|more wing|less wing|wet setup|night race|rain mode|run the dyno|redline it|rev it|paint it|top speed|flat out|surprise me)\b/i;
 
 export function engineerIntent(text: string): boolean {
   return STRONG_RE.test(text) || (TOPIC_RE.test(text) && ACTION_RE.test(text));
@@ -132,15 +132,6 @@ export function tuneFromText(
       `Dyno live at ${rpmValue(patch.rpm).toLocaleString()} rpm — ${Math.round(point.torqueNm)} Nm, ${Math.round(point.powerHp)} hp at the crank.`,
     );
     trades.push("Watch the curve: torque peaks mid-range, power keeps climbing to the redline.");
-  }
-
-  /* Exploded view --------------------------------------------------------- */
-  if (/\b(assemble|put it back|back together|reassemble)\b/i.test(text)) {
-    patch.explode = 0;
-    notes.push("Bolting it back together — assemblies home.");
-  } else if (/\b(explode|exploded|apart|disassemble|strip it|internals|show me the engine|x[- ]?ray)\b/i.test(text)) {
-    patch.explode = /\b(fully|completely|all the way)\b/i.test(text) ? 1 : 0.85;
-    notes.push("Pulling the assemblies apart — monocoque, canopy, aero and V12 on display.");
   }
 
   /* Paint / livery --------------------------------------------------------- */

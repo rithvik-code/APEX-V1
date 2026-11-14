@@ -26,8 +26,6 @@ const RULES: Rule[] = [
     re: /\b(wind|tunnel|air)\b.*\b(down|less|lower|weaker|calm)\b/i,
     build: (scene) => ({ action: `WIND TUNNEL → ${Math.max(40, scene.windSpeed - 40)} KM/H`, patch: { windSpeed: Math.max(40, scene.windSpeed - 40) } }),
   },
-  { re: /\b(blow (it )?apart|explode|tear (it )?apart|apart)\b/i, build: () => ({ action: "EXPLODED VIEW 65%", patch: { explode: 0.65 } }) },
-  { re: /\b(put (it )?back|reassemble|together|snap (it )?home|home)\b/i, build: () => ({ action: "ASSEMBLY SNAPPED HOME", patch: { explode: 0 } }) },
   { re: /\b(redline|rev|dyno|power run|full power)\b/i, build: () => ({ action: "DYNO → REDLINE", patch: { dyno: true, rpm: 0.9 } }) },
   { re: /\b(kill the engine|engine off|stop the dyno|shut (it )?down)\b/i, build: () => ({ action: "DYNO OFF", patch: { dyno: false } }) },
   { re: /\b(heavy rain|monsoon|soak)\b/i, build: () => ({ action: "RAIN AMOUNT → 100%", patch: { weather: "rain", rainAmount: 1 } }) },
@@ -101,7 +99,7 @@ export function CommandDeck({ scene, onTune, onDrive }: MeshNodeProps) {
       const rule = RULES.find((entry) => entry.re.test(heard));
       if (!rule) {
         setLog((prev) => [
-          { say: heard, action: "NO INTENT MATCHED — TRY: rain / night / wind up / explode / redline / launch", at: Date.now() },
+          { say: heard, action: "NO INTENT MATCHED — TRY: rain / night / wind up / redline / launch", at: Date.now() },
           ...prev.slice(0, 7),
         ]);
         setPhase("idle");

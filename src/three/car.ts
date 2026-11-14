@@ -140,7 +140,7 @@ export function createSupercar(): {
   const wheels: THREE.Group[] = [];
   const anchors: VehicleAnchor[] = [];
 
-  // Exploded-view assemblies. Each is a group offset from its assembled pose.
+  // Grouped body components remain at the assembled pose in the garage.
   const shell = new THREE.Group();
   const canopy = new THREE.Group();
   const frontAero = new THREE.Group();

@@ -31,7 +31,6 @@ export type SceneConfig = {
   weather: Weather;
   rainAmount: number;
   nightRace: boolean;
-  explode: number;
   dyno: boolean;
   rpm: number;
   paint: CustomPaint;
@@ -62,7 +61,6 @@ export const DEFAULT_SCENE: SceneConfig = {
   weather: "clear",
   rainAmount: 0.6,
   nightRace: false,
-  explode: 0,
   dyno: false,
   rpm: 0.32,
   paint: { ...DEFAULT_PAINT },
@@ -230,7 +228,6 @@ export function sanitizeSceneConfig(input: unknown): SceneConfig | null {
     weather: pick(value.weather, WEATHER_VALUES, DEFAULT_SCENE.weather),
     rainAmount: boundedNumber(value.rainAmount, DEFAULT_SCENE.rainAmount, 0, 1),
     nightRace: flag(value.nightRace, DEFAULT_SCENE.nightRace),
-    explode: boundedNumber(value.explode, DEFAULT_SCENE.explode, 0, 1),
     dyno: flag(value.dyno, DEFAULT_SCENE.dyno),
     rpm: boundedNumber(value.rpm, DEFAULT_SCENE.rpm, 0, 1),
     paint: {

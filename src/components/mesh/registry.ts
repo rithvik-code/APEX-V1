@@ -73,7 +73,7 @@ export const NODES: MeshNode[] = [
     name: "GESTURE DECK",
     tag: "Your hands, the remote control",
     blurb:
-      "A hand-tracking vision model reads your webcam at video rate and turns gestures into machine actions. Pinch to pull the exploded view apart, open your palm to snap it home, spread two hands to raise the wind tunnel.",
+      "A hand-tracking vision model reads your webcam at video rate and turns gestures into machine actions. Spread two hands to raise the wind tunnel.",
     runtime: "MEDIAPIPE HANDS · WEBGL",
     cost: "~8 MB CACHE",
     tier: "live",
@@ -115,7 +115,7 @@ export const NODES: MeshNode[] = [
     name: "COMMAND DECK",
     tag: "Voice in, real actions out",
     blurb:
-      "Whisper hears the words; an intent grammar maps them to real controls — wind, rain, night mode, the exploded view, launch drive. Speak and the machine obeys, entirely offline.",
+      "Whisper hears the words; an intent grammar maps them to real controls — wind, rain, night mode and launch drive. Speak and the machine obeys, entirely offline.",
     runtime: "WHISPER + INTENT GRAMMAR",
     cost: "SHARES N-01 MODEL",
     tier: "live",

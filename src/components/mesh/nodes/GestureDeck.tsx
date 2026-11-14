@@ -129,15 +129,13 @@ export function GestureDeck({ onTune }: MeshNodeProps) {
               Math.hypot(points[pip].x - points[0].x, points[pip].y - points[0].y) * 1.08;
           }).length;
           if (pinch > 0.62) {
-            gesture = `PINCH ${(pinch * 100).toFixed(0)} · EXPLODED VIEW`;
+            gesture = `PINCH ${(pinch * 100).toFixed(0)} · HAND TRACKED`;
             if (now - lastTune > 180) {
-              tuneRef.current({ explode: Number(pinch.toFixed(2)) });
               lastTune = now;
             }
           } else if (extended >= 4 && !palmLatch) {
             palmLatch = true;
-            gesture = "PALM · ASSEMBLY HOME";
-            tuneRef.current({ explode: 0 });
+            gesture = "PALM · HAND TRACKED";
           } else {
             gesture = extended >= 4 ? "PALM" : "HAND READY";
             if (extended < 3) palmLatch = false;
@@ -194,8 +192,8 @@ export function GestureDeck({ onTune }: MeshNodeProps) {
         )}
       </div>
       <p className="mesh-fine">
-        PINCH → EXPLODED VIEW · OPEN PALM → SNAP HOME · TWO-HAND SPREAD → WIND
-        TUNNEL SPEED. EVERY GESTURE FIRES THE REAL SCENE CONTROLS.
+        PINCH / OPEN PALM TRACK HAND POSE · TWO-HAND SPREAD → WIND TUNNEL SPEED.
+        EVERY GESTURE FIRES THE REAL SCENE CONTROLS.
       </p>
       {error && <p className="mesh-error">{error}</p>}
     </div>

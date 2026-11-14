@@ -635,10 +635,6 @@ export function AeroDock({
               </div>
             </div>
 
-            <div className="aero-dock__group">
-              <Slider label="EXPLODED VIEW" value={Math.round(config.explode * 100)} min={0} max={100} step={1} unit="%" onChange={(v) => onChange({ explode: v / 100 })} />
-              <p className="aero-dock__note">Pull the assemblies apart to inspect the monocoque, canopy, aero and V12. Labels track each part in 3D.</p>
-            </div>
           </>
         )}
 

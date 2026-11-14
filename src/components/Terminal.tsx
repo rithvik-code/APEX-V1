@@ -133,7 +133,7 @@ type Topic = "tune" | "f1" | "code" | "local" | "apex";
 const TOPICS: Array<{ topic: Topic; re: RegExp }> = [
   {
     topic: "tune",
-    re: /\b(downforce|drag|wet setup|rain mode|night race|dyno|redline|explode|paint it|livery|top speed|wind speed|grid floor|auto-orbit)\b/i,
+    re: /\b(downforce|drag|wet setup|rain mode|night race|dyno|redline|paint it|livery|top speed|wind speed|grid floor|auto-orbit)\b/i,
   },
   {
     topic: "f1",
