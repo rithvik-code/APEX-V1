@@ -4158,6 +4158,16 @@ body.is-orbiting * {
    Responsive
    ========================================================================== */
 
+@media (max-width: 1360px) {
+  .topbar {
+    grid-template-columns: auto 1fr auto auto auto;
+  }
+
+  .topbar__status {
+    display: none;
+  }
+}
+
 @media (max-width: 1280px) {
   .rail {
     display: none;
