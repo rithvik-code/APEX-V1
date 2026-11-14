@@ -20,6 +20,7 @@ import { Cursor } from "./components/Cursor";
 import { AeroDock, AeroLaunch, type DockBridge, type DockStatus } from "./components/AeroDock";
 import { DriveHUD, type TrackOutline } from "./components/DriveHUD";
 import { Garage } from "./components/Garage";
+import { CyrusHUD } from "./components/CyrusHUD";
 import type { DriveHudState, DriveVehicle } from "./three/drive";
 import { DEFAULT_DRIVE_SETUP, loadBoard, type DriveSetup } from "./lib/driveStore";
 import { cyrus } from "./lib/cyrus";
@@ -1923,6 +1924,10 @@ export default function App() {
           onReward={garageReward}
           trophies={trophyCount}
         />
+      )}
+
+      {!booting && !takeover && !coreView && (
+        <CyrusHUD mode={garage ? "garage" : drive ? "drive" : "page"} />
       )}
 
       {coreView && (
