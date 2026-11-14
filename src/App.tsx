@@ -1414,6 +1414,7 @@ export default function App() {
           { id: "machine", label: "MACHINE", icon: "◈" },
           { id: "pitwall", label: "PIT WALL", icon: "⌘" },
           { id: "grid", label: "GRID", icon: "▦" },
+          { id: "mesh", label: "MESH", icon: "◎" },
           { id: "crew", label: "CREW", icon: "✳" },
         ].map((item) => (
           <a key={item.id} href={`#${item.id}`} aria-current={active === item.id ? "location" : undefined}>

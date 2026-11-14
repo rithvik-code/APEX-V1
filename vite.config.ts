@@ -3,9 +3,9 @@ import react from "@vitejs/plugin-react";
 
 const control = {
   "/api": {
-    // Must match apexd's default port (APEX_CONTROL_PORT, 4317), otherwise the
-    // console in the page talks to a socket nobody is listening on.
-    target: "http://127.0.0.1:4317",
+    // Follow the daemon's own port so a custom APEX_CONTROL_PORT cannot
+    // silently leave the console talking to an empty socket.
+    target: `http://127.0.0.1:${process.env.APEX_CONTROL_PORT || 4317}`,
     changeOrigin: false,
   },
 };

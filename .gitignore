@@ -24,6 +24,10 @@ pnpm-debug.log*
 coverage/
 *.tsbuildinfo
 
+# agent scratch
+.freebuff/
+.cloud-attachments/
+
 # editor / OS
 .vscode/*
 !.vscode/extensions.json

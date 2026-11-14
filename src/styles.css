@@ -737,7 +737,7 @@ a {
     right: max(10px, env(safe-area-inset-right));
     bottom: max(8px, env(safe-area-inset-bottom));
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     min-height: 58px;
     padding: 5px;
     border: 1px solid rgba(200, 255, 22, 0.24);
