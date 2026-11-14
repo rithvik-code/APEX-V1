@@ -661,9 +661,9 @@ export function createGarage(): GarageStage {
   const centerZ = (minZ + maxZ) / 2;
   const circuit = new THREE.Group();
   circuit.name = "shared-driving-circuit-vista";
-  circuit.position.set(0, -25, 164);
+  circuit.position.set(0, -18, 164);
   circuit.scale.setScalar(0.46);
-  circuit.rotation.set(-THREE.MathUtils.degToRad(18), Math.PI, 0);
+  circuit.rotation.set(-Math.PI / 15, Math.PI, 0);
   exterior.add(circuit);
   const wrapCircuit = (i: number) => ((i % count) + count) % count;
   const circuitPoint = (i: number, off: number, lift: number, out: THREE.Vector3): THREE.Vector3 => {
