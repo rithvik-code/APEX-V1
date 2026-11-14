@@ -2267,8 +2267,8 @@ export function createGarage(): GarageStage {
   let catCall = 0;
   const lastPlayer = { x: 0, z: 6.3 };
   const callPet = (pet: "dog" | "cat"): void => {
-    if (pet === "dog") dogCall = 9;
-    else catCall = 7;
+    if (pet === "dog") dogCall = 20;
+    else catCall = 40;
   };
   const scanCar = (): void => {
     scanT = 0;
@@ -2307,8 +2307,16 @@ export function createGarage(): GarageStage {
     const fromX = group.position.x - player.x;
     const fromZ = group.position.z - player.z;
     const away = Math.hypot(fromX, fromZ) || 1;
-    const tx = player.x + (fromX / away) * stop;
-    const tz = player.z + (fromZ / away) * stop;
+    let tx = player.x + (fromX / away) * stop;
+    let tz = player.z + (fromZ / away) * stop;
+    const doorUp = doorOpen > 0.5;
+    if (doorUp && player.z > 9.8 && group.position.z < 9.8) {
+      tx = Math.max(-2.5, Math.min(2.5, player.x));
+      tz = Math.abs(group.position.x) > 2.6 ? 6.1 : 10.2;
+    } else if (doorUp && player.z < 6.4 && group.position.z > 6.4) {
+      tx = Math.max(-2.5, Math.min(2.5, player.x));
+      tz = Math.abs(group.position.x) > 2.6 ? 10.2 : 6.1;
+    }
     const dx = tx - group.position.x;
     const dz = tz - group.position.z;
     const dist = Math.hypot(dx, dz);
@@ -2318,8 +2326,9 @@ export function createGarage(): GarageStage {
     let nz = group.position.z + (dz / dist) * step;
     [nx, nz] = slideAround(nx, nz, 0, 0.2, 2.7, tx, tz, step);
     [nx, nz] = slideAround(nx, nz, 5.5, 3.4, 1.3, tx, tz, step);
-    nx = Math.max(-6.6, Math.min(6.95, nx));
-    nz = Math.max(-6.7, Math.min(7.6, nz));
+    nz = Math.max(-6.7, Math.min(doorUp ? 14.2 : 7.4, nz));
+    if (doorUp && nz > 6.4 && nz < 9.8) nx = Math.max(-2.7, Math.min(2.7, nx));
+    else nx = Math.max(doorUp && nz >= 9.8 ? -9.4 : -6.6, Math.min(doorUp && nz >= 9.8 ? 9.4 : 6.95, nx));
     const moved = Math.hypot(nx - group.position.x, nz - group.position.z);
     if (moved > 1e-4) {
       const want = Math.atan2(nx - group.position.x, nz - group.position.z);
