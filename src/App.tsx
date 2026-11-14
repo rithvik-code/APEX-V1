@@ -356,14 +356,11 @@ export default function App() {
     [closeGarage, launchDrive],
   );
 
-  const summonVehicle = useCallback((vehicle: "car" | "bike") => {
+  const summonVehicle = useCallback((vehicle: "car" | "bike", assembled = true) => {
     if (!garage) openGarage();
     sound.whoosh();
-    setScene((prev) => ({ ...prev, focus: vehicle, explode: 0 }));
-    window.setTimeout(() => {
-      setScene((prev) => ({ ...prev, explode: 1 }));
-      sound.tick("start");
-    }, garage ? 80 : 950);
+    setScene((prev) => ({ ...prev, focus: vehicle, explode: assembled ? 0 : 1 }));
+    if (assembled) window.setTimeout(() => sound.tick("start"), garage ? 80 : 950);
   }, [garage, openGarage]);
 
   const runGarageAction = useCallback(
@@ -581,8 +578,8 @@ export default function App() {
       const driving = engine.driveActive;
       switch (intent.kind) {
         case "pet":
-          if (!inGarage) return "Meet me in the garage to call the pets.";
-          if (intent.pet === "turtles") return "The turtles are taking things at their own pace. You'll find them by the pebble tray.";
+          if (!inGarage) openGarage();
+          if (intent.pet === "turtles") return "Mr and Mrs Turtle are by the pebble tray. The little procession is underway.";
           engine.callGaragePet(intent.pet);
           runGarageAction(intent.pet === "dog" ? "dog" : "cat");
           return intent.pet === "dog" ? "Scotch, come here. He's on his way to you." : "Mario is coming over. At a cat's pace, naturally.";
@@ -592,9 +589,10 @@ export default function App() {
           else if (driving) switchDriveVehicle(intent.vehicle);
           else launchDrive(intent.vehicle);
           return `Taking the ${intent.vehicle} to the circuit. You're at the wheel.`;
-        case "summon":
-          summonVehicle(intent.vehicle);
-          return `Summoning the ${intent.vehicle}. Stand by for assembly.`;
+        case "explode":
+          if (!inGarage) openGarage();
+          window.setTimeout(() => summonVehicle(intent.vehicle, intent.assembled), inGarage ? 80 : 950);
+          return intent.assembled ? `Reassembling the ${intent.vehicle}.` : `Exploding the ${intent.vehicle} into its linked assemblies.`;
         case "garage":
           if (inGarage) return "You're already home. What do you need?";
           openGarage();

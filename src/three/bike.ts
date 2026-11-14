@@ -92,8 +92,8 @@ export function createSuperbike(): {
 } {
   const group = new THREE.Group();
   const anchors: VehicleAnchor[] = [];
-  const rearWheelAssembly = new THREE.Group();
   const wheelAssembly = new THREE.Group();
+  const rearWheelAssembly = new THREE.Group();
   const shellAssembly = new THREE.Group();
   const powerAssembly = new THREE.Group();
   const assemblies = [
@@ -203,7 +203,7 @@ export function createSuperbike(): {
   }
 
   wheelAssembly.add(buildWheel(1.02, false));
-  assemblies[1].group.add(buildWheel(-0.98, true));
+  rearWheelAssembly.add(buildWheel(-0.98, true));
 
   // Front fender: carbon arc hugging the front slick -------------------------
   const fenderArc = 2.2;
