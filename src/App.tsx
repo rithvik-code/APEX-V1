@@ -90,9 +90,10 @@ const CHAPTERS = [
   { id: "machine", n: "02", label: "MACHINE" },
   { id: "pitwall", n: "03", label: "PIT WALL" },
   { id: "grid", n: "04", label: "GRID" },
-  { id: "vast", n: "05", label: "VAST" },
+  { id: "mesh", n: "05", label: "MESH" },
   { id: "crew", n: "06", label: "CREW" },
-  { id: "install", n: "07", label: "SPAWN" },
+  { id: "vast", n: "07", label: "VAST" },
+  { id: "install", n: "08", label: "SPAWN" },
 ];
 
 const ANCHORS = [
@@ -1882,7 +1883,7 @@ export default function App() {
             ∞
           </span>
           <div className="vast__top" data-reveal>
-            <span className="micro">05 / THE VAST</span>
+            <span className="micro">07 / THE VAST</span>
             <span className="micro">NO END OF LINE</span>
           </div>
 
@@ -1928,7 +1929,7 @@ export default function App() {
         </section>
 
         <section className="section install" id="install">
-          <SectionHead index="07" title="SPAWN IT" meta="NODE 18+ / OLLAMA" />
+          <SectionHead index="08" title="SPAWN IT" meta="NODE 18+ / OLLAMA" />
 
           <div className="install__grid">
             <div className="install__copy" data-reveal>

@@ -3,9 +3,9 @@ import react from "@vitejs/plugin-react";
 
 const control = {
   "/api": {
-    // The default APEX port is occupied by a stale listener on this machine.
-    // Keep the UI proxy aligned with the documented alternate daemon port.
-    target: "http://127.0.0.1:4318",
+    // Must match apexd's default port (APEX_CONTROL_PORT, 4317), otherwise the
+    // console in the page talks to a socket nobody is listening on.
+    target: "http://127.0.0.1:4317",
     changeOrigin: false,
   },
 };
