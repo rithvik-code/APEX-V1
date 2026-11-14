@@ -193,17 +193,17 @@ type StreamOptions = {
   grounding?: Grounding | null;
   knowledge?: string;
   extraSystem?: string;
+  systemPrompt?: string;
   temperature?: number;
   numPredict?: number;
+  numCtx?: number;
 };
 
 function composeSystem(settings: AiSettings, options: StreamOptions): string {
   const today = new Date().toISOString().slice(0, 10);
   const parts = [
-    settings.systemPrompt.trim(),
+    options.systemPrompt?.trim() ?? [settings.systemPrompt.trim(), STYLE_RULE, CONTROL_RULE].join("\n\n"),
     `SESSION DATE: ${today}. Your training data may be older than this date. For anything that could have changed — champions, standings, releases, prices, news — trust live context when it is provided. When no context covers it and you are unsure, say so instead of guessing.`,
-    STYLE_RULE,
-    CONTROL_RULE,
   ];
   if (options.grounding) parts.push(formatGroundingContext(options.grounding));
   if (options.knowledge) parts.push(options.knowledge);
@@ -226,7 +226,7 @@ async function streamOllama(options: StreamOptions): Promise<void> {
     options: {
       temperature: temperature ?? (grounding ? 0.2 : 0.55),
       top_p: 0.9,
-      num_ctx: 4096,
+      num_ctx: options.numCtx ?? 4096,
       num_predict: numPredict ?? (grounding ? 200 : 360),
     },
   };

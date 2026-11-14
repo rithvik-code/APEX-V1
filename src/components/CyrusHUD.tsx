@@ -2,10 +2,10 @@ import { useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
 import { cyrus, useCyrus } from "../lib/cyrus";
 
 const isolate = (event: SyntheticEvent) => event.stopPropagation();
-const privacy = "Web Speech may use your browser's speech service. Whisper downloads once, then recognizes on-device. Keep this page open.";
+const privacy = "Chat uses your configured AI model and this session's conversation. Web Speech may use your browser's speech service; Whisper runs on-device after download. Keep this page open.";
 
 export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
-  const { phase, ear, heard, reply, status, error, log } = useCyrus();
+  const { phase, ear, heard, reply, status, brain, error, log } = useCyrus();
   const [expanded, setExpanded] = useState(mode === "garage");
   const [text, setText] = useState("");
   const rootRef = useRef<HTMLElement>(null);
@@ -200,6 +200,7 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
             <span>{ear === "web-speech" ? "WEB SPEECH" : ear === "whisper" ? "WHISPER" : "NO SPEECH EAR"}</span>
           </div>
           <p className="cyrus-hud__detail">{status}</p>
+          <p className="cyrus-hud__detail" role="status">{brain}</p>
           <div className="cyrus-hud__meter">
             <div className="cyrus-hud__bars" aria-hidden="true">
               {Array.from({ length: 18 }, (_, index) => <i key={index} />)}
@@ -220,7 +221,7 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
             {lastHeard && <p><b>YOU</b><span>{lastHeard}</span></p>}
             {lastReply && <p><b>CYRUS</b><span>{lastReply}</span></p>}
             {!lastHeard && !lastReply && (
-              <p className="cyrus-hud__empty">Type a request, or enable the mic and say “Hey Cyrus”.</p>
+              <p className="cyrus-hud__empty">Ask about anything, talk through an idea, or give a garage command. Enable the mic to say “Hey Cyrus”.</p>
             )}
           </div>
           <form
@@ -241,7 +242,7 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
               type="text"
               value={text}
               onChange={(event) => setText(event.target.value)}
-              placeholder="Ask CYRUS…"
+              placeholder="Talk to CYRUS…"
               autoComplete="off"
               enterKeyHint="send"
             />
