@@ -1802,6 +1802,7 @@ export function createGarage(): GarageStage {
     { id: "launch", label: "LAUNCH PRACTICE", position: new THREE.Vector3(3.6, 0.3, 6.0), radius: 2 },
     { id: "car", label: "TAKE THE CAR OUT", position: new THREE.Vector3(0, 1.1, 0.2), radius: 3.1 },
     { id: "bike", label: "TAKE THE BIKE OUT", position: new THREE.Vector3(5.5, 0.9, 3.4), radius: 2.1 },
+    { id: "cyrus", label: "CYRUS CORE · TALK", position: new THREE.Vector3(0, 3.15, -4.3), radius: 1.6 },
   ];
 
   /* ------------------------------------------------------------------ */
@@ -1902,6 +1903,534 @@ export function createGarage(): GarageStage {
     makeRoam(t.baseX, t.baseZ, i === 0 ? 0.45 : 0.3, i === 0 ? 0.15 : 0.11, 3 + i),
   );
   const turtleMoves = turtles.map(() => 0);
+
+  /* ------------------------------------------------------------------ */
+  /* CYRUS — holographic core, holo panels and car scanner              */
+  /* ------------------------------------------------------------------ */
+
+  const CORE_POS = new THREE.Vector3(0, 3.15, -4.3);
+  const cyrusState: CyrusVisual = { phase: "off", level: 0, heard: "", reply: "", ear: "" };
+  const cyrusTint = new THREE.Color(0x3a4a2a);
+  const cyrusWant = new THREE.Color();
+  const coreHaloMap = radialTexture("rgba(220,255,140,1)");
+  const glow = (color: number, opacity: number): THREE.MeshBasicMaterial =>
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      fog: false,
+      toneMapped: false,
+    });
+
+  const core = new THREE.Group();
+  core.name = "cyrus-core";
+  core.position.copy(CORE_POS);
+  root.add(core);
+  const coreShellMat = glow(ACID, 0.55);
+  coreShellMat.wireframe = true;
+  const shell = new THREE.Mesh(new THREE.IcosahedronGeometry(0.36, 2), coreShellMat);
+  core.add(shell);
+  const shellOuterMat = glow(ACID, 0.18);
+  shellOuterMat.wireframe = true;
+  const shellOuter = new THREE.Mesh(new THREE.IcosahedronGeometry(0.46, 1), shellOuterMat);
+  core.add(shellOuter);
+  const heartMat = glow(0xf2ffd0, 0.95);
+  const heart = new THREE.Mesh(new THREE.SphereGeometry(0.15, 24, 18), heartMat);
+  core.add(heart);
+  const coreHaloMat = new THREE.SpriteMaterial({
+    map: coreHaloMap,
+    color: ACID,
+    transparent: true,
+    opacity: 0.5,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    fog: false,
+    toneMapped: false,
+  });
+  const coreHalo = new THREE.Sprite(coreHaloMat);
+  coreHalo.scale.setScalar(2.4);
+  core.add(coreHalo);
+
+  const coreRings: Array<{ mesh: THREE.Mesh; axis: THREE.Vector3; speed: number }> = [];
+  const ringSpecs = [
+    { r: 0.66, tilt: [Math.PI / 2, 0, 0], speed: 0.6, color: ACID, opacity: 0.7 },
+    { r: 0.8, tilt: [Math.PI / 2.6, 0.5, 0], speed: -0.42, color: 0x6ff9ff, opacity: 0.45 },
+    { r: 0.96, tilt: [Math.PI / 1.8, -0.7, 0.3], speed: 0.3, color: ACID, opacity: 0.35 },
+  ];
+  for (const spec of ringSpecs) {
+    const mesh = new THREE.Mesh(
+      new THREE.TorusGeometry(spec.r, 0.007, 6, 120),
+      glow(spec.color, spec.opacity),
+    );
+    mesh.rotation.set(spec.tilt[0], spec.tilt[1], spec.tilt[2]);
+    core.add(mesh);
+    coreRings.push({ mesh, axis: new THREE.Vector3(0, 0, 1), speed: spec.speed });
+  }
+  // Segmented outer arcs, like a targeting bezel around the core.
+  const arcMat = glow(ACID, 0.5);
+  const arcs = new THREE.Group();
+  core.add(arcs);
+  for (let i = 0; i < 4; i++) {
+    const arc = new THREE.Mesh(
+      new THREE.RingGeometry(1.12, 1.16, 48, 1, i * (Math.PI / 2) + 0.14, Math.PI / 2 - 0.28),
+      arcMat,
+    );
+    arcs.add(arc);
+  }
+
+  const orbitCount = 180;
+  const orbitGeo = new THREE.BufferGeometry();
+  const orbitPos = new Float32Array(orbitCount * 3);
+  const orbitSeed = Array.from({ length: orbitCount }, () => ({
+    r: 0.55 + Math.random() * 0.75,
+    a: Math.random() * Math.PI * 2,
+    y: (Math.random() - 0.5) * 0.9,
+    s: 0.2 + Math.random() * 0.9,
+  }));
+  orbitGeo.setAttribute("position", new THREE.BufferAttribute(orbitPos, 3));
+  const orbitMat = new THREE.PointsMaterial({
+    color: ACID,
+    size: 0.028,
+    transparent: true,
+    opacity: 0.8,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    fog: false,
+    toneMapped: false,
+  });
+  core.add(new THREE.Points(orbitGeo, orbitMat));
+
+  // Ceiling emitter and projection cone feeding the core.
+  cylinder(0.34, 0.08, darkSteel, CORE_POS.x, 4.36, CORE_POS.z, root, 28);
+  const emitterRing = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.3, 40), glow(ACID, 0.8));
+  emitterRing.rotation.x = Math.PI / 2;
+  emitterRing.position.set(CORE_POS.x, 4.31, CORE_POS.z);
+  root.add(emitterRing);
+  const beamMat = glow(ACID, 0.07);
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.62, 4.31 - CORE_POS.y, 32, 1, true), beamMat);
+  beam.position.set(CORE_POS.x, (4.31 + CORE_POS.y) / 2, CORE_POS.z);
+  root.add(beam);
+  // Floor projection directly under the core.
+  const floorRingMat = glow(ACID, 0.22);
+  const floorRing = new THREE.Mesh(new THREE.RingGeometry(0.9, 0.94, 64), floorRingMat);
+  floorRing.rotation.x = -Math.PI / 2;
+  floorRing.position.set(CORE_POS.x, 0.016, CORE_POS.z);
+  root.add(floorRing);
+  const floorRingInner = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.52, 6), floorRingMat);
+  floorRingInner.rotation.x = -Math.PI / 2;
+  floorRingInner.position.set(CORE_POS.x, 0.017, CORE_POS.z);
+  root.add(floorRingInner);
+
+  // Holo panels: main voice panel under the core, systems + circuit link either side.
+  const holoPanel = (w: number, h: number, px: number, x: number, y: number, z: number, yaw: number) => {
+    const surface = canvas2d(px, Math.round((px * h) / w));
+    const map = texture(surface.canvas);
+    const mat = new THREE.MeshBasicMaterial({
+      map,
+      transparent: true,
+      opacity: 0.92,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      fog: false,
+      toneMapped: false,
+    });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = yaw;
+    root.add(mesh);
+    return { ...surface, map, mat, mesh };
+  };
+  const voicePanel = holoPanel(2.5, 0.86, 1024, CORE_POS.x, 1.98, CORE_POS.z + 0.15, 0);
+  const sysPanel = holoPanel(1.55, 1.05, 512, -2.95, 2.55, -4.7, 0.42);
+  const linkPanel = holoPanel(1.55, 1.05, 512, 2.95, 2.55, -4.7, -0.42);
+
+  // Car scanner: a lit plane that sweeps the car nose to tail.
+  const scanMat = glow(0x6ff9ff, 0);
+  const scanPlane = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 1.5), scanMat);
+  scanPlane.rotation.y = 0;
+  root.add(scanPlane);
+  const scanEdgeMat = glow(0xdffcff, 0);
+  const scanEdge = new THREE.Mesh(new THREE.PlaneGeometry(2.7, 0.02), scanEdgeMat);
+  root.add(scanEdge);
+  let scanT = -1;
+
+  // Paw-print target rings shown while a pet answers a call.
+  const callRingMat = glow(0x6ff9ff, 0);
+  const callRing = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.47, 48), callRingMat);
+  callRing.rotation.x = -Math.PI / 2;
+  root.add(callRing);
+
+  const waveHistory = new Float32Array(72);
+  let waveClock = 0;
+  let sideClock = 0;
+
+  let circuitBounds: { minX: number; maxX: number; minZ: number; maxZ: number } | null = null;
+  const drawLinkPanel = (time: number): void => {
+    const { ctx, canvas } = linkPanel;
+    const W = canvas.width;
+    const H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(6,12,10,0.62)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = "rgba(200,255,22,0.65)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(4, 4, W - 8, H - 8);
+    ctx.fillStyle = ACID_HEX;
+    ctx.font = "600 22px 'JetBrains Mono', monospace";
+    ctx.fillText("CIRCUIT LINK // LIVE", 22, 40);
+    ctx.fillStyle = "rgba(220,240,230,0.6)";
+    ctx.font = "16px 'JetBrains Mono', monospace";
+    ctx.fillText(`${raceCars.length} CARS LAPPING · ${Math.round(plan.length)} M`, 22, 66);
+    if (!circuitBounds) {
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minZ = Infinity;
+      let maxZ = -Infinity;
+      for (let i = 0; i < plan.count; i++) {
+        minX = Math.min(minX, plan.xs[i]);
+        maxX = Math.max(maxX, plan.xs[i]);
+        minZ = Math.min(minZ, plan.zs[i]);
+        maxZ = Math.max(maxZ, plan.zs[i]);
+      }
+      circuitBounds = { minX, maxX, minZ, maxZ };
+    }
+    const b = circuitBounds;
+    const boxW = W - 60;
+    const boxH = H - 120;
+    const scale = Math.min(boxW / (b.maxX - b.minX), boxH / (b.maxZ - b.minZ));
+    const ox = 30 + (boxW - (b.maxX - b.minX) * scale) / 2;
+    const oz = 92 + (boxH - (b.maxZ - b.minZ) * scale) / 2;
+    const mapX = (x: number) => ox + (x - b.minX) * scale;
+    const mapZ = (z: number) => oz + (z - b.minZ) * scale;
+    ctx.beginPath();
+    for (let i = 0; i <= plan.count; i += 4) {
+      const k = i % plan.count;
+      const x = mapX(plan.xs[k]);
+      const z = mapZ(plan.zs[k]);
+      if (i === 0) ctx.moveTo(x, z);
+      else ctx.lineTo(x, z);
+    }
+    ctx.strokeStyle = "rgba(200,255,22,0.85)";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    for (const car of raceCars) {
+      const k = Math.floor(car.distance / plan.step) % plan.count;
+      ctx.fillStyle = "#f2fbff";
+      ctx.beginPath();
+      ctx.arc(mapX(plan.xs[k]), mapZ(plan.zs[k]), 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = `rgba(111,249,255,${0.5 + 0.5 * Math.sin(time * 3)})`;
+    ctx.fillRect(W - 40, 26, 12, 12);
+  };
+
+  const drawSysPanel = (): void => {
+    const { ctx, canvas } = sysPanel;
+    const W = canvas.width;
+    const H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(6,12,10,0.62)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = "rgba(200,255,22,0.65)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(4, 4, W - 8, H - 8);
+    ctx.fillStyle = ACID_HEX;
+    ctx.font = "600 22px 'JetBrains Mono', monospace";
+    ctx.fillText("BAY SYSTEMS", 22, 40);
+    const rows: Array<[string, string, boolean]> = [
+      ["ROLLER DOOR", doorOpen > 0.5 ? "OPEN" : "SHUT", doorOpen > 0.5],
+      ["HYDRAULIC LIFT", carriage.position.y > 0.6 ? "RAISED" : "LOWERED", carriage.position.y > 0.6],
+      ["SERVICE MODE", serviceTarget > 0.5 ? "ACTIVE" : "OFF", serviceTarget > 0.5],
+      ["V12 TACH", `${Math.round(revRpm * 9000)} RPM`, revRpm > 0.05],
+      ["SCOTCH", `${Math.hypot(dog.position.x - lastPlayer.x, dog.position.z - lastPlayer.z).toFixed(1)} M${dogCall > 0 ? " · INBOUND" : ""}`, dogCall > 0],
+      ["MARIO", `${Math.hypot(cat.position.x - lastPlayer.x, cat.position.z - lastPlayer.z).toFixed(1)} M${catCall > 0 ? " · INBOUND" : ""}`, catCall > 0],
+      ["VOICE EAR", cyrusState.ear || "OFFLINE", cyrusState.phase !== "off"],
+    ];
+    ctx.font = "17px 'JetBrains Mono', monospace";
+    rows.forEach(([label, value, live], i) => {
+      const y = 82 + i * 32;
+      ctx.fillStyle = "rgba(220,240,230,0.6)";
+      ctx.fillText(label, 22, y);
+      ctx.fillStyle = live ? ACID_HEX : "rgba(220,240,230,0.85)";
+      const width = ctx.measureText(value).width;
+      ctx.fillText(value, W - 26 - width, y);
+      ctx.fillStyle = "rgba(200,255,22,0.12)";
+      ctx.fillRect(22, y + 9, W - 48, 1);
+    });
+  };
+
+  const wrapLines = (ctx: CanvasRenderingContext2D, text: string, width: number, max: number): string[] => {
+    const words = text.split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let line = "";
+    for (const word of words) {
+      const next = line ? `${line} ${word}` : word;
+      if (ctx.measureText(next).width > width && line) {
+        lines.push(line);
+        line = word;
+      } else line = next;
+    }
+    if (line) lines.push(line);
+    if (lines.length > max) {
+      const kept = lines.slice(lines.length - max);
+      kept[0] = `… ${kept[0]}`;
+      return kept;
+    }
+    return lines;
+  };
+
+  const PHASE_LABEL: Record<CyrusVisual["phase"], string> = {
+    off: "OFFLINE · TAP THE CORE",
+    starting: "WAKING THE MICROPHONE",
+    standby: "STANDBY · SAY “HEY CYRUS”",
+    awake: "LISTENING",
+    thinking: "THINKING",
+    speaking: "SPEAKING",
+  };
+
+  const drawVoicePanel = (time: number): void => {
+    const { ctx, canvas } = voicePanel;
+    const W = canvas.width;
+    const H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(6,12,10,0.55)";
+    ctx.fillRect(0, 0, W, H);
+    const tint = `#${cyrusTint.getHexString()}`;
+    ctx.strokeStyle = tint;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    const c = 22;
+    ctx.moveTo(4 + c, 4);
+    ctx.lineTo(W - 4, 4);
+    ctx.lineTo(W - 4, H - 4 - c);
+    ctx.lineTo(W - 4 - c, H - 4);
+    ctx.lineTo(4, H - 4);
+    ctx.lineTo(4, 4 + c);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.fillStyle = tint;
+    ctx.font = "700 34px 'JetBrains Mono', monospace";
+    ctx.fillText("CYRUS", 28, 54);
+    ctx.font = "18px 'JetBrains Mono', monospace";
+    ctx.fillStyle = "rgba(220,240,230,0.6)";
+    ctx.fillText("BAY INTELLIGENCE // v1", 150, 52);
+    ctx.font = "600 22px 'JetBrains Mono', monospace";
+    ctx.fillStyle = tint;
+    const label = PHASE_LABEL[cyrusState.phase];
+    ctx.fillText(label, W - 28 - ctx.measureText(label).width, 52);
+
+    // Live waveform.
+    const bars = waveHistory.length;
+    const barW = (W - 56) / bars;
+    for (let i = 0; i < bars; i++) {
+      const v = waveHistory[(i + waveCursor) % bars];
+      const h = 4 + v * 90;
+      ctx.fillStyle = tint;
+      ctx.globalAlpha = 0.35 + 0.65 * (i / bars);
+      ctx.fillRect(28 + i * barW, 128 - h / 2, Math.max(2, barW - 3), h);
+    }
+    ctx.globalAlpha = 1;
+    const sweep = ((time * 0.35) % 1) * (W - 56);
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.fillRect(28 + sweep, 80, 2, 96);
+
+    ctx.font = "24px 'JetBrains Mono', monospace";
+    const you = cyrusState.heard;
+    const said = cyrusState.reply;
+    let y = 216;
+    if (you) {
+      ctx.fillStyle = "rgba(220,240,230,0.55)";
+      for (const line of wrapLines(ctx, `YOU › ${you}`, W - 60, 1)) {
+        ctx.fillText(line, 28, y);
+        y += 34;
+      }
+    }
+    if (said) {
+      ctx.fillStyle = "rgba(242,255,210,0.95)";
+      for (const line of wrapLines(ctx, said, W - 60, you ? 3 : 4)) {
+        ctx.fillText(line, 28, y);
+        y += 34;
+      }
+    }
+    if (!you && !said) {
+      ctx.fillStyle = "rgba(220,240,230,0.45)";
+      ctx.fillText("Try: “Hey Cyrus, hi Scotch” · “let's take the car” · ask anything", 28, y);
+    }
+  };
+  let waveCursor = 0;
+
+  // Pets answering a voice call.
+  let dogCall = 0;
+  let catCall = 0;
+  const lastPlayer = { x: 0, z: 6.3 };
+  const callPet = (pet: "dog" | "cat"): void => {
+    if (pet === "dog") dogCall = 9;
+    else catCall = 7;
+  };
+  const scanCar = (): void => {
+    scanT = 0;
+  };
+  const setCyrus = (state: CyrusVisual): void => {
+    Object.assign(cyrusState, state);
+  };
+  const slideAround = (
+    x: number,
+    z: number,
+    cx: number,
+    cz: number,
+    r: number,
+    tx: number,
+    tz: number,
+    step: number,
+  ): [number, number] => {
+    const ox = x - cx;
+    const oz = z - cz;
+    if (Math.hypot(ox, oz) >= r) return [x, z];
+    const a = Math.atan2(oz, ox);
+    const ta = Math.atan2(tz - cz, tx - cx);
+    const diff = Math.atan2(Math.sin(ta - a), Math.cos(ta - a));
+    const na = a + Math.sign(diff || 1) * Math.min(Math.abs(diff), step / r);
+    return [cx + Math.cos(na) * r, cz + Math.sin(na) * r];
+  };
+  // Heads for the spot just in front of the player, skirting the car and bike.
+  // Returns metres covered this frame; 0 once arrived.
+  const runToPlayer = (
+    group: THREE.Group,
+    player: { x: number; z: number },
+    stop: number,
+    speed: number,
+    dt: number,
+  ): number => {
+    const fromX = group.position.x - player.x;
+    const fromZ = group.position.z - player.z;
+    const away = Math.hypot(fromX, fromZ) || 1;
+    const tx = player.x + (fromX / away) * stop;
+    const tz = player.z + (fromZ / away) * stop;
+    const dx = tx - group.position.x;
+    const dz = tz - group.position.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 0.1) return 0;
+    const step = Math.min(dist, speed * dt);
+    let nx = group.position.x + (dx / dist) * step;
+    let nz = group.position.z + (dz / dist) * step;
+    [nx, nz] = slideAround(nx, nz, 0, 0.2, 2.7, tx, tz, step);
+    [nx, nz] = slideAround(nx, nz, 5.5, 3.4, 1.3, tx, tz, step);
+    nx = Math.max(-6.6, Math.min(6.95, nx));
+    nz = Math.max(-6.7, Math.min(7.6, nz));
+    const moved = Math.hypot(nx - group.position.x, nz - group.position.z);
+    if (moved > 1e-4) {
+      const want = Math.atan2(nx - group.position.x, nz - group.position.z);
+      const turn = Math.atan2(Math.sin(want - group.rotation.y), Math.cos(want - group.rotation.y));
+      group.rotation.y += turn * Math.min(1, dt * 10);
+    }
+    group.position.x = nx;
+    group.position.z = nz;
+    return moved;
+  };
+
+  const updateCyrus = (dt: number, time: number): void => {
+    const phase = cyrusState.phase;
+    const level = cyrusState.level;
+    cyrusWant.setHex(
+      phase === "off" || phase === "starting"
+        ? 0x3e5230
+        : phase === "awake"
+          ? 0x9ff7ff
+          : phase === "thinking"
+            ? 0xffb21f
+            : ACID,
+    );
+    cyrusTint.lerp(cyrusWant, 1 - Math.exp(-dt * 6));
+    for (const mat of [coreShellMat, shellOuterMat, arcMat, beamMat, floorRingMat, emitterRing.material as THREE.MeshBasicMaterial]) {
+      mat.color.copy(cyrusTint);
+    }
+    coreHaloMat.color.copy(cyrusTint);
+    orbitMat.color.copy(cyrusTint);
+    for (const i of [0, 2]) {
+      const mat = coreRings[i].mesh.material;
+      if (mat instanceof THREE.MeshBasicMaterial) mat.color.copy(cyrusTint);
+    }
+
+    const live = phase !== "off" && phase !== "starting";
+    const energy = phase === "awake" ? 1 : phase === "speaking" ? 0.85 : phase === "thinking" ? 0.9 : live ? 0.45 : 0.15;
+    const spin = phase === "thinking" ? 3.2 : phase === "awake" ? 1.1 : phase === "speaking" ? 1.4 : live ? 0.35 : 0.1;
+    const pulse = 1 + level * 0.4 + Math.sin(time * 2) * 0.03 * energy;
+    shell.rotation.y += dt * spin * 0.6;
+    shell.rotation.x += dt * spin * 0.25;
+    shellOuter.rotation.y -= dt * spin * 0.3;
+    shell.scale.setScalar(pulse);
+    heart.scale.setScalar(0.85 + level * 0.9 + Math.sin(time * 3.1) * 0.04);
+    heartMat.opacity = 0.35 + energy * 0.6;
+    heartMat.color.copy(cyrusTint).lerp(new THREE.Color(0xffffff), 0.6);
+    coreHaloMat.opacity = 0.15 + energy * 0.4 + level * 0.3;
+    coreHalo.scale.setScalar(1.9 + energy * 0.8 + level * 1.2);
+    const expand = phase === "awake" ? 1.12 : 1;
+    for (const ring of coreRings) {
+      ring.mesh.rotateZ(dt * ring.speed * spin);
+      ring.mesh.scale.lerp(new THREE.Vector3(expand, expand, expand), 1 - Math.exp(-dt * 5));
+    }
+    arcs.rotation.z -= dt * spin * 0.4;
+    arcs.lookAt(lastPlayer.x, CORE_POS.y, lastPlayer.z);
+    arcMat.opacity = 0.2 + energy * 0.45;
+    beamMat.opacity = 0.03 + energy * 0.06 + level * 0.05;
+    floorRingMat.opacity = 0.1 + energy * 0.25;
+    floorRing.rotation.z += dt * 0.2;
+    floorRingInner.rotation.z -= dt * spin * 0.5;
+    for (let i = 0; i < orbitCount; i++) {
+      const p = orbitSeed[i];
+      p.a += dt * p.s * spin * 0.7;
+      const r = p.r * (1 + level * 0.25);
+      orbitPos[i * 3] = Math.cos(p.a) * r;
+      orbitPos[i * 3 + 1] = p.y + Math.sin(p.a * 2 + i) * 0.05;
+      orbitPos[i * 3 + 2] = Math.sin(p.a) * r;
+    }
+    (orbitGeo.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
+    orbitMat.opacity = 0.25 + energy * 0.6;
+    core.position.y = CORE_POS.y + Math.sin(time * 0.9) * 0.04;
+
+    waveClock += dt;
+    if (waveClock > 0.05) {
+      waveClock = 0;
+      waveHistory[waveCursor] = live ? Math.min(1, level * 1.4) : 0;
+      waveCursor = (waveCursor + 1) % waveHistory.length;
+      drawVoicePanel(time);
+      voicePanel.map.needsUpdate = true;
+    }
+    sideClock += dt;
+    if (sideClock > 0.25) {
+      sideClock = 0;
+      drawSysPanel();
+      sysPanel.map.needsUpdate = true;
+      drawLinkPanel(time);
+      linkPanel.map.needsUpdate = true;
+    }
+    const panelAlpha = 0.55 + energy * 0.4;
+    voicePanel.mat.opacity = panelAlpha;
+    sysPanel.mat.opacity = panelAlpha * 0.95;
+    linkPanel.mat.opacity = panelAlpha * 0.95;
+
+    // Car scan: on request, and continuously while CYRUS is thinking.
+    if (scanT < 0 && phase === "thinking") scanT = 0;
+    if (scanT >= 0) {
+      scanT += dt / 2.4;
+      const u = scanT % 1;
+      const lift = carriage.position.y;
+      const z = 2.6 - u * 5.2;
+      scanPlane.position.set(0, 0.78 + lift, z);
+      scanEdge.position.set(0, 0.78 + lift + 0.76, z);
+      const fade = Math.sin(Math.PI * u);
+      scanMat.opacity = 0.09 * fade;
+      scanEdgeMat.opacity = 0.85 * fade;
+      if (scanT >= 1 && phase !== "thinking") {
+        scanT = -1;
+        scanMat.opacity = 0;
+        scanEdgeMat.opacity = 0;
+      }
+    }
+  };
 
   const ringMat = new THREE.MeshBasicMaterial({
     color: ACID,
@@ -2092,8 +2621,24 @@ export function createGarage(): GarageStage {
     // MARIO — prowls the tyre corner, but the V12 flattens him mid-step.
     const catPlayerAttn = attention(cat.position.x, cat.position.z, 4.2);
     const catAttn = Math.max(catAlert, catPlayerAttn);
-    const catFrozen = catAttn > 0.5 || catAlert > 0.35;
-    const catStep = stepRoam(catRoam, cat, dt, catFrozen);
+    let catFrozen = catAttn > 0.5 || catAlert > 0.35;
+    let catStep: number;
+    if (catCall > 0 && player) {
+      catCall -= dt;
+      const moved = runToPlayer(cat, player, 1.4, 1.15, dt);
+      catRoam.stride += moved * 7;
+      catStep = moved > 1e-4 ? 1 : 0;
+      catFrozen = catStep === 0;
+      if (catFrozen) catCall = Math.min(catCall, 1.2);
+      if (catCall <= 0) {
+        catRoam.homeX = cat.position.x;
+        catRoam.homeZ = cat.position.z;
+        catRoam.tx = cat.position.x;
+        catRoam.tz = cat.position.z;
+      }
+    } else {
+      catStep = stepRoam(catRoam, cat, dt, catFrozen);
+    }
     catMove += (catStep - catMove) * (1 - Math.exp(-dt * 7));
     if (catFrozen) {
       turnToward(
@@ -2134,9 +2679,27 @@ export function createGarage(): GarageStage {
     }
 
     // SCOTCH — trots his patch by the launch pad, ears swinging.
-    const dogAttn = attention(dog.position.x, dog.position.z, 5.2);
-    const dogFrozen = dogAttn > 0.45;
-    const dogStep = stepRoam(dogRoam, dog, dt, dogFrozen);
+    let dogAttn = attention(dog.position.x, dog.position.z, 5.2);
+    let dogFrozen = dogAttn > 0.45;
+    let dogStep: number;
+    if (dogCall > 0 && player) {
+      dogCall -= dt;
+      const moved = runToPlayer(dog, player, 1.05, 3.4, dt);
+      dogRoam.stride += moved * 5.5;
+      dogStep = moved > 1e-4 ? 1 : 0;
+      dogFrozen = dogStep === 0;
+      dogAttn = 1;
+      if (dogFrozen) dogCall = Math.min(dogCall, 2.5);
+      if (dogCall <= 0) {
+        dogRoam.homeX = dog.position.x;
+        dogRoam.homeZ = dog.position.z;
+        dogRoam.tx = dog.position.x;
+        dogRoam.tz = dog.position.z;
+        dogRoam.wait = 6;
+      }
+    } else {
+      dogStep = stepRoam(dogRoam, dog, dt, dogFrozen);
+    }
     dogMove += (dogStep - dogMove) * (1 - Math.exp(-dt * 6));
     if (dogFrozen) {
       turnToward(dog, Math.atan2(px - dog.position.x, pz - dog.position.z), 5);
@@ -2208,6 +2771,21 @@ export function createGarage(): GarageStage {
 
     if (activeRing) activeRing.rotation.z += dt * 0.5;
     ringMat.opacity = 0.26 + 0.16 * Math.sin(time * 3.6);
+
+    if (player) {
+      lastPlayer.x = player.x;
+      lastPlayer.z = player.z;
+    }
+    const caller = dogCall > 0 ? dog : catCall > 0 ? cat : null;
+    if (caller) {
+      callRing.position.set(caller.position.x, 0.03, caller.position.z);
+      callRing.rotation.z += dt * 2;
+      callRing.scale.setScalar(1 + 0.18 * Math.sin(time * 8));
+      callRingMat.opacity = 0.55 + 0.3 * Math.sin(time * 8);
+    } else {
+      callRingMat.opacity = Math.max(0, callRingMat.opacity - dt * 2);
+    }
+    updateCyrus(dt, time);
   };
 
   setDoor(0);
@@ -2226,6 +2804,9 @@ export function createGarage(): GarageStage {
     setTerminal,
     setDiecast,
     setService,
+    callPet,
+    setCyrus,
+    scanCar,
     hotspots,
     dispose: () => {
       root.traverse((object) => {
@@ -2250,6 +2831,13 @@ export function createGarage(): GarageStage {
       rainGeo.dispose();
       rainMat.dispose();
       terminalTexture.dispose();
+      coreHaloMap.dispose();
+      coreHaloMat.dispose();
+      orbitGeo.dispose();
+      orbitMat.dispose();
+      voicePanel.map.dispose();
+      sysPanel.map.dispose();
+      linkPanel.map.dispose();
     },
   };
 }
