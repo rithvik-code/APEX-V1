@@ -1,0 +1,19 @@
+{
+  "name": "APEX — Terminal Intelligence",
+  "short_name": "APEX",
+  "description": "Local-first AI: a 3D control room, a terminal, an agent and a desktop engine running on your own hardware.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#050607",
+  "theme_color": "#050607",
+  "categories": ["productivity", "developer", "utilities"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

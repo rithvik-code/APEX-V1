@@ -1227,3 +1227,54 @@
   .mesh-preview--standby.is-live .mesh-standby__sigil span,
   .mesh-gauge__spin { animation: none; }
 }
+
+/* Service doctor: target, last probe, state, copyable setup. */
+.mesh-doctor {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(233, 237, 232, 0.08);
+  border-radius: 10px;
+  background: rgba(233, 237, 232, 0.02);
+}
+
+.mesh-doctor > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.mesh-doctor span {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: #6e7871;
+}
+
+.mesh-doctor b {
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #e9ede8;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mesh-doctor b.is-on {
+  color: #c8ff16;
+}
+
+.mesh-doctor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+@media (max-width: 720px) {
+  .mesh-doctor { grid-template-columns: 1fr; }
+}
