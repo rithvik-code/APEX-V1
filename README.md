@@ -551,6 +551,24 @@ LAN mode binds `0.0.0.0`, and **the token is the only gate**: every API request 
 without it. Pin your own with `APEX_CONTROL_TOKEN`. Loopback mode is unchanged and
 needs no token.
 
+### MCP
+
+`apex mcp` serves the desktop over the Model Context Protocol on stdio, so any MCP
+client can drive this machine:
+
+```json
+{
+  "mcpServers": {
+    "apex": { "command": "node", "args": ["C:/path/to/APEX/cli/mcp.mjs"] }
+  }
+}
+```
+
+Tools: `desktop_command`, `desktop_state`, `screen_text`, `desktop_commands`.
+A gated action comes back as `isError` with `needsApproval`; repeat the same call
+with `confirm: true` to approve it. The daemon must be running, and nothing leaves
+the machine — the bridge talks to `127.0.0.1:4317` only.
+
 ### API
 
 Everything under `http://127.0.0.1:4317`. Vite proxies `/api` to `4317`, so the console

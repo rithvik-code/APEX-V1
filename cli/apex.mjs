@@ -124,6 +124,7 @@ function usage() {
   console.log(`  ${acid('apex "prompt"')}                 one-shot answer`);
   console.log(`  ${acid('apex do "task"')}                agent mode — read, edit, run`);
   console.log(`  ${acid('apex cyrus "open notepad"')}     desktop command through Cyrus`);
+  console.log(`  ${acid("apex mcp")}                     expose desktop tools over MCP (stdio)`);
   console.log(`  ${acid("apex control")}                  desktop control daemon`);
   console.log(`  ${acid("apex control status")}           daemon + live session state`);
   console.log(`  ${acid("apex control --readonly")}       daemon, screen + accessibility only`);
@@ -1879,6 +1880,11 @@ async function main() {
 
   if (argv[0] === "cyrus") {
     await runCyrusCli(argv.slice(1));
+    return;
+  }
+
+  if (argv[0] === "mcp") {
+    await import("./mcp.mjs");
     return;
   }
 

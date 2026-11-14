@@ -81,6 +81,17 @@ apex cyrus --yes "run ipconfig"     # skip the approval prompt
 Typing, key chords and shell commands ask first unless `--yes`. Phone: run
 `npm run apexd -- --lan` and open the `/m?token=…` URL it prints.
 
+## MCP — desktop tools for other agents
+
+`apex mcp` speaks the Model Context Protocol over stdio, so an editor or another
+agent can use the same gated executor. Tools: `desktop_command`, `desktop_state`,
+`screen_text`, `desktop_commands`. A gated call returns `isError` with
+`needsApproval`; repeat it with `confirm: true`. The daemon must be running.
+
+```json
+{"mcpServers":{"apex":{"command":"node","args":["cli/mcp.mjs"]}}}
+```
+
 ## Audit
 
 `apex history` tails `~/.apex/actions.log` — tier, target, exit code, and whether you
