@@ -15,6 +15,7 @@ import { PoseCoach } from "./nodes/PoseCoach";
 import { DossierParser } from "./nodes/DossierParser";
 import { BrowserBrain } from "./nodes/BrowserBrain";
 import { Standby } from "./nodes/Standby";
+import { CrewWorkbench } from "./CrewWorkbench";
 import "./mesh.css";
 
 const PREVIEWS: Record<string, ComponentType<MeshNodeProps>> = {
@@ -37,6 +38,9 @@ type Props = {
   scene: MeshNodeProps["scene"];
   onTune: MeshNodeProps["onTune"];
   onDrive: MeshNodeProps["onDrive"];
+  requestedNode?: string | null;
+  onNodeOpened?: () => void;
+  workbench?: boolean;
 };
 
 type Positioned = { node: MeshNode; x: number; y: number; scale: number; alpha: number };
@@ -49,7 +53,7 @@ const TIER_COLOR: Record<string, string> = {
 
 type Pulse = { ring: number; from: number; to: number; t: number; speed: number };
 
-export function ModelMesh({ scene, onTune, onDrive }: Props) {
+export function ModelMesh({ scene, onTune, onDrive, requestedNode, onNodeOpened, workbench }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<MeshNode | null>(null);
@@ -70,6 +74,13 @@ export function ModelMesh({ scene, onTune, onDrive }: Props) {
       { ring: node.ring, from: -1, to: -1, t: 0, speed: 1.6 },
     );
   }, []);
+
+  useEffect(() => {
+    if (!requestedNode) return;
+    const node = NODES.find((candidate) => candidate.id === requestedNode);
+    if (node) openNode(node);
+    onNodeOpened?.();
+  }, [requestedNode, openNode, onNodeOpened]);
 
   useEffect(() => {
     if (!selected) return;
@@ -496,6 +507,7 @@ export function ModelMesh({ scene, onTune, onDrive }: Props) {
               </aside>
               <main className="mesh-overlay__stage">
                 {(() => {
+                  if (workbench) return <CrewWorkbench {...previewProps} />;
                   const Preview = PREVIEWS[selected.id];
                   if (Preview) return <Preview {...previewProps} />;
                   return <Standby node={selected} />;

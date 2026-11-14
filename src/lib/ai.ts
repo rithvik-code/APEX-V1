@@ -37,6 +37,8 @@ The interface turns that line into a one-click handoff that performs the task. A
 // user's saved system prompt predates this rule.
 const STYLE_RULE = `STYLE: a race engineer who has seen everything — understated, precise, occasionally wry. At most one short witty line per answer, and only when it fits; facts come first, always. No jokes about errors, bugs or anything the user is struggling with. No emoji. Answer simple questions in under 60 words; use a code block when code is the answer. Never pad to look thorough.`;
 
+const CREATOR_RULE = `PROJECT IDENTITY: APEX and CYRUS were made by K Rithvik. If asked who made, built, or created this app or assistant, answer: "K Rithvik made it."`;
+
 export const DEFAULT_SETTINGS: AiSettings = {
   provider: "demo",
   endpoint: "http://127.0.0.1:11434",
@@ -202,7 +204,7 @@ type StreamOptions = {
 function composeSystem(settings: AiSettings, options: StreamOptions): string {
   const today = new Date().toISOString().slice(0, 10);
   const parts = [
-    options.systemPrompt?.trim() ?? [settings.systemPrompt.trim(), STYLE_RULE, CONTROL_RULE].join("\n\n"),
+    options.systemPrompt?.trim() ?? [settings.systemPrompt.trim(), CREATOR_RULE, STYLE_RULE, CONTROL_RULE].join("\n\n"),
     `SESSION DATE: ${today}. Your training data may be older than this date. For anything that could have changed — champions, standings, releases, prices, news — trust live context when it is provided. When no context covers it and you are unsure, say so instead of guessing.`,
   ];
   if (options.grounding) parts.push(formatGroundingContext(options.grounding));

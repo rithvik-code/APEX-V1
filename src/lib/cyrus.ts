@@ -254,8 +254,8 @@ You cannot execute actions from a generated answer. The app separately executes 
 Garage context, only when relevant: Scotch is a white Labrador; Mario is a white Persian cat; Mr and Mrs Turtle also live here. The bay has a V12 hypercar, an inline-four hyperbike, hydraulic lift, roller door, die-cast shelf, trophy wall, music and a circuit with ramps and boost pads. Supported commands include calling pets, taking the car or bike out, returning to the garage, door/lift/service controls, music, simulated weather, revving, racing line, ghost, restart, recover and stop. You can also simply talk about anything else.`;
 
 const PREF_KEY = "apex.cyrus.v1";
-const AWAKE_MS = 7000;
-const FOLLOW_UP_MS = 15000;
+const AWAKE_MS = 12000;
+const FOLLOW_UP_MS = 25000;
 
 /* -------------------------------------------------------------------------- */
 /* The assistant                                                               */
@@ -882,31 +882,22 @@ class Cyrus {
     this.followUp = true;
     this.streamDone = false;
     const messages = [...this.history];
-    this.set({ phase: "thinking", status: "CONNECTING TO AI…", reply: "", brain: "Connecting to AI…" });
+    this.set({ phase: "thinking", status: "THINKING…", reply: "", brain: "Waking the local model…" });
 
-    const settings = await this.resolveModel(controller.signal);
+    // Start model resolution and retrieval together; avoid serial network waits.
+    const settingsPromise = this.resolveModel(controller.signal);
+    const groundingPromise = needsGrounding(question)
+      ? retrieveGrounding(question, controller.signal, 1500).catch(() => null)
+      : Promise.resolve(null);
+    const [settings, groundingResult] = await Promise.all([settingsPromise, groundingPromise]);
     if (gen !== this.gen) return;
     this.set({
       status: "THINKING",
       brain: settings ? `${settings.model} · ${settings.provider === "ollama" ? "Ollama" : "AI endpoint"}` : "AI unavailable · commands still work",
     });
 
-    let grounding: Grounding | null = null;
-    if (needsGrounding(question)) {
-      const cap = new AbortController();
-      const forward = () => cap.abort();
-      controller.signal.addEventListener("abort", forward, { once: true });
-      const timer = window.setTimeout(() => cap.abort(), 3200);
-      try {
-        grounding = await retrieveGrounding(question, cap.signal, 2600);
-      } catch {
-        grounding = null;
-      } finally {
-        window.clearTimeout(timer);
-        controller.signal.removeEventListener("abort", forward);
-      }
-      if (gen !== this.gen) return;
-    }
+    const grounding: Grounding | null = groundingResult;
+    if (gen !== this.gen) return;
 
     if (!settings) {
       const summary = grounding ? cleanSpeech(grounding.quick || grounding.summary) : "";
@@ -949,9 +940,9 @@ class Cyrus {
         grounding,
         knowledge: knowledgeContext(question, 4) || undefined,
         systemPrompt: PERSONA,
-        temperature: grounding ? 0.25 : 0.65,
-        numPredict: 1200,
-        numCtx: 8192,
+        temperature: grounding ? 0.25 : 0.6,
+        numPredict: 420,
+        numCtx: 4096,
         onToken: (token) => {
           if (gen !== this.gen) return;
           full += token;

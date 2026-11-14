@@ -90,9 +90,9 @@ const CHAPTERS = [
   { id: "machine", n: "02", label: "MACHINE" },
   { id: "pitwall", n: "03", label: "PIT WALL" },
   { id: "grid", n: "04", label: "GRID" },
+  { id: "vast", n: "05", label: "VAST" },
   { id: "crew", n: "06", label: "CREW" },
-  { id: "vast", n: "07", label: "VAST" },
-  { id: "install", n: "08", label: "SPAWN" },
+  { id: "install", n: "07", label: "SPAWN" },
 ];
 
 const ANCHORS = [
@@ -167,6 +167,8 @@ export default function App() {
   const [active, setActive] = useState("top");
   const [audioOn, setAudioOn] = useState(false);
   const [blueprintOpen, setBlueprintOpen] = useState(false);
+  const [requestedCrewNode, setRequestedCrewNode] = useState<string | null>(null);
+  const [crewWorkbench, setCrewWorkbench] = useState(false);
   const [coreView, setCoreView] = useState<CoreVariant | null>(null);
   const [takeover, setTakeover] = useState(false);
   const [takeoverGoal, setTakeoverGoal] = useState<string | undefined>(undefined);
@@ -1643,6 +1645,9 @@ export default function App() {
             scene={scene}
             onTune={tuneScene}
             onDrive={() => launchDrive("car")}
+            requestedNode={requestedCrewNode}
+            onNodeOpened={() => setRequestedCrewNode(null)}
+            workbench={crewWorkbench}
           />
         </section>
 
@@ -1658,9 +1663,21 @@ export default function App() {
                 <span className="crew-card__number">{number} / CREW</span>
                 <h3>{name}</h3>
                 <p>{description}</p>
-                <a href={number === "01" || number === "02" || number === "03" || number === "04" || number === "07" || number === "08" || number === "09" || number === "10" || number === "18" || number === "19" || number === "21" || number === "24" ? "#pitwall" : "#mesh"}>
-                  {number === "01" ? "WAKE CYRUS ↗" : "OPEN TOOL BAY ↗"}
-                </a>
+                <button type="button" onClick={() => {
+                  const nodeByNumber: Record<string, string> = {
+                    "05": "memory", "11": "memory", "12": "command", "13": "memory", "15": "command",
+                    "16": "livery", "17": "whisper", "20": "convoy", "22": "vision", "23": "whisper",
+                    "25": "status", "27": "grid", "28": "convoy", "30": "status",
+                  };
+                  const id = nodeByNumber[number];
+                  if (number === "29") { launchDrive("car"); return; }
+                  else if (id) { setCrewWorkbench(false); setRequestedCrewNode(id); }
+                  else if (number === "01") { void cyrus.wake(); return; }
+                  else { setCrewWorkbench(true); setRequestedCrewNode("convoy"); }
+                  document.getElementById("mesh")?.scrollIntoView({ behavior: "smooth" });
+                }}>
+                  {number === "01" ? "WAKE CYRUS ↗" : number === "29" ? "ENTER SIMULATION ↗" : "OPEN TOOL BAY ↗"}
+                </button>
               </article>
             ))}
           </div>
@@ -1672,7 +1689,7 @@ export default function App() {
             ∞
           </span>
           <div className="vast__top" data-reveal>
-            <span className="micro">06 / THE VAST</span>
+            <span className="micro">05 / THE VAST</span>
             <span className="micro">NO END OF LINE</span>
           </div>
 

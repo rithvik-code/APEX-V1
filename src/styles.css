@@ -2122,7 +2122,19 @@ body.is-orbiting * {
 .crew-card p { color: #aab4af; font: 12px/1.6 var(--mono, monospace); margin: 0 0 1.2rem; }
 .crew-card a { color: #e2a246; text-decoration: none; font: 10px/1.4 var(--mono, monospace); letter-spacing: .1em; margin-top: auto; }
 .crew-card a:hover { color: #fff; }
+.crew-card button { color: #e2a246; background: transparent; border: 0; padding: 0; cursor: pointer; font: 10px/1.4 var(--mono, monospace); letter-spacing: .1em; margin-top: auto; text-align: left; }
+.crew-card button:hover { color: #fff; }
 .crew-note { color: #8d9993; font: 11px/1.6 var(--mono, monospace); }
+.crew-workbench { width: 100%; color: #e3ebe5; font-family: var(--mono, monospace); }
+.crew-workbench__bar { display: flex; flex-wrap: wrap; gap: .7rem 1rem; align-items: center; padding: .8rem; border: 1px solid rgba(215,226,224,.16); color: #acb8b1; font-size: 10px; }
+.crew-workbench__bar select { flex: 1; min-width: 150px; color: #e3ebe5; background: #101514; padding: .55rem; border: 1px solid rgba(215,226,224,.24); font: inherit; }
+.crew-workbench__label { display: block; margin: 1.2rem 0 .5rem; color: #a2afaa; font-size: 10px; letter-spacing: .12em; }
+.crew-workbench textarea { width: 100%; resize: vertical; box-sizing: border-box; color: #eef2ef; background: rgba(8,12,11,.8); border: 1px solid rgba(215,226,224,.2); padding: 1rem; font: 12px/1.6 var(--mono, monospace); }
+.crew-workbench__run { margin-top: .8rem; padding: .8rem 1rem; color: #111; background: #c8ff16; border: 0; font: 11px var(--mono, monospace); cursor: pointer; }
+.crew-workbench__run:disabled { opacity: .5; cursor: wait; }
+.crew-workbench__answer { white-space: pre-wrap; margin-top: 1rem; padding: 1rem; border-left: 2px solid #c8ff16; background: rgba(200,255,22,.045); font: 12px/1.7 var(--mono, monospace); }
+.crew-workbench__answer span, .crew-workbench__foot { color: #929f98; font-size: 10px; letter-spacing: .06em; }
+.crew-workbench__error { color: #ff8a63; font: 11px/1.5 var(--mono, monospace); }
 @media (max-width: 800px) { .crew-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .crew-grid { grid-template-columns: 1fr; } .crew-card { min-height: 170px; } }
 
