@@ -7,7 +7,7 @@ import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { createSupercar, badgeTexture, numberTexture, type Assembly, type VehicleAnchor } from "./car";
 import { createSuperbike } from "./bike";
-import { createGarage, type GarageHotspot, type GarageStage, type GarageTerminalState } from "./garage";
+import { createGarage, type CyrusVisual, type GarageHotspot, type GarageStage, type GarageTerminalState } from "./garage";
 import { AeroFlow, buildBikeStreamlines, buildCarStreamlines } from "./aero";
 import { WeatherSystem } from "./weather";
 import { buildTrack, type Track } from "./track";
@@ -366,6 +366,7 @@ export class ApexEngine {
   /* ---- Garage mode -------------------------------------------------------- */
 
   private garageStage: GarageStage | null = null;
+  private cyrusFeed: (() => CyrusVisual) | null = null;
   private garageOn = false;
   private garageEntryT = GARAGE_ENTRY_DURATION;
   private garageWalk = new THREE.Vector3(0, 0, 6.3);
@@ -1591,6 +1592,18 @@ export class ApexEngine {
     this.garageListener = listener;
   }
 
+  setCyrusFeed(feed: (() => CyrusVisual) | null): void {
+    this.cyrusFeed = feed;
+  }
+
+  callGaragePet(pet: "dog" | "cat"): void {
+    this.garageStage?.callPet(pet);
+  }
+
+  scanGarageCar(): void {
+    this.garageStage?.scanCar();
+  }
+
   private emitGarage(event: GarageEvent): void {
     this.garageListener?.(event);
   }
@@ -1995,6 +2008,7 @@ export class ApexEngine {
     // The pets hold their glare from the walk-in for a few beats, then let go.
     this.garageLiveT += dt;
     const stare = Math.max(0, 1 - Math.max(0, this.garageLiveT - 4.4) / 3.4);
+    if (this.cyrusFeed) stage.setCyrus(this.cyrusFeed());
     stage.update(dt, this.clockTime, { x: this.garageWalk.x, z: this.garageWalk.z }, stare);
     this.weather.update(dt);
 

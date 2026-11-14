@@ -296,6 +296,8 @@ class Cyrus {
   private listeners = new Set<() => void>();
   private handler: CyrusHandler | null = null;
 
+  private listening = false;
+  private earGen = 0;
   private stream: MediaStream | null = null;
   private ctx: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
@@ -363,7 +365,7 @@ class Cyrus {
   }
 
   get on(): boolean {
-    return this.snap.phase !== "off";
+    return this.listening;
   }
 
   /** 0..1 loudness for the hologram: the mic while listening, a voice envelope while speaking. */
@@ -387,13 +389,23 @@ class Cyrus {
   /* ---- lifecycle ---- */
 
   async enable(): Promise<void> {
-    if (this.snap.phase !== "off") return;
+    if (this.listening) return;
+    this.stopOutput();
+    this.listening = true;
+    const generation = ++this.earGen;
     this.set({ phase: "starting", status: "REQUESTING MICROPHONE…", error: null });
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
+      if (generation !== this.earGen || !this.listening) {
+        for (const track of stream.getTracks()) track.stop();
+        return;
+      }
+      this.stream = stream;
     } catch {
+      if (generation !== this.earGen) return;
+      this.listening = false;
       this.set({
         phase: "off",
         status: "MIC BLOCKED",

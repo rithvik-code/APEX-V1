@@ -21,7 +21,8 @@ import { AeroDock, AeroLaunch, type DockBridge, type DockStatus } from "./compon
 import { DriveHUD, type TrackOutline } from "./components/DriveHUD";
 import { Garage } from "./components/Garage";
 import type { DriveHudState, DriveVehicle } from "./three/drive";
-import { DEFAULT_DRIVE_SETUP, type DriveSetup } from "./lib/driveStore";
+import { DEFAULT_DRIVE_SETUP, loadBoard, type DriveSetup } from "./lib/driveStore";
+import { cyrus } from "./lib/cyrus";
 import {
   addDistance,
   awardCareer,
@@ -159,6 +160,7 @@ export default function App() {
   const [garageAction, setGarageAction] = useState<{ id: string; seq: number } | null>(null);
   const [garageBits, setGarageBits] = useState({ door: true, lift: false, service: false });
   const garageSeq = useRef(0);
+  const cyrusRevTimer = useRef(0);
   const [portalReady, setPortalReady] = useState(false);
   const [portalPhase, setPortalPhase] = useState<"dive" | "flash" | null>(null);
   const portalReadyRef = useRef(false);
@@ -345,6 +347,9 @@ export default function App() {
           engine.sitGarage();
           sound.footstep();
           break;
+        case "cyrus":
+          void cyrus.wake();
+          return;
         case "cat":
           sound.meow();
           break;
@@ -521,6 +526,139 @@ export default function App() {
     sound.tick("click");
   }, []);
 
+  useEffect(() => {
+    cyrus.setHandler((intent) => {
+      const engine = engineRef.current;
+      if (!engine) return null;
+      const inGarage = engine.garageActive;
+      const driving = engine.driveActive;
+      switch (intent.kind) {
+        case "pet":
+          if (!inGarage) return "Meet me in the garage to call the pets.";
+          if (intent.pet === "turtles") return "The turtles are taking things at their own pace. You'll find them by the pebble tray.";
+          engine.callGaragePet(intent.pet);
+          runGarageAction(intent.pet === "dog" ? "dog" : "cat");
+          return intent.pet === "dog" ? "Scotch, come here. He's on his way to you." : "Mario is coming over. At a cat's pace, naturally.";
+        case "drive":
+          window.clearTimeout(cyrusRevTimer.current);
+          if (inGarage) driveOutGarage(intent.vehicle);
+          else if (driving) switchDriveVehicle(intent.vehicle);
+          else launchDrive(intent.vehicle);
+          return `Taking the ${intent.vehicle} to the circuit. You're at the wheel.`;
+        case "garage":
+          if (inGarage) return "You're already home. What do you need?";
+          openGarage();
+          return "Bringing you back to the bay.";
+        case "exit":
+          if (driving) exitDrive();
+          else if (inGarage) closeGarage();
+          else return null;
+          return "Back to the main deck.";
+        case "door":
+          if (!inGarage) return null;
+          if (intent.open === null || engine.garageDoorOpen !== intent.open) runGarageAction("door");
+          return engine.garageDoorOpen ? "Door open. The circuit is waiting." : "Door closed.";
+        case "lift":
+          if (!inGarage) return null;
+          if (intent.up === null || engine.garageLiftRaised !== intent.up) runGarageAction("lift");
+          return engine.garageLiftRaised ? "Raising the car." : "Lowering the car.";
+        case "service":
+          if (!inGarage) return null;
+          if (intent.on === null || engine.garageServiceMode !== intent.on) runGarageAction("service");
+          return engine.garageServiceMode ? "Service mode engaged. Lift up, tools deployed." : "Service complete. Stowing the tools.";
+        case "panel":
+          if (!inGarage) return null;
+          runGarageAction(intent.panel);
+          return { shelf: "Your collection, on display.", computer: "Bay computer open.", trophies: "Your trophy cabinet.", launch: "Launch practice ready. Watch the lights." }[intent.panel];
+        case "photo":
+          if (!inGarage) return null;
+          garageCapture();
+          return "Snapshot captured.";
+        case "rev":
+          if (!inGarage) return null;
+          window.clearTimeout(cyrusRevTimer.current);
+          revStart(intent.vehicle);
+          cyrusRevTimer.current = window.setTimeout(revEnd, 2400);
+          return intent.vehicle === "car" ? "Waking the V12." : "Let's hear the inline four.";
+        case "sit":
+          if (!inGarage) return null;
+          runGarageAction("stool");
+          return "Take a seat. I've got the bay.";
+        case "music":
+          if (intent.on && !sound.isOn) setAudioOn(sound.toggle());
+          sound.setStation(intent.on ? 2 : 0);
+          return intent.on ? "Synthwave on." : "Music off.";
+        case "weather": {
+          const next = {
+            ...sceneRef.current,
+            weather: intent.rain === null ? sceneRef.current.weather : intent.rain ? "rain" as const : "clear" as const,
+            nightRace: intent.night ?? sceneRef.current.nightRace,
+          };
+          sceneRef.current = next;
+          setScene(next);
+          engine.setGarageWeather(next.weather === "rain", next.nightRace);
+          const conditions = `${next.weather === "rain" ? "Rain" : "Clear skies"}, ${next.nightRace ? "night" : "daytime"}`;
+          return driving ? `${conditions} set for your next drive.` : `${conditions}. Look out through the door.`;
+        }
+        case "sound":
+          audioLockedRef.current = !intent.on;
+          if (sound.isOn !== intent.on) setAudioOn(sound.toggle());
+          return intent.on ? "Garage audio on." : "Garage audio off. My voice stays on; say microphone off to stop listening.";
+        case "replay":
+          if (!inGarage) return null;
+          replayGarage();
+          return "Replaying your entrance.";
+        case "restart":
+          if (!driving) return null;
+          engine.restartDrive();
+          return "Fresh start. Watch the countdown.";
+        case "recover":
+          if (!driving) return null;
+          engine.recoverDrive();
+          return "Back on the circuit.";
+        case "line": {
+          const state = engine.getDriveState();
+          if (!state) return null;
+          const enabled = intent.on ?? !state.assist.on;
+          toggleDriveAssist(enabled);
+          return enabled ? "Racing line and circuit co-pilot on." : "Racing assistance off.";
+        }
+        case "ghost": {
+          const state = engine.getDriveState();
+          if (!state) return null;
+          const enabled = intent.on ?? !state.ghostEnabled;
+          toggleDriveGhost(enabled);
+          return enabled ? state.hasGhost ? "Your best-lap ghost is on." : "Ghost enabled. Finish a clean lap to record one." : "Ghost off.";
+        }
+        case "bestLap": {
+          const vehicle = engine.getDriveState()?.vehicle ?? "car";
+          const best = loadBoard(vehicle)[0];
+          return best ? `Your best ${vehicle} lap is ${best.time.toFixed(2)} seconds.` : `No clean ${vehicle} laps recorded yet. Let's set one.`;
+        }
+        case "status":
+          if (inGarage) engine.scanGarageCar();
+          return `${currentLicence(careerRef.current.cp).name} licence, ${careerRef.current.cp} constructor points and ${unlockSet(careerRef.current).size} unlocks. ${inGarage ? "Running the car's visual scan." : driving ? "Circuit link active." : "Main deck ready."}`;
+        case "stop":
+          window.clearTimeout(cyrusRevTimer.current);
+          revEnd();
+          engine.setGarageMove(0, 0);
+          return null;
+        default:
+          return null;
+      }
+    });
+    return () => cyrus.setHandler(null);
+  }, [runGarageAction, driveOutGarage, switchDriveVehicle, launchDrive, openGarage, exitDrive, closeGarage, garageCapture, revStart, revEnd, replayGarage, toggleDriveAssist, toggleDriveGhost]);
+
+  useEffect(() => {
+    if (garage && cyrus.wanted() && !cyrus.on) void cyrus.enable();
+  }, [garage]);
+
+  useEffect(() => () => {
+    window.clearTimeout(cyrusRevTimer.current);
+    cyrus.disable(false);
+  }, []);
+
   const exportScene = useCallback(() => {
     const url = engineRef.current?.exportPNG();
     if (!url) return;
@@ -609,6 +747,10 @@ export default function App() {
       if (disposed) return;
       engine = new Engine(canvas, labels);
       engineRef.current = engine;
+      engine.setCyrusFeed(() => {
+        const { phase, heard, reply, ear } = cyrus.snapshot();
+        return { phase, heard, reply, ear: ear ?? "", level: cyrus.level() };
+      });
       engine.setPaused(pausedRef.current);
       engine.configure(sceneRef.current);
       engine.setCareer(
