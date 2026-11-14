@@ -8,8 +8,11 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
   const { phase, ear, heard, reply, status, brain, error, log } = useCyrus();
   const [expanded, setExpanded] = useState(mode === "garage");
   const [text, setText] = useState("");
+  const [memoryDraft, setMemoryDraft] = useState("");
   const [search, setSearch] = useState("");
   const [responsePrefs, setResponsePrefs] = useState(() => cyrus.getResponseSettings());
+  const [memories, setMemories] = useState(() => cyrus.getPersonalMemory());
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>(() => typeof speechSynthesis === "undefined" ? [] : speechSynthesis.getVoices());
   const rootRef = useRef<HTMLElement>(null);
   const id = useId();
   const enabled = cyrus.on;
@@ -23,6 +26,14 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
   useEffect(() => {
     setExpanded(mode === "garage");
   }, [mode]);
+
+  useEffect(() => {
+    if (!("speechSynthesis" in window)) return;
+    const refresh = () => setVoices(window.speechSynthesis.getVoices());
+    refresh();
+    window.speechSynthesis.addEventListener("voiceschanged", refresh);
+    return () => window.speechSynthesis.removeEventListener("voiceschanged", refresh);
+  }, []);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -211,6 +222,17 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
           </div>
           <details className="cyrus-hud__preferences">
             <summary>VOICE & RESPONSE SETTINGS</summary>
+            <label>INSTALLED VOICE
+              <select value={responsePrefs.voice} onChange={(event) => {
+                const voice = event.target.value;
+                const next = { ...responsePrefs, voice };
+                setResponsePrefs(next); cyrus.setResponseSettings({ voice });
+              }}>
+                <option value="">AUTO · BOLD ENGLISH VOICE</option>
+                {voices.map((voice) => <option key={`${voice.name}::${voice.lang}`} value={`${voice.name}::${voice.lang}`}>{voice.name} · {voice.lang}</option>)}
+              </select>
+              {voices.length === 0 && <small>Voices appear when your browser makes them available.</small>}
+            </label>
             <label>ANSWER DETAIL
               <select value={responsePrefs.detail} onChange={(event) => {
                 const detail = event.target.value as typeof responsePrefs.detail;
@@ -230,6 +252,26 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
                 const pitch = Number(event.target.value); setResponsePrefs((value) => ({ ...value, pitch })); cyrus.setResponseSettings({ pitch });
               }} />
             </label>
+          </details>
+          <details className="cyrus-hud__preferences">
+            <summary>PERSONAL MEMORY · {memories.length}</summary>
+            <p className="cyrus-hud__memory-note">Only notes you explicitly ask me to remember are saved on this device. Say “remember that…” or type it below.</p>
+            <form className="cyrus-hud__memory-form" onSubmit={(event) => {
+              event.preventDefault();
+              const fact = memoryDraft.trim();
+              if (!fact) return;
+              cyrus.rememberPersonalFact(fact);
+              setMemories(cyrus.getPersonalMemory());
+              setMemoryDraft("");
+            }}>
+              <label className="cyrus-hud__sr" htmlFor={`${id}-memory`}>Add a personal memory</label>
+              <input id={`${id}-memory`} value={memoryDraft} onChange={(event) => setMemoryDraft(event.target.value)} placeholder="Add a note CYRUS can remember…" maxLength={240} />
+              <button type="submit" disabled={!memoryDraft.trim()}>SAVE</button>
+            </form>
+            {memories.length > 0 && <div className="cyrus-hud__memories">
+              {memories.map((memory) => <p key={memory}><span>{memory}</span><button type="button" aria-label={`Forget: ${memory}`} onClick={() => { cyrus.forgetPersonalFact(memory); setMemories(cyrus.getPersonalMemory()); }}>FORGET</button></p>)}
+              <button type="button" className="cyrus-hud__forget-all" onClick={() => { cyrus.clearPersonalMemory(); setMemories([]); }}>FORGET ALL NOTES</button>
+            </div>}
           </details>
           <div
             className="cyrus-hud__captions"

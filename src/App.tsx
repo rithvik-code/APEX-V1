@@ -245,6 +245,10 @@ export default function App() {
   }, []);
 
   const activeChapter = CHAPTERS.find((c) => c.id === active) ?? CHAPTERS[0];
+  useEffect(() => {
+    const place = drive ? `driving the ${drive.vehicle} on the circuit` : garage ? `inside the walkable garage${garageFocus ? `, viewing ${garageFocus.label}` : ""}` : `${activeChapter.label} section of the APEX page`;
+    cyrus.setPageContext(place);
+  }, [activeChapter.label, drive, garage, garageFocus]);
   const licenceName = currentLicence(career.cp).name;
   const unlockCount = useMemo(() => unlockSet(career).size, [career]);
   const trophyCount = useMemo(() => Math.min(8, Math.floor(career.cp / 120)), [career.cp]);
@@ -594,6 +598,22 @@ export default function App() {
 
   useEffect(() => {
     cyrus.setHandler((intent) => {
+      if (intent.kind === "scroll") {
+        const targetId = intent.section
+          ? ({ ignition: "top", home: "top", manifesto: "manifesto", machine: "machine", car: "machine", bike: "machine", "pit wall": "pitwall", pitwall: "pitwall", grid: "grid", vast: "vast", crew: "crew", spawn: "install", install: "install" } as Record<string, string>)[intent.section]
+          : undefined;
+        if (targetId) {
+          scrollToId(targetId);
+          return `Taking you to ${targetId === "top" ? "the top" : targetId === "pitwall" ? "the Pit Wall" : targetId}.`;
+        }
+        const index = CHAPTERS.findIndex((chapter) => chapter.id === active);
+        const nextIndex = intent.direction === "next"
+          ? Math.min(CHAPTERS.length - 1, index + 1)
+          : Math.max(0, index - 1);
+        if (nextIndex === index) return intent.direction === "next" ? "You're at the last section." : "You're already at the top.";
+        scrollToId(CHAPTERS[nextIndex].id);
+        return `Scrolling to ${CHAPTERS[nextIndex].label}.`;
+      }
       const engine = engineRef.current;
       if (!engine) return null;
       const inGarage = engine.garageActive;
@@ -714,7 +734,7 @@ export default function App() {
       }
     });
     return () => cyrus.setHandler(null);
-  }, [runGarageAction, driveOutGarage, switchDriveVehicle, launchDrive, openGarage, exitDrive, closeGarage, garageCapture, revStart, revEnd, replayGarage, toggleDriveAssist, toggleDriveGhost, summonVehicle]);
+  }, [active, scrollToId, runGarageAction, driveOutGarage, switchDriveVehicle, launchDrive, openGarage, exitDrive, closeGarage, garageCapture, revStart, revEnd, replayGarage, toggleDriveAssist, toggleDriveGhost, summonVehicle]);
 
   useEffect(() => {
     if (garage && cyrus.wanted() && !cyrus.on) void cyrus.enable();
