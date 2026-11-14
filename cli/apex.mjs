@@ -123,9 +123,11 @@ function usage() {
   console.log(`  ${acid("apex")}                          interactive session`);
   console.log(`  ${acid('apex "prompt"')}                 one-shot answer`);
   console.log(`  ${acid('apex do "task"')}                agent mode — read, edit, run`);
+  console.log(`  ${acid('apex cyrus "open notepad"')}     desktop command through Cyrus`);
   console.log(`  ${acid("apex control")}                  desktop control daemon`);
   console.log(`  ${acid("apex control status")}           daemon + live session state`);
   console.log(`  ${acid("apex control --readonly")}       daemon, screen + accessibility only`);
+  console.log(`  ${dim("npm run apexd -- --lan")}          phone remote at /m (token printed)`);
   console.log(`  ${acid('cat file | apex "explain"')}     pipe context in`);
   console.log(`  ${acid("apex models")}                   list local models`);
   console.log(`  ${acid("apex undo")}                     roll back the last agent run`);
@@ -1783,6 +1785,71 @@ function cmdControl(args) {
   });
 }
 
+function controlBase() {
+  return String(
+    process.env.APEX_CONTROL_URL ||
+      `http://127.0.0.1:${process.env.APEX_CONTROL_PORT || 4317}`,
+  ).replace(/\/+$/, "");
+}
+
+async function postCyrus(text, confirm) {
+  const res = await fetch(`${controlBase()}/api/cyrus`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, confirm }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(
+      `control daemon ${res.status}${detail ? `: ${detail.slice(0, 160)}` : ""}`,
+    );
+  }
+  return res.json();
+}
+
+async function runCyrusCli(argv) {
+  const auto = argv.includes("--yes") || argv.includes("-y");
+  const text = argv
+    .filter((arg) => arg !== "--yes" && arg !== "-y")
+    .join(" ")
+    .trim();
+
+  if (!text) {
+    console.log("");
+    console.log(`  ${acid("apex cyrus")} ${dim('"open notepad"')}`);
+    console.log(`  ${dim("Needs the control daemon: npm run apexd")}`);
+    console.log("");
+    return;
+  }
+
+  header();
+  let result;
+  try {
+    result = await postCyrus(text, false);
+  } catch (error) {
+    console.error(red(`  ${error.message}`));
+    console.error(dim("  Start it with: npm run apexd"));
+    process.exitCode = 1;
+    return;
+  }
+
+  if (result.needsApproval) {
+    const ok = auto || (await askApproval(result.speech || "approve this action?"));
+    if (!ok) {
+      console.log(dim("  cancelled"));
+      return;
+    }
+    result = await postCyrus(text, true);
+  }
+
+  console.log("");
+  console.log(
+    `  ${result.ok ? acid("CYRUS") : red("CYRUS")} ${white(result.speech || "")}`,
+  );
+  if (result.detail) console.log(dim(`  ${result.detail.replace(/\n/g, "\n  ")}`));
+  console.log("");
+}
+
 async function main() {
   let argv = process.argv.slice(2);
   state.autoApprove = process.env.APEX_YES === "1";
@@ -1807,6 +1874,11 @@ async function main() {
   if (argv[0] === "models") {
     const models = await listModels();
     printModels(models);
+    return;
+  }
+
+  if (argv[0] === "cyrus") {
+    await runCyrusCli(argv.slice(1));
     return;
   }
 

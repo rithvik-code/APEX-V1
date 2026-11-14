@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -29,10 +30,16 @@ import { killAllPowerShell } from "./control/powershell.mjs";
 import { stopCommands } from "./control/terminal.mjs";
 import { stopBrowser } from "./control/browser.mjs";
 import { scanWorkspace } from "./control/workspace.mjs";
+import { runCyrusCommand, CYRUS_HELP } from "./control/cyrus.mjs";
+import { mobilePage } from "./mobile.mjs";
 
 const VERSION = "1.4.0";
 const PORT = Number(process.env.APEX_CONTROL_PORT || 4317);
-const HOST = "127.0.0.1";
+const LAN = process.env.APEX_CONTROL_LAN === "1" || process.argv.includes("--lan");
+const HOST = LAN ? "0.0.0.0" : "127.0.0.1";
+const TOKEN = LAN
+  ? String(process.env.APEX_CONTROL_TOKEN || crypto.randomBytes(9).toString("base64url"))
+  : "";
 const READ_ONLY =
   process.env.APEX_CONTROL_READONLY === "1" || process.argv.includes("--readonly");
 const ORIGIN_OK = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i;
@@ -57,6 +64,8 @@ function validateModelName(value, field = "model") {
 // The daemon only ever answers on loopback. Checking Host as well as Origin
 // closes the DNS-rebinding gap, because a rebound name still arrives as Host.
 function hostAllowed(req) {
+  // LAN mode is reachable by design; the pairing token is the gate there.
+  if (LAN) return true;
   const raw = String(req.headers.host || "").toLowerCase();
   const name = raw.startsWith("[")
     ? raw.slice(0, raw.indexOf("]") + 1)
@@ -96,13 +105,40 @@ function json(res, status, payload) {
 function cors(req, res) {
   const origin = req.headers.origin;
   if (origin) {
-    if (!ORIGIN_OK.test(origin)) return false;
+    const sameHost =
+      origin === `http://${req.headers.host}` || origin === `https://${req.headers.host}`;
+    if (!ORIGIN_OK.test(origin) && !(LAN && sameHost)) return false;
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Apex-Token");
   }
   return true;
+}
+
+function html(res, body) {
+  res.writeHead(200, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Content-Length": Buffer.byteLength(body),
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+  });
+  res.end(body);
+}
+
+// Only enforced in LAN mode; loopback keeps the existing origin/host checks.
+function tokenOk(req, url) {
+  if (!LAN) return true;
+  const supplied = String(
+    req.headers["x-apex-token"] || url.searchParams.get("token") || "",
+  );
+  if (!supplied || supplied.length !== TOKEN.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(TOKEN));
+  } catch {
+    return false;
+  }
 }
 
 function broadcast(state) {
@@ -157,6 +193,50 @@ async function readBody(req, limit = 2_000_000) {
 
 function requireSession() {
   if (!session) throw new Error("No control session has been created");
+  return session;
+}
+
+// Cyrus needs a session for manual actions even when no mission has been
+// started from the console. Creating one does not start the planner.
+function ensureSession() {
+  if (session) return session;
+  const config = readControlConfig();
+  const permissions = READ_ONLY
+    ? {
+        screen: true,
+        accessibility: true,
+        mouse: false,
+        keyboard: false,
+        apps: false,
+        browser: false,
+        files: false,
+        terminal: false,
+      }
+    : {
+        screen: true,
+        accessibility: true,
+        mouse: true,
+        keyboard: true,
+        apps: true,
+        browser: true,
+        files: true,
+        terminal: true,
+      };
+  session = new ControlSession({
+    goal: "Cyrus desktop control",
+    permissions,
+    autoApprove: READ_ONLY ? false : Boolean(config.autoApprove),
+    vision: Boolean(config.vision),
+    ocr: config.ocr !== false,
+    plannerModel: config.plannerModel || DEFAULT_PLANNER,
+    visionModel: config.visionModel || DEFAULT_VISION,
+    endpoint: config.endpoint || DEFAULT_ENDPOINT,
+    maxSteps: config.maxSteps || 20,
+    fileRoots: config.fileRoots,
+    onEvent: (state) => {
+      if (session?.id === state.id) broadcast(state);
+    },
+  });
   return session;
 }
 
@@ -252,6 +332,32 @@ async function route(req, res) {
 
   const url = new URL(req.url || "/", `http://${HOST}:${PORT}`);
   const routePath = url.pathname;
+
+  if (req.method === "GET" && (routePath === "/m" || routePath === "/m/")) {
+    html(res, mobilePage());
+    return;
+  }
+
+  if (!tokenOk(req, url)) {
+    json(res, 401, {
+      error: "Pairing token required. Open the /m URL printed by apexd --lan.",
+    });
+    return;
+  }
+
+  if (req.method === "GET" && routePath === "/api/cyrus") {
+    json(res, 200, { ok: true, commands: CYRUS_HELP });
+    return;
+  }
+
+  if (req.method === "POST" && routePath === "/api/cyrus") {
+    const body = await readBody(req);
+    const result = await runCyrusCommand(ensureSession(), String(body.text ?? ""), {
+      confirm: body.confirm === true,
+    });
+    json(res, 200, result);
+    return;
+  }
 
   if (req.method === "GET" && routePath === "/api/health") {
     const ollama = await ollamaHealth();
@@ -618,7 +724,19 @@ server.listen(PORT, HOST, () => {
   console.log(`  models  ${DEFAULT_PLANNER} + ${DEFAULT_VISION}`);
   console.log(`  mode    ${READ_ONLY ? "READ-ONLY (screen + accessibility)" : "AUTHORIZED CAPABILITIES"}`);
   console.log("");
-  console.log("  Loopback only. Arm capabilities from the APEX console.");
+  if (LAN) {
+    const nets = os.networkInterfaces();
+    const addresses = Object.values(nets)
+      .flat()
+      .filter((entry) => entry && entry.family === "IPv4" && !entry.internal)
+      .map((entry) => entry.address);
+    const address = addresses[0] || "127.0.0.1";
+    console.log(`  remote  http://${address}:${PORT}/m?token=${TOKEN}`);
+    console.log(`  token   ${TOKEN}`);
+    console.log("  LAN mode: the token is the only gate. Keep it private.");
+  } else {
+    console.log("  Loopback only. Arm capabilities from the APEX console.");
+  }
   console.log("  Ctrl+C stops the daemon and any running control session.");
   console.log("");
 });
