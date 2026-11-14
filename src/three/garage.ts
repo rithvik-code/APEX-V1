@@ -43,7 +43,18 @@ export type GarageStage = {
   setTerminal: (patch: Partial<GarageTerminalState>) => void;
   setDiecast: (unlocks: ReadonlySet<string>) => void;
   setService: (on: boolean) => void;
+  callPet: (pet: "dog" | "cat") => void;
+  setCyrus: (state: CyrusVisual) => void;
+  scanCar: () => void;
   hotspots: GarageHotspot[];
+};
+
+export type CyrusVisual = {
+  phase: "off" | "starting" | "standby" | "awake" | "thinking" | "speaking";
+  level: number;
+  heard: string;
+  reply: string;
+  ear: string;
 };
 
 function canvas2d(width: number, height: number) {
@@ -1876,6 +1887,7 @@ export function createGarage(): GarageStage {
     const step = Math.min(dist, r.speed * dt);
     group.position.x += (dx / dist) * step;
     group.position.z += (dz / dist) * step;
+    r.stride += step * 7;
     const want = Math.atan2(dx, dz);
     const turn = Math.atan2(Math.sin(want - group.rotation.y), Math.cos(want - group.rotation.y));
     group.rotation.y += turn * Math.min(1, dt * 6);
