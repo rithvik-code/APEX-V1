@@ -424,13 +424,15 @@ class Cyrus {
     this.remember(true);
     // Voices load lazily in Chrome; asking early means the first reply has one.
     if ("speechSynthesis" in window) window.speechSynthesis.getVoices();
+    this.set({ phase: "standby", status: "SAY “HEY CYRUS”" });
     if (speechCtor()) this.startWebSpeech();
     else void this.startWhisper();
-    this.set({ phase: "standby", status: "SAY “HEY CYRUS”" });
     this.chime("online");
   }
 
-  disable(): void {
+  disable(remember = true): void {
+    this.listening = false;
+    this.earGen += 1;
     this.stopOutput();
     window.clearTimeout(this.awakeTimer);
     this.recLive = false;
@@ -445,6 +447,7 @@ class Cyrus {
       }
       this.rec = null;
     }
+    if (this.processor) this.processor.onaudioprocess = null;
     this.processor?.disconnect();
     this.processorSink?.disconnect();
     this.processor = null;
@@ -452,16 +455,18 @@ class Cyrus {
     this.analyser = null;
     for (const track of this.stream?.getTracks() ?? []) track.stop();
     this.stream = null;
-    this.remember(false);
+    this.meterBuf = null;
+    this.smooth = 0;
+    if (this.ctx) void this.ctx.close();
+    this.ctx = null;
+    if (remember) this.remember(false);
     this.set({ phase: "off", ear: null, heard: "", status: "MIC OFF" });
   }
 
   /** Tap-to-talk, like holding the side button: wake without the wake word. */
   async wake(): Promise<void> {
-    if (this.snap.phase === "off") {
-      await this.enable();
-      if (this.snap.phase === "off") return;
-    }
+    if (!this.listening) await this.enable();
+    if (!this.listening || !this.stream) return;
     if (this.snap.phase === "speaking" || this.snap.phase === "thinking") this.stopOutput();
     this.goAwake();
   }
@@ -563,6 +568,8 @@ class Cyrus {
   private async startWhisper(): Promise<void> {
     const ctx = this.audio();
     if (!ctx || !this.stream) return;
+    const generation = this.earGen;
+    const stream = this.stream;
     this.set({ ear: "whisper", status: "LOADING OFFLINE EAR…" });
     let asr: { transcribe(pcm: Float32Array): Promise<string> };
     try {
@@ -726,7 +733,7 @@ class Cyrus {
   private toStandby(withChime: boolean): void {
     window.clearTimeout(this.awakeTimer);
     if (withChime && this.snap.phase === "awake") this.chime("sleep");
-    this.set({ phase: this.on ? "standby" : "off", heard: "", status: "SAY “HEY CYRUS”" });
+    this.set({ phase: this.on ? "standby" : "off", heard: "", status: this.on ? "SAY “HEY CYRUS”" : "MIC OFF · TYPE A COMMAND" });
   }
 
   private command(text: string): void {
@@ -737,11 +744,12 @@ class Cyrus {
     switch (intent.kind) {
       case "stop":
         this.stopOutput();
+        this.handler?.(intent);
         this.toStandby(false);
         return;
       case "off":
-        this.say("Going quiet. Tap the core when you need me.", false);
-        window.setTimeout(() => this.disable(), 2200);
+        this.disable();
+        this.say("Microphone off. You can still type to me.", false);
         return;
       case "sleep":
         this.say(pick(["Standing by.", "I'll be here.", "Standing by. The bay is yours."]), false);
@@ -845,7 +853,7 @@ class Cyrus {
     this.speechEndAt = performance.now();
     if (this.snap.phase === "off") return;
     this.chime("done");
-    if (this.followUp) {
+    if (this.followUp && this.listening) {
       // Continued conversation: a short window to follow up without the wake word.
       this.set({ phase: "awake", heard: "", status: "FOLLOW UP…" });
       this.armAwake(FOLLOW_UP_MS);
