@@ -126,8 +126,6 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
       data-expanded={showPanel}
       aria-label="CYRUS voice controls"
       onKeyDown={isolate}
-      onKeyUp={isolate}
-      onKeyPress={isolate}
       onPointerDown={isolate}
       onPointerUp={isolate}
       onClick={isolate}

@@ -293,7 +293,7 @@ class Cyrus {
     ear: null,
     heard: "",
     reply: "",
-    status: "SAY “HEY CYRUS”",
+    status: "MIC OFF · TAP TO ENABLE",
     error: null,
     log: [],
   };
