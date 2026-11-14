@@ -2114,6 +2114,18 @@ body.is-orbiting * {
   }
 }
 
+.crew-section { position: relative; z-index: 2; }
+.crew-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 4rem 0 1.5rem; border: 1px solid rgba(215, 226, 224, .18); background: rgba(215, 226, 224, .18); }
+.crew-card { min-height: 205px; padding: 1.5rem; background: #101514; display: flex; flex-direction: column; align-items: flex-start; }
+.crew-card__number { color: #a5b2ac; font: 10px/1.4 var(--mono, monospace); letter-spacing: .12em; }
+.crew-card h3 { margin: 1.2rem 0 .5rem; font: 500 clamp(16px, 1.5vw, 22px)/1.1 var(--display, sans-serif); letter-spacing: -.03em; }
+.crew-card p { color: #aab4af; font: 12px/1.6 var(--mono, monospace); margin: 0 0 1.2rem; }
+.crew-card a { color: #e2a246; text-decoration: none; font: 10px/1.4 var(--mono, monospace); letter-spacing: .1em; margin-top: auto; }
+.crew-card a:hover { color: #fff; }
+.crew-note { color: #8d9993; font: 11px/1.6 var(--mono, monospace); }
+@media (max-width: 800px) { .crew-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .crew-grid { grid-template-columns: 1fr; } .crew-card { min-height: 170px; } }
+
 @media (prefers-reduced-motion: reduce) {
   .term__handoff,
   .term__handoff::after {

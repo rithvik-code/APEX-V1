@@ -51,14 +51,48 @@ const CoreLab = lazy(() =>
   import("./components/CoreLab").then((module) => ({ default: module.CoreLab })),
 );
 
+const CREW_IDEAS = [
+  ["01", "HEY CYRUS", "Wake phrase, push to talk, and rapid voice replies."],
+  ["02", "LIVE RESPONSE", "Stream answers from your selected local model."],
+  ["03", "RADIO CONTROL", "Clear mic status, voice choice, and hands-free controls."],
+  ["04", "VOICE PERSONAS", "Tune Cyrus's style through the prompt controls."],
+  ["05", "MEMORY BAY", "Inspect and manage locally saved knowledge."],
+  ["06", "PAGE CONTEXT", "Ask about the current APEX interface and its controls."],
+  ["07", "FOLLOW-UP THREAD", "Continue with natural follow-up questions."],
+  ["08", "COMMAND DECK", "Open a tool or issue a supported garage command."],
+  ["09", "SOURCE TRACE", "Ground changing answers in retrieved web and local knowledge."],
+  ["10", "QUICK ANSWERS", "Short questions route directly to the connected model."],
+  ["11", "RESEARCH SCOUT", "Gather sourced facts through the live grounding system."],
+  ["12", "CODE MECHANIC", "Use the local coding agent and project workspace."],
+  ["13", "FILE LIBRARIAN", "Search local knowledge and indexed project material."],
+  ["14", "DATA ENGINEER", "Use the mesh and local tools to explore structured data."],
+  ["15", "DESIGN STUDIO", "Shape interface concepts and vehicle setups in the garage."],
+  ["16", "IMAGE FORGE", "Connect a local Stable Diffusion service from the mesh bay."],
+  ["17", "MEETING CREW", "Transcribe audio with the offline speech node."],
+  ["18", "WRITING COACH", "Draft and revise with Cyrus in the Pit Wall."],
+  ["19", "LEARNING COACH", "Ask Cyrus to explain a topic, then quiz you in Arcade mode."],
+  ["20", "PLANNING STRATEGIST", "Turn goals into steps with the Convoy assistant."],
+  ["21", "TRANSLATION RADIO", "Translate text or speech with the selected language model."],
+  ["22", "VISION PIT", "Analyze an image with the browser vision node."],
+  ["23", "AUDIO WORKSHOP", "Use offline speech recognition and local audio services."],
+  ["24", "PROMPT TUNER", "Edit the system prompt and compare model behavior."],
+  ["25", "MODEL MATCHMAKER", "Check available local models and service health."],
+  ["26", "WORKFLOW BUILDER", "Chain local tools using the controlled agent workspace."],
+  ["27", "KNOWLEDGE MAP", "Explore the semantic grid built from local memory."],
+  ["28", "AGENT CONVOY", "Compare strategist, skeptic, and engineer perspectives."],
+  ["29", "SIMULATION BAY", "Test driving setups and tune the car before a run."],
+  ["30", "STATUS ENGINEER", "Probe model, daemon, and local service availability."],
+] as const;
+
 const CHAPTERS = [
   { id: "top", n: "00", label: "IGNITION" },
   { id: "manifesto", n: "01", label: "MANIFESTO" },
   { id: "machine", n: "02", label: "MACHINE" },
   { id: "pitwall", n: "03", label: "PIT WALL" },
   { id: "grid", n: "04", label: "GRID" },
-  { id: "vast", n: "05", label: "VAST" },
-  { id: "install", n: "06", label: "SPAWN" },
+  { id: "crew", n: "06", label: "CREW" },
+  { id: "vast", n: "07", label: "VAST" },
+  { id: "install", n: "08", label: "SPAWN" },
 ];
 
 const ANCHORS = [
@@ -1610,6 +1644,27 @@ export default function App() {
             onTune={tuneScene}
             onDrive={() => launchDrive("car")}
           />
+        </section>
+
+        <section className="section crew-section" id="crew">
+          <SectionHead index="06" title="GARAGE CREW" meta="30 ASSISTANTS · ONE LOCAL CORE" />
+          <div className="grid__intro" data-reveal>
+            <h2>YOUR AI<br /><em>CREW.</em></h2>
+            <p>Thirty specialist roles built around Cyrus and the local tools already in APEX. Open a live tool from the mesh; service-linked tools become available when you connect their local service.</p>
+          </div>
+          <div className="crew-grid">
+            {CREW_IDEAS.map(([number, name, description]) => (
+              <article className="crew-card" key={number}>
+                <span className="crew-card__number">{number} / CREW</span>
+                <h3>{name}</h3>
+                <p>{description}</p>
+                <a href={number === "01" || number === "02" || number === "03" || number === "04" || number === "07" || number === "08" || number === "09" || number === "10" || number === "18" || number === "19" || number === "21" || number === "24" ? "#pitwall" : "#mesh"}>
+                  {number === "01" ? "WAKE CYRUS ↗" : "OPEN TOOL BAY ↗"}
+                </a>
+              </article>
+            ))}
+          </div>
+          <p className="crew-note">Creator: K Rithvik · Cyrus runs on the model and services you connect. External tools require their local service or browser permission.</p>
         </section>
 
         <section className="section vast" id="vast">
