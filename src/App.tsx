@@ -363,7 +363,6 @@ export default function App() {
     window.setTimeout(() => {
       setScene((prev) => ({ ...prev, explode: 1 }));
       sound.tick("start");
-      window.setTimeout(() => setScene((prev) => ({ ...prev, explode: 0 })), 2600);
     }, garage ? 80 : 950);
   }, [garage, openGarage]);
 

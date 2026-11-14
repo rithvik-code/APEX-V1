@@ -79,6 +79,7 @@ function radialTexture(): THREE.CanvasTexture {
 
 export function createSuperbike(): {
   group: THREE.Group;
+  assemblies: Array<{ id: string; label: string; group: THREE.Group; offset: THREE.Vector3 }>;
   scan: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
   anchors: VehicleAnchor[];
   engine: EngineAssembly;
@@ -91,6 +92,17 @@ export function createSuperbike(): {
 } {
   const group = new THREE.Group();
   const anchors: VehicleAnchor[] = [];
+  const rearWheelAssembly = new THREE.Group();
+  const wheelAssembly = new THREE.Group();
+  const shellAssembly = new THREE.Group();
+  const powerAssembly = new THREE.Group();
+  const assemblies = [
+    { id: "bike-front-wheel", label: "FRONT WHEEL", group: wheelAssembly, offset: new THREE.Vector3(0, 0.35, 1.35) },
+    { id: "bike-rear-wheel", label: "REAR WHEEL", group: rearWheelAssembly, offset: new THREE.Vector3(0, 0.2, -1.35) },
+    { id: "bike-shell", label: "CARBON FAIRINGS", group: shellAssembly, offset: new THREE.Vector3(0, 1.25, 0) },
+    { id: "bike-power", label: "SUPERCHARGED I4", group: powerAssembly, offset: new THREE.Vector3(0.85, 0.55, -0.2) },
+  ];
+  group.add(...assemblies.map((assembly) => assembly.group));
 
   const shell = new THREE.MeshStandardMaterial({
     color: 0x121518,
@@ -190,8 +202,8 @@ export function createSuperbike(): {
     return wheel;
   }
 
-  group.add(buildWheel(1.02, false));
-  group.add(buildWheel(-0.98, true));
+  wheelAssembly.add(buildWheel(1.02, false));
+  assemblies[1].group.add(buildWheel(-0.98, true));
 
   // Front fender: carbon arc hugging the front slick -------------------------
   const fenderArc = 2.2;
@@ -201,7 +213,7 @@ export function createSuperbike(): {
   fender.rotation.x = fenderArc / 2 - Math.PI / 2;
   fender.position.set(0, 0.56, 1.02);
   fender.scale.set(2.6, 1, 1);
-  group.add(fender);
+  shellAssembly.add(fender);
 
   const fenderLineGeo = new THREE.TorusGeometry(0.665, 0.004, 4, 32, fenderArc);
   fenderLineGeo.rotateY(Math.PI / 2);
@@ -209,7 +221,7 @@ export function createSuperbike(): {
   fenderLine.rotation.x = fenderArc / 2 - Math.PI / 2;
   fenderLine.position.set(0, 0.56, 1.02);
   fenderLine.scale.set(2.6, 1, 1);
-  group.add(fenderLine);
+  shellAssembly.add(fenderLine);
 
   // Lime trellis frame --------------------------------------------------------
   const frame = new THREE.Group();
@@ -267,7 +279,7 @@ export function createSuperbike(): {
     acid,
   );
   frame.add(rearShock);
-  group.add(frame);
+  shellAssembly.add(frame);
 
   // Faceted stealth bodywork --------------------------------------------------
   const fairing = edgesOf(
@@ -290,7 +302,7 @@ export function createSuperbike(): {
     wire,
     24,
   );
-  group.add(fairing);
+  shellAssembly.add(fairing);
 
   const belly = edgesOf(
     panel(
@@ -308,7 +320,7 @@ export function createSuperbike(): {
     wire,
     26,
   );
-  group.add(belly);
+  shellAssembly.add(belly);
 
   // Mirrored fuel tank — the H2R signature finish -----------------------------
   const tank = edgesOf(
@@ -327,11 +339,11 @@ export function createSuperbike(): {
     wire,
     24,
   );
-  group.add(tank);
+  shellAssembly.add(tank);
 
   const seat = new THREE.Mesh(new RoundedBoxGeometry(0.24, 0.06, 0.5, 2, 0.02), carbon);
   seat.position.set(0, 1.0, -0.5);
-  group.add(seat);
+  shellAssembly.add(seat);
 
   const tail = edgesOf(
     panel(
@@ -351,11 +363,11 @@ export function createSuperbike(): {
     wire,
     24,
   );
-  group.add(tail);
+  shellAssembly.add(tail);
 
   const tailLed = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.012, 0.012), acid);
   tailLed.position.set(0, 1.05, -1.29);
-  group.add(tailLed);
+  shellAssembly.add(tailLed);
 
   // Career unlock: vertical tail light blade.
   const tailStripMat = new THREE.MeshBasicMaterial({
@@ -370,12 +382,12 @@ export function createSuperbike(): {
   tailStrip.position.set(0, 1.05, -1.302);
   tailStrip.rotation.y = Math.PI;
   tailStrip.visible = false;
-  group.add(tailStrip);
+  shellAssembly.add(tailStrip);
 
   const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.26), glass);
   screen.position.set(0, 1.24, 0.78);
   screen.rotation.x = -0.55;
-  group.add(screen);
+  shellAssembly.add(screen);
 
   // Ram-air nose intake + angular LED eyes ------------------------------------
   const intake = edgesOf(
@@ -384,17 +396,17 @@ export function createSuperbike(): {
     20,
   );
   intake.position.set(0, 1.0, 1.26);
-  group.add(intake);
+  shellAssembly.add(intake);
   const intakeGlow = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.09), acid);
   intakeGlow.position.set(0, 1.0, 1.325);
-  group.add(intakeGlow);
+  shellAssembly.add(intakeGlow);
 
   for (const side of [-1, 1]) {
     const eye = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.018, 0.02), acid);
     eye.position.set(side * 0.16, 0.9, 1.22);
     eye.rotation.y = -side * 0.35;
     eye.rotation.z = side * 0.12;
-    group.add(eye);
+    shellAssembly.add(eye);
   }
 
   // Carbon winglets with acid endplates ---------------------------------------
@@ -403,17 +415,17 @@ export function createSuperbike(): {
     wing.position.set(side * 0.32, 0.98, 0.85);
     wing.rotation.z = -side * 0.12;
     wing.rotation.y = side * 0.1;
-    group.add(wing);
+    shellAssembly.add(wing);
 
     const endplate = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.09, 0.14), carbon);
     endplate.position.set(side * 0.49, 1.0, 0.85);
-    group.add(endplate);
+    shellAssembly.add(endplate);
     const tipLine = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.006, 0.14), acid);
     tipLine.position.set(side * 0.49, 1.048, 0.85);
-    group.add(tipLine);
+    shellAssembly.add(tipLine);
 
     // Mirror-delete camera pods on stalks.
-    group.add(
+    shellAssembly.add(
       strut(
         new THREE.Vector3(side * 0.22, 1.05, 0.8),
         new THREE.Vector3(side * 0.32, 1.14, 0.75),
@@ -423,41 +435,41 @@ export function createSuperbike(): {
     );
     const pod = new THREE.Mesh(new THREE.SphereGeometry(0.022, 12, 10), carbon);
     pod.position.set(side * 0.33, 1.15, 0.75);
-    group.add(pod);
+    shellAssembly.add(pod);
     const lens = new THREE.Mesh(new THREE.CircleGeometry(0.01, 12), acid);
     lens.position.set(side * 0.33, 1.15, 0.773);
-    group.add(lens);
+    shellAssembly.add(lens);
   }
 
   // Energy lines tracing the bodywork -----------------------------------------
   for (const side of [-1, 1]) {
     const fairingLine = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.01, 0.5), acid);
     fairingLine.position.set(side * 0.24, 0.88, 0.75);
-    group.add(fairingLine);
+    shellAssembly.add(fairingLine);
     const tailLine = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.008, 0.6), acid);
     tailLine.position.set(side * 0.125, 1.02, -0.8);
-    group.add(tailLine);
+    shellAssembly.add(tailLine);
   }
   const spineLine = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.006, 0.5), acid);
   spineLine.position.set(0, 1.175, 0.05);
-  group.add(spineLine);
+  shellAssembly.add(spineLine);
 
   // Supercharged inline-four ---------------------------------------------------
   const engineAssembly = createInlineFour();
   engineAssembly.group.scale.setScalar(0.5);
   engineAssembly.group.position.set(0, 0.55, 0.08);
-  group.add(engineAssembly.group);
+  powerAssembly.add(engineAssembly.group);
 
   // Supercharger housing + intake plumbing behind the block.
   const supercharger = new THREE.Mesh(new RoundedBoxGeometry(0.2, 0.16, 0.18, 2, 0.03), metal);
   supercharger.position.set(0, 0.5, -0.28);
-  group.add(edgesOf(supercharger, wire, 30));
+  powerAssembly.add(edgesOf(supercharger, wire, 30));
   const scRing = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.008, 6, 28), acid);
   scRing.rotation.y = Math.PI / 2;
   scRing.position.set(-0.11, 0.5, -0.28);
-  group.add(scRing);
+  powerAssembly.add(scRing);
   for (const side of [-1, 1]) {
-    group.add(
+    powerAssembly.add(
       strut(
         new THREE.Vector3(side * 0.06, 0.58, -0.28),
         new THREE.Vector3(side * 0.07, 0.8, -0.1),
@@ -465,7 +477,7 @@ export function createSuperbike(): {
         metal,
       ),
     );
-    group.add(
+    powerAssembly.add(
       strut(
         new THREE.Vector3(side * 0.07, 0.8, -0.1),
         new THREE.Vector3(side * 0.08, 0.95, 0.15),
@@ -478,19 +490,19 @@ export function createSuperbike(): {
   // Exhaust: four headers into a short right-side canister ---------------------
   for (let i = 0; i < 4; i++) {
     const x = -0.12 + i * 0.08;
-    group.add(
+    powerAssembly.add(
       strut(new THREE.Vector3(x, 0.5, 0.32), new THREE.Vector3(x, 0.32, 0.15), 0.016, metal),
     );
   }
-  group.add(strut(new THREE.Vector3(0, 0.32, 0.1), new THREE.Vector3(0.2, 0.34, -0.3), 0.028, metal));
-  group.add(strut(new THREE.Vector3(0.2, 0.34, -0.3), new THREE.Vector3(0.3, 0.5, -0.5), 0.028, metal));
+  powerAssembly.add(strut(new THREE.Vector3(0, 0.32, 0.1), new THREE.Vector3(0.2, 0.34, -0.3), 0.028, metal));
+  powerAssembly.add(strut(new THREE.Vector3(0.2, 0.34, -0.3), new THREE.Vector3(0.3, 0.5, -0.5), 0.028, metal));
   const muffler = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.09, 0.42, 18), metal);
   muffler.rotation.x = Math.PI / 2;
   muffler.position.set(0.31, 0.52, -0.62);
-  group.add(muffler);
+  powerAssembly.add(muffler);
   const exhaustTip = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.008, 6, 28), acid);
   exhaustTip.position.set(0.31, 0.52, -0.84);
-  group.add(exhaustTip);
+  powerAssembly.add(exhaustTip);
 
   // Floating detail ring --------------------------------------------------------
   const detailRing = new THREE.Mesh(
@@ -505,7 +517,7 @@ export function createSuperbike(): {
   );
   detailRing.rotation.y = Math.PI / 2;
   detailRing.position.set(0, 0.95, 0);
-  group.add(detailRing);
+  shellAssembly.add(detailRing);
 
   // Scanning beam ---------------------------------------------------------------
   const scan = new THREE.Mesh(
@@ -557,6 +569,7 @@ export function createSuperbike(): {
 
   return {
     group,
+    assemblies,
     scan,
     anchors,
     engine: engineAssembly,

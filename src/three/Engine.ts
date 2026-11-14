@@ -327,6 +327,9 @@ export class ApexEngine {
   private floorMat: THREE.MeshStandardMaterial;
   private explodeTarget = 0;
   private explodeCurrent = 0;
+  private bikeExplodeTarget = 0;
+  private bikeExplodeCurrent = 0;
+  private assemblyPulse = 0;
   private rpmTarget = 0.32;
   private rpmCurrent = 0.32;
   private dynoOn = false;
@@ -479,6 +482,14 @@ export class ApexEngine {
     }
 
     this.bike = createSuperbike();
+    for (const assembly of this.bike.assemblies) {
+      const el = document.createElement("div");
+      el.className = "assembly-label";
+      el.textContent = assembly.label;
+      el.style.opacity = "0";
+      this.labelsEl.appendChild(el);
+      this.assemblyLabels.push({ el, assembly });
+    }
     this.bikeGroup.add(this.bike.group);
     this.bikeGroup.position.set(-9, 0, -6);
     this.bikeGroup.rotation.y = 0.18;
@@ -1182,7 +1193,7 @@ export class ApexEngine {
   }
 
   private updateAssemblyLabels(): void {
-    const show = this.explodeCurrent > 0.04;
+    const show = Math.max(this.explodeCurrent, this.bikeExplodeCurrent) > 0.04;
     const v = new THREE.Vector3();
     for (const { el, assembly } of this.assemblyLabels) {
       if (!show) {
@@ -1195,8 +1206,9 @@ export class ApexEngine {
       const x = (v.x * 0.5 + 0.5) * window.innerWidth;
       const y = (-v.y * 0.5 + 0.5) * window.innerHeight;
       const inFront = v.z < 1 && v.z > -1;
+      const progress = assembly.id.startsWith("bike-") ? this.bikeExplodeCurrent : this.explodeCurrent;
       el.style.opacity = inFront
-        ? String(Math.min(1, this.explodeCurrent * 1.5))
+        ? String(Math.min(1, progress * 1.5))
         : "0";
       el.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`;
     }
@@ -1220,6 +1232,7 @@ export class ApexEngine {
     this.lightTargets = LIGHTING_TARGETS[config.lighting];
     this.presetTarget = CAMERA_TARGETS[config.camera];
     this.explodeTarget = config.explode;
+    this.bikeExplodeTarget = config.explode;
     this.rpmTarget = config.rpm;
     this.dynoOn = config.dyno;
     this.weather.configure(this.garageOn ? { ...config, weather: "clear" } : config);
@@ -1927,12 +1940,18 @@ export class ApexEngine {
 
     this.explodeTarget = 0;
     this.explodeCurrent = 0;
+    this.bikeExplodeTarget = 0;
+    this.bikeExplodeCurrent = 0;
     this.revHeld = false;
     this.revWasActive = false;
     this.revReleaseAt = -1;
     this.revRpm = 0;
     this.revKick = 0;
     for (const assembly of this.car.assemblies) assembly.group.position.set(0, 0, 0);
+    for (const assembly of this.bike.assemblies) {
+      assembly.group.position.set(0, 0, 0);
+      assembly.group.rotation.set(0, 0, 0);
+    }
     this.stopLapReplay();
 
     this.drive = new DriveSession(this.track, this.scene, vehicle, setup, options);
@@ -2527,7 +2546,10 @@ export class ApexEngine {
     // Exploded view eases assemblies apart along their offset vectors and
     // spreads the wheels outward so the internals read clearly.
     this.explodeCurrent +=
-      (this.explodeTarget - this.explodeCurrent) * (1 - Math.exp(-dt * 4));
+      (this.explodeTarget - this.explodeCurrent) * (1 - Math.exp(-dt * 8));
+    this.bikeExplodeCurrent +=
+      (this.bikeExplodeTarget - this.bikeExplodeCurrent) * (1 - Math.exp(-dt * 8));
+    this.assemblyPulse = Math.max(0, this.assemblyPulse - dt * 1.6);
     for (const assembly of this.car.assemblies) {
       assembly.group.position
         .copy(assembly.offset)
@@ -2545,6 +2567,12 @@ export class ApexEngine {
       const side = wheel.userData.side as number;
       wheel.position.x =
         (wheel.userData.baseX as number) + side * 1.5 * this.explodeCurrent;
+    }
+    for (const [index, assembly] of this.bike.assemblies.entries()) {
+      const delay = index * 0.045;
+      const amount = THREE.MathUtils.clamp(this.bikeExplodeCurrent - delay, 0, 1);
+      assembly.group.position.copy(assembly.offset).multiplyScalar(amount);
+      assembly.group.rotation.y = (index % 2 ? -1 : 1) * amount * 0.035;
     }
     this.car.engine.update(this.engineTime);
     this.bike.engine.update(this.dynoOn ? this.engineTime : this.clockTime);

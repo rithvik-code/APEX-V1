@@ -197,18 +197,14 @@ function speechCtor(): SpeechCtor | null {
 function pickVoice(): SpeechSynthesisVoice | null {
   if (!("speechSynthesis" in window)) return null;
   const voices = window.speechSynthesis.getVoices();
-  const prefs = [
-    /Google UK English Male/i,
-    /Microsoft Ryan.*Natural/i,
-    /Microsoft (Thomas|George|Ryan)/i,
-    /\bDaniel\b/i,
-    /Microsoft Guy.*Natural/i,
-  ];
-  for (const re of prefs) {
-    const voice = voices.find((v) => re.test(v.name));
-    if (voice) return voice;
-  }
-  return voices.find((v) => /en[-_]GB/i.test(v.lang)) ?? voices.find((v) => /^en/i.test(v.lang)) ?? null;
+  const english = voices.filter((voice) => /^en([_-]|$)/i.test(voice.lang));
+  const feminine = /(aria|jenny|sonia|natasha|ava|samantha|zira|hazel|susan|karen|female|woman)/i;
+  const natural = /(natural|neural|premium|enhanced)/i;
+  return english.find((voice) => feminine.test(voice.name) && natural.test(voice.name))
+    ?? english.find((voice) => feminine.test(voice.name))
+    ?? english.find((voice) => natural.test(voice.name) && /en[-_]GB/i.test(voice.lang))
+    ?? english.find((voice) => /en[-_]GB/i.test(voice.lang))
+    ?? english[0] ?? voices[0] ?? null;
 }
 
 function cleanSpeech(text: string): string {
@@ -248,6 +244,7 @@ function to16k(chunks: Float32Array[], rate: number): Float32Array {
 }
 
 const PERSONA = `You are CYRUS, a warm, thoughtful general-purpose AI companion in the user's virtual APEX garage. Talk naturally, with calm confidence and occasional dry wit. You are a conversational assistant, not a command menu or a racing-only expert.
+Your voice persona is a confident, bold woman: warm, composed, witty, direct, and emotionally perceptive. Keep the style natural and respectful, never theatrical by default.
 Be easy to talk to: acknowledge what the user means, use everyday language, and answer without a long preamble. For casual questions aim for 1–4 clear sentences; expand when asked. If speech seems ambiguous, make the most likely interpretation and briefly confirm it instead of silently ignoring it. For follow-ups, carry forward the conversation naturally.
 If asked who created, built, or made you or APEX, answer plainly: "I was made by K Rithvik." Do not claim that another person or company created this project.
 Help with any subject you can: science, history, coding, mathematics, creative writing, planning, everyday questions, ideas, feelings and casual conversation. Answer the actual request directly. Do not redirect unrelated topics to cars or list garage commands unless asked.
@@ -258,8 +255,8 @@ You cannot execute actions from a generated answer. The app separately executes 
 Garage context, only when relevant: Scotch is a white Labrador; Mario is a white Persian cat; Mr and Mrs Turtle also live here. The bay has a V12 hypercar, an inline-four hyperbike, hydraulic lift, roller door, die-cast shelf, trophy wall, music and a circuit with ramps and boost pads. Supported commands include calling pets, taking the car or bike out, returning to the garage, door/lift/service controls, music, simulated weather, revving, racing line, ghost, restart, recover and stop. You can also simply talk about anything else.`;
 
 const PREF_KEY = "apex.cyrus.v1";
-const AWAKE_MS = 12000;
-const FOLLOW_UP_MS = 25000;
+const AWAKE_MS = 18000;
+const FOLLOW_UP_MS = 30000;
 
 /* -------------------------------------------------------------------------- */
 /* The assistant                                                               */
@@ -637,7 +634,7 @@ class Cyrus {
       chunks.push(data);
       talkMs += frameMs;
       quietMs = rms > threshold * 0.7 ? 0 : quietMs + frameMs;
-      if (quietMs > 750 || talkMs > 9000) finish();
+      if (quietMs > 420 || talkMs > 9000) finish();
     };
   }
 
@@ -807,8 +804,8 @@ class Cyrus {
       utterance.voice = voice;
       utterance.lang = voice.lang;
     }
-    utterance.rate = 1.04;
-    utterance.pitch = 0.9;
+    utterance.rate = 1.08;
+    utterance.pitch = 1.12;
     utterance.volume = 1;
     this.pending += 1;
     this.utterances.add(utterance);
@@ -854,6 +851,11 @@ class Cyrus {
     const base = loadSettings();
     if (base.provider === "openai") return base.endpoint.trim() && base.model.trim() ? base : null;
     const endpoint = base.endpoint.trim() || "http://127.0.0.1:11434";
+    if (base.model && base.provider === "ollama") {
+      const settings = { ...base, endpoint, provider: "ollama" as const };
+      this.model = { at: Date.now(), endpoint, requested: base.model, settings };
+      return settings;
+    }
     if (this.model && this.model.endpoint === endpoint && this.model.requested === base.model && Date.now() - this.model.at < 60000) {
       return this.model.settings;
     }
