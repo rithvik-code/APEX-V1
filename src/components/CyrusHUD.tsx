@@ -33,13 +33,15 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
     let controls: Element[] = [];
     const place = () => {
       const bounds = root.getBoundingClientRect();
+      const ceiling = parseFloat(getComputedStyle(root).getPropertyValue("--cyrus-hud-ceiling"));
       let floor = 22;
       for (const control of controls) {
         const box = control.getBoundingClientRect();
-        if (box.width && box.height && box.left < bounds.right && box.right > bounds.left) {
+        if (box.width && box.height && box.bottom > ceiling && box.left < bounds.right && box.right > bounds.left) {
           floor = Math.max(floor, window.innerHeight - box.top + 12);
         }
       }
+      floor = Math.min(floor, Math.max(22, window.innerHeight - ceiling - 64));
       root.style.setProperty("--cyrus-hud-floor", `${floor}px`);
     };
     const resize = new ResizeObserver(place);
