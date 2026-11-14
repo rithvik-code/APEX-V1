@@ -199,6 +199,7 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
             <span>{phase.toUpperCase()}</span>
             <span>{ear === "web-speech" ? "WEB SPEECH" : ear === "whisper" ? "WHISPER" : "NO SPEECH EAR"}</span>
           </div>
+          <p className="cyrus-hud__detail">{status}</p>
           <div className="cyrus-hud__meter">
             <div className="cyrus-hud__bars" aria-hidden="true">
               {Array.from({ length: 18 }, (_, index) => <i key={index} />)}
