@@ -2124,6 +2124,8 @@ body.is-orbiting * {
 .crew-card a:hover { color: #fff; }
 .crew-card button { color: #e2a246; background: transparent; border: 0; padding: 0; cursor: pointer; font: 10px/1.4 var(--mono, monospace); letter-spacing: .1em; margin-top: auto; text-align: left; }
 .crew-card button:hover { color: #fff; }
+.garage__actions .garage__summon { color: #c8ff16; border-color: rgba(200,255,22,.52); box-shadow: inset 0 0 24px rgba(200,255,22,.05); }
+.garage__actions .garage__summon:hover { color: #080a08; background: #c8ff16; box-shadow: 0 0 28px rgba(200,255,22,.28); }
 .crew-note { color: #8d9993; font: 11px/1.6 var(--mono, monospace); }
 .crew-workbench { width: 100%; color: #e3ebe5; font-family: var(--mono, monospace); }
 .crew-workbench__bar { display: flex; flex-wrap: wrap; gap: .7rem 1rem; align-items: center; padding: .8rem; border: 1px solid rgba(215,226,224,.16); color: #acb8b1; font-size: 10px; }

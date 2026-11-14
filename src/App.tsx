@@ -356,6 +356,17 @@ export default function App() {
     [closeGarage, launchDrive],
   );
 
+  const summonVehicle = useCallback((vehicle: "car" | "bike") => {
+    if (!garage) openGarage();
+    sound.whoosh();
+    setScene((prev) => ({ ...prev, focus: vehicle, explode: 0 }));
+    window.setTimeout(() => {
+      setScene((prev) => ({ ...prev, explode: 1 }));
+      sound.tick("start");
+      window.setTimeout(() => setScene((prev) => ({ ...prev, explode: 0 })), 2600);
+    }, garage ? 80 : 950);
+  }, [garage, openGarage]);
+
   const runGarageAction = useCallback(
     (id: string) => {
       const engine = engineRef.current;
@@ -582,6 +593,9 @@ export default function App() {
           else if (driving) switchDriveVehicle(intent.vehicle);
           else launchDrive(intent.vehicle);
           return `Taking the ${intent.vehicle} to the circuit. You're at the wheel.`;
+        case "summon":
+          summonVehicle(intent.vehicle);
+          return `Summoning the ${intent.vehicle}. Stand by for assembly.`;
         case "garage":
           if (inGarage) return "You're already home. What do you need?";
           openGarage();
@@ -685,7 +699,7 @@ export default function App() {
       }
     });
     return () => cyrus.setHandler(null);
-  }, [runGarageAction, driveOutGarage, switchDriveVehicle, launchDrive, openGarage, exitDrive, closeGarage, garageCapture, revStart, revEnd, replayGarage, toggleDriveAssist, toggleDriveGhost]);
+  }, [runGarageAction, driveOutGarage, switchDriveVehicle, launchDrive, openGarage, exitDrive, closeGarage, garageCapture, revStart, revEnd, replayGarage, toggleDriveAssist, toggleDriveGhost, summonVehicle]);
 
   useEffect(() => {
     if (garage && cyrus.wanted() && !cyrus.on) void cyrus.enable();
@@ -1992,6 +2006,7 @@ export default function App() {
             updateScene({ paint: { ...sceneRef.current.paint, ...patch } })
           }
           onDriveOut={driveOutGarage}
+          onSummon={summonVehicle}
           onCapture={garageCapture}
           onReward={garageReward}
           trophies={trophyCount}

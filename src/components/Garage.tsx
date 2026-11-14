@@ -39,6 +39,7 @@ type GarageProps = {
   paint: CustomPaint;
   onPaint: (patch: Partial<CustomPaint>) => void;
   onDriveOut: (vehicle: "car" | "bike") => void;
+  onSummon: (vehicle: "car" | "bike") => void;
   onCapture: () => void;
   onReward: () => void;
   trophies: number;
@@ -207,6 +208,7 @@ export function Garage({
   paint,
   onPaint,
   onDriveOut,
+  onSummon,
   onCapture,
   onReward,
   trophies,
@@ -448,6 +450,12 @@ export function Garage({
           </div>
 
           <div className="garage__actions">
+            <button type="button" className="garage__summon" onClick={() => onSummon("car")}>
+              ASSEMBLE THE CAR <span aria-hidden="true">✦</span>
+            </button>
+            <button type="button" className="garage__summon" onClick={() => onSummon("bike")}>
+              ASSEMBLE THE BIKE <span aria-hidden="true">✦</span>
+            </button>
             <button type="button" onClick={() => onDriveOut("car")}>
               TAKE THE CAR OUT <span aria-hidden="true">▶</span>
             </button>

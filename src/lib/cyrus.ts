@@ -34,6 +34,7 @@ export type CyrusSnapshot = {
 export type CyrusIntent =
   | { kind: "pet"; pet: "dog" | "cat" | "turtles" }
   | { kind: "drive"; vehicle: "car" | "bike" }
+  | { kind: "summon"; vehicle: "car" | "bike" }
   | { kind: "garage" }
   | { kind: "exit" }
   | { kind: "door"; open: boolean | null }
@@ -117,6 +118,8 @@ export function parseIntent(raw: string): CyrusIntent {
     return { kind: "lift", up: on(/\b(up|raise|lift (?:the )?car)\b/, /\b(down|lower)\b/) };
 
   const bike = /\b(bike|motorbike|motorcycle|h2r|kawasaki)\b/.test(t);
+  if (/\b(get|bring|summon|assemble|materialize|call)\b/.test(t) && /\b(car|bike|motorbike|motorcycle|h2r|kawasaki)\b/.test(t))
+    return { kind: "summon", vehicle: bike ? "bike" : "car" };
   if (/^(?:rev(?: (?:up|it|the engine|the car|the bike|the v12|the inline four))?|fire (?:it )?up|(?:start|fire up) (?:the )?(?:(?:car|bike) )?engine)$/.test(t))
     return { kind: "rev", vehicle: bike ? "bike" : "car" };
   if (/^(?:(?:take|capture|snap) (?:a |the )?)?(?:photo|picture|snapshot|screenshot|pic|selfie)$/.test(t))
