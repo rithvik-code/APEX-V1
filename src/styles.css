@@ -1504,9 +1504,9 @@ body.is-orbiting * {
   left: 0;
   top: 0;
   padding: 4px 9px;
-  border: 1px solid rgba(200, 255, 22, 0.4);
-  background: rgba(7, 9, 8, 0.82);
-  backdrop-filter: blur(6px);
+  border: 1px solid rgba(200, 255, 22, 0.48);
+  background: linear-gradient(112deg, rgba(7, 11, 12, 0.96), rgba(12, 19, 20, 0.82));
+  backdrop-filter: blur(10px);
   font-family: var(--mono);
   font-size: 9px;
   letter-spacing: 0.14em;
@@ -1515,7 +1515,9 @@ body.is-orbiting * {
   opacity: 0;
   will-change: transform, opacity;
   transition: opacity 0.2s linear;
-  box-shadow: 0 0 18px rgba(200, 255, 22, 0.08);
+  box-shadow: 0 0 18px rgba(200, 255, 22, 0.1), inset 0 0 14px rgba(200, 255, 22, 0.035);
+  text-shadow: 0 0 12px rgba(200, 255, 22, 0.45);
+  animation: assembly-readout 2.4s ease-in-out infinite alternate;
 }
 
 .assembly-label::before {
@@ -1526,6 +1528,11 @@ body.is-orbiting * {
   width: 1px;
   height: 5px;
   background: rgba(200, 255, 22, 0.5);
+}
+
+@keyframes assembly-readout {
+  from { border-color: rgba(200, 255, 22, 0.28); }
+  to { border-color: rgba(200, 255, 22, 0.68); }
 }
 
 .blueprint {

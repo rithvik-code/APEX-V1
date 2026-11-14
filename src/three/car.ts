@@ -830,11 +830,11 @@ export function createSupercar(): {
   group.add(shell, canopy, frontAero, rearWing, power);
 
   const assemblies: Assembly[] = [
-    { id: "shell", label: "MONOCOQUE", group: shell, offset: new THREE.Vector3(0, 0, 0) },
-    { id: "canopy", label: "CANOPY / COCKPIT", group: canopy, offset: new THREE.Vector3(0, 1.3, 0.2) },
-    { id: "frontAero", label: "FRONT AERO", group: frontAero, offset: new THREE.Vector3(0, 0.2, 1.8) },
-    { id: "rearWing", label: "REAR WING / DIFFUSER", group: rearWing, offset: new THREE.Vector3(0, 0.75, -1.9) },
-    { id: "power", label: "V12 BITURBO", group: power, offset: new THREE.Vector3(0, 1.85, -0.5) },
+    { id: "shell", label: "AERO BODY / CHASSIS", group: shell, offset: new THREE.Vector3(0, -0.3, 0) },
+    { id: "canopy", label: "GLASS CANOPY / COCKPIT", group: canopy, offset: new THREE.Vector3(0, 2.15, 0.25) },
+    { id: "frontAero", label: "FRONT AERO / WHEELS", group: frontAero, offset: new THREE.Vector3(0, 0.25, 2.75) },
+    { id: "rearWing", label: "REAR WING / DIFFUSER", group: rearWing, offset: new THREE.Vector3(0, 1.15, -2.75) },
+    { id: "power", label: "V12 / DRIVETRAIN", group: power, offset: new THREE.Vector3(0, 2.25, -0.45) },
   ];
 
   return {

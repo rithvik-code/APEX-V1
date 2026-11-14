@@ -475,6 +475,7 @@ export class ApexEngine {
     for (const assembly of this.car.assemblies) {
       const el = document.createElement("div");
       el.className = "assembly-label";
+      el.dataset.vehicle = "car";
       el.textContent = assembly.label;
       el.style.opacity = "0";
       this.labelsEl.appendChild(el);
@@ -485,6 +486,7 @@ export class ApexEngine {
     for (const assembly of this.bike.assemblies) {
       const el = document.createElement("div");
       el.className = "assembly-label";
+      el.dataset.vehicle = "bike";
       el.textContent = assembly.label;
       el.style.opacity = "0";
       this.labelsEl.appendChild(el);
@@ -1194,9 +1196,10 @@ export class ApexEngine {
 
   private updateAssemblyLabels(): void {
     const show = Math.max(this.explodeCurrent, this.bikeExplodeCurrent) > 0.04;
+    const activeVehicle = this.lastConfig?.focus === "bike" ? "bike" : "car";
     const v = new THREE.Vector3();
     for (const { el, assembly } of this.assemblyLabels) {
-      if (!show) {
+      if (!show || el.dataset.vehicle !== activeVehicle) {
         el.style.opacity = "0";
         continue;
       }
@@ -2543,17 +2546,20 @@ export class ApexEngine {
 
     this.carGroup.rotation.y = Math.sin(this.clockTime * 0.08) * 0.012;
 
-    // Exploded view eases assemblies apart along their offset vectors and
-    // spreads the wheels outward so the internals read clearly.
+    // Exploded view stages every subassembly like a precision teardown: each
+    // assembly follows its own vector with a slight cinematic timing stagger.
     this.explodeCurrent +=
       (this.explodeTarget - this.explodeCurrent) * (1 - Math.exp(-dt * 8));
     this.bikeExplodeCurrent +=
       (this.bikeExplodeTarget - this.bikeExplodeCurrent) * (1 - Math.exp(-dt * 8));
     this.assemblyPulse = Math.max(0, this.assemblyPulse - dt * 1.6);
-    for (const assembly of this.car.assemblies) {
+    for (const [index, assembly] of this.car.assemblies.entries()) {
+      const stagger = index * 0.035;
+      const amount = THREE.MathUtils.clamp(this.explodeCurrent - stagger, 0, 1);
       assembly.group.position
         .copy(assembly.offset)
-        .multiplyScalar(this.explodeCurrent);
+        .multiplyScalar(amount);
+      assembly.group.rotation.y = (index % 2 ? -1 : 1) * amount * 0.045;
     }
 
     // Dyno: RPM drives a continuously accumulated engine clock so the crank
@@ -2566,7 +2572,7 @@ export class ApexEngine {
       wheel.rotation.x += adt * wheelSpin;
       const side = wheel.userData.side as number;
       wheel.position.x =
-        (wheel.userData.baseX as number) + side * 1.5 * this.explodeCurrent;
+        (wheel.userData.baseX as number) + side * 2.15 * this.explodeCurrent;
     }
     for (const [index, assembly] of this.bike.assemblies.entries()) {
       const delay = index * 0.045;

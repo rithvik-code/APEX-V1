@@ -97,10 +97,10 @@ export function createSuperbike(): {
   const shellAssembly = new THREE.Group();
   const powerAssembly = new THREE.Group();
   const assemblies = [
-    { id: "bike-front-wheel", label: "FRONT WHEEL", group: wheelAssembly, offset: new THREE.Vector3(0, 0.35, 1.35) },
-    { id: "bike-rear-wheel", label: "REAR WHEEL", group: rearWheelAssembly, offset: new THREE.Vector3(0, 0.2, -1.35) },
-    { id: "bike-shell", label: "CARBON FAIRINGS", group: shellAssembly, offset: new THREE.Vector3(0, 1.25, 0) },
-    { id: "bike-power", label: "SUPERCHARGED I4", group: powerAssembly, offset: new THREE.Vector3(0.85, 0.55, -0.2) },
+    { id: "bike-front-wheel", label: "FRONT WHEEL / BRAKES", group: wheelAssembly, offset: new THREE.Vector3(0, 0.65, 2.05) },
+    { id: "bike-rear-wheel", label: "REAR WHEEL / DRIVE", group: rearWheelAssembly, offset: new THREE.Vector3(0, 0.4, -2.05) },
+    { id: "bike-shell", label: "CARBON FAIRINGS / TAIL", group: shellAssembly, offset: new THREE.Vector3(0, 2.1, 0) },
+    { id: "bike-power", label: "SUPERCHARGED I4 / FRAME", group: powerAssembly, offset: new THREE.Vector3(1.3, 0.8, -0.2) },
   ];
   group.add(...assemblies.map((assembly) => assembly.group));
 

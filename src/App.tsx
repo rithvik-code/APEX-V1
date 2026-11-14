@@ -364,7 +364,13 @@ export default function App() {
   const summonVehicle = useCallback((vehicle: "car" | "bike", assembled = true) => {
     if (!garage) openGarage();
     sound.whoosh();
-    setScene((prev) => ({ ...prev, focus: vehicle, explode: assembled ? 0 : 1 }));
+    setScene((prev) => ({
+      ...prev,
+      focus: vehicle,
+      camera: "hero",
+      autoOrbit: false,
+      explode: assembled ? 0 : 1,
+    }));
     if (assembled) window.setTimeout(() => sound.tick("start"), garage ? 80 : 950);
   }, [garage, openGarage]);
 
