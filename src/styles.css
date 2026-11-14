@@ -924,6 +924,23 @@ em {
   animation: letterIn 1.15s var(--ease) forwards;
 }
 
+.site.aero-entering .hero__letter {
+  animation: heroWindShear .95s cubic-bezier(.16,.76,.18,1) both !important;
+  animation-delay: calc(var(--wind-index, 0) * 45ms) !important;
+}
+.site.aero-entering .hero__letter:nth-child(1) { --wind-index: 0; }
+.site.aero-entering .hero__letter:nth-child(2) { --wind-index: 1; }
+.site.aero-entering .hero__letter:nth-child(3) { --wind-index: 2; }
+.site.aero-entering .hero__letter:nth-child(4) { --wind-index: 3; }
+.site.aero-on .hero__title { transition: opacity .35s ease .25s, filter .35s ease .25s; }
+.site.aero-on:not(.aero-entering) .hero__title { opacity: .14; filter: blur(2px); pointer-events: none; }
+
+@keyframes heroWindShear {
+  0% { opacity: 1; transform: translate3d(0,0,0) skewX(0) scale(1); filter: blur(0); }
+  34% { opacity: .95; transform: translate3d(-3vw,-.04em,0) skewX(-15deg) scaleX(1.03); filter: blur(1px); }
+  100% { opacity: 0; transform: translate3d(118vw,-.42em,0) skewX(-28deg) scaleX(.55); filter: blur(16px); }
+}
+
 @keyframes letterIn {
   0% {
     opacity: 0;
@@ -4163,6 +4180,38 @@ body.is-orbiting * {
   }
 }
 
+/* Phone finishing pass: safe areas, legible controls, no sideways overflow. */
+@media (max-width: 600px) {
+  .topbar { padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 10px max(12px, env(safe-area-inset-left)); gap: 10px; }
+  .brand { gap: 8px; }
+  .brand__mark { width: 32px; height: 32px; font-size: 16px; }
+  .brand__text b { font-size: 13px; }
+  .audio { height: 38px; padding: 0 9px; font-size: 9px; }
+  .section { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+  .hero { min-height: 100svh; min-height: 100dvh; padding-left: 16px; padding-right: 16px; padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+  .hero__title { margin-top: auto; }
+  .hero h1 { font-size: clamp(4.25rem, 25vw, 8rem); line-height: .78; }
+  .hero__under { align-items: flex-start; font-size: 9px; line-height: 1.5; }
+  .hero__bottom { gap: 14px; }
+  .hero__actions { width: 100%; gap: 8px; }
+  .hero__actions .btn { min-height: 46px; }
+  .revbtn { min-height: 48px; }
+  .crew-grid { grid-template-columns: 1fr; }
+  .crew-card { min-height: 150px; }
+  .term__body { height: min(42dvh, 360px); min-height: 210px; }
+  .term__input, .term__form input { min-height: 46px; font-size: 16px; }
+  .aero-launch { touch-action: manipulation; }
+  .cyrus-hud { bottom: calc(var(--cyrus-hud-floor, 16px) + env(safe-area-inset-bottom)); }
+  .mesh__index { grid-template-columns: 1fr; }
+  .mesh-overlay__panel { width: calc(100vw - 20px); max-height: calc(100dvh - 20px - env(safe-area-inset-top)); }
+  .mesh-overlay__body { grid-template-columns: 1fr; }
+  .mesh-overlay__dossier { display: none; }
+  .mesh-overlay__stage { min-height: 48dvh; }
+  .aero-dock__close { width: 42px; height: 42px; }
+  button, a { -webkit-tap-highlight-color: transparent; }
+  input, textarea, select { font-size: 16px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -6940,24 +6989,37 @@ body.core-open {
 
 @media (max-width: 900px) {
   .aero-dock {
-    left: 12px;
-    right: 12px;
+    left: max(12px, env(safe-area-inset-left));
+    right: max(12px, env(safe-area-inset-right));
     top: auto;
-    bottom: 118px;
+    bottom: calc(108px + env(safe-area-inset-bottom));
     width: auto;
-    max-height: 48vh;
+    max-height: min(58dvh, 620px);
+    border-radius: 14px 14px 4px 4px;
+    transform-origin: 50% 100%;
   }
 
   .aero-launch {
-    right: 16px;
-    bottom: 18px;
-    width: 80px;
-    height: 80px;
+    right: max(16px, env(safe-area-inset-right));
+    bottom: calc(14px + env(safe-area-inset-bottom));
+    width: 72px;
+    height: 72px;
   }
 
   .aero-launch__label {
     font-size: 13px;
   }
+}
+
+@media (max-width: 600px) {
+  .site.aero-on .hero__title { opacity: 0; filter: blur(8px); }
+  .site.aero-on.aero-entering .hero__title { opacity: 1; }
+  .aero-dock { max-height: min(62dvh, 590px); }
+  .aero-dock__head { padding: 10px 12px; }
+  .aero-dock__tabs { overflow-x: auto; scrollbar-width: none; }
+  .aero-dock__tabs::-webkit-scrollbar { display: none; }
+  .aero-dock__tabs button { flex: 0 0 auto; min-width: 76px; min-height: 44px; padding: 10px 9px; }
+  .aero-dock__scroll { padding: 12px; overscroll-behavior: contain; }
 }
 
 @media (prefers-reduced-motion: reduce) {

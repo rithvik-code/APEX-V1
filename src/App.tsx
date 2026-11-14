@@ -169,6 +169,7 @@ export default function App() {
   const [blueprintOpen, setBlueprintOpen] = useState(false);
   const [requestedCrewNode, setRequestedCrewNode] = useState<string | null>(null);
   const [crewWorkbench, setCrewWorkbench] = useState(false);
+  const [aeroAnimating, setAeroAnimating] = useState(false);
   const [coreView, setCoreView] = useState<CoreVariant | null>(null);
   const [takeover, setTakeover] = useState(false);
   const [takeoverGoal, setTakeoverGoal] = useState<string | undefined>(undefined);
@@ -279,6 +280,10 @@ export default function App() {
 
   const toggleAero = useCallback(() => {
     const next = !sceneRef.current.aero;
+    if (next) {
+      setAeroAnimating(true);
+      window.setTimeout(() => setAeroAnimating(false), 1150);
+    }
     setScene((prev) => ({ ...prev, aero: next }));
     if (next) {
       sound.whoosh();
@@ -1183,7 +1188,7 @@ export default function App() {
 
   return (
     <div
-      className={`site${booting ? "" : " is-ready"}${scene.aero ? " aero-on" : ""}`}
+      className={`site${booting ? "" : " is-ready"}${scene.aero ? " aero-on" : ""}${aeroAnimating ? " aero-entering" : ""}`}
     >
       <a className="skip-link" href="#main">
         SKIP TO CONTENT
