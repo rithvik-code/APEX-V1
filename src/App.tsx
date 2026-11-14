@@ -166,6 +166,9 @@ export default function App() {
   const [scrolled, setScrolled] = useState(false);
   const [active, setActive] = useState("top");
   const [audioOn, setAudioOn] = useState(false);
+  const [batterySaver, setBatterySaver] = useState(() => {
+    try { return localStorage.getItem("apex-battery-saver") === "on"; } catch { return false; }
+  });
   const [blueprintOpen, setBlueprintOpen] = useState(false);
   const [requestedCrewNode, setRequestedCrewNode] = useState<string | null>(null);
   const [crewWorkbench, setCrewWorkbench] = useState(false);
@@ -806,6 +809,7 @@ export default function App() {
         return { phase, heard, reply, ear: ear ?? "", level: cyrus.level() };
       });
       engine.setPaused(pausedRef.current);
+      engine.setBatterySaver(batterySaver);
       engine.configure(sceneRef.current);
       engine.setCareer(
         unlockSet(careerRef.current),
@@ -838,6 +842,19 @@ export default function App() {
     pausedRef.current = paused;
     engineRef.current?.setPaused(paused);
   }, [coreView, takeover]);
+
+  useEffect(() => {
+    engineRef.current?.setBatterySaver(batterySaver);
+    try { localStorage.setItem("apex-battery-saver", batterySaver ? "on" : "off"); } catch { /* storage is optional */ }
+  }, [batterySaver]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const syncMotionPreference = () => engineRef.current?.setReducedMotion(media.matches);
+    syncMotionPreference();
+    media.addEventListener("change", syncMotionPreference);
+    return () => media.removeEventListener("change", syncMotionPreference);
+  }, []);
 
   useEffect(() => {
     sceneRef.current = scene;
@@ -1251,6 +1268,15 @@ export default function App() {
 
         <button
           type="button"
+          className={`power-mode${batterySaver ? " is-on" : ""}`}
+          onClick={() => setBatterySaver((value) => !value)}
+          aria-pressed={batterySaver}
+          title="Reduce graphics workload and battery use"
+        >
+          POWER {batterySaver ? "SAVE" : "MAX"}
+        </button>
+        <button
+          type="button"
           className={`audio${audioOn ? " is-on" : ""}`}
           onClick={toggleAudio}
           aria-pressed={audioOn}
@@ -1375,7 +1401,7 @@ export default function App() {
                 <b>{copied === "hero" ? "COPIED" : "COPY"}</b>
               </button>
               <span className="hero__camhint">
-                <i /> DRAG — ORBIT · DOUBLE-CLICK — RESET
+                <i /> SWIPE / DRAG — 360° ORBIT · DOUBLE-CLICK — RESET
               </span>
             </div>
 

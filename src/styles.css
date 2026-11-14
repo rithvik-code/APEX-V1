@@ -130,6 +130,17 @@ a {
   pointer-events: none;
 }
 
+@media (pointer: coarse) {
+  .hero__camhint {
+    color: var(--paper);
+    font-size: 10px;
+    padding: 8px 11px;
+    border: 1px solid rgba(200, 255, 22, 0.3);
+    background: rgba(7, 9, 8, 0.62);
+    box-shadow: 0 0 18px rgba(200, 255, 22, 0.08);
+  }
+}
+
 .vignette {
   position: fixed;
   inset: 0;
@@ -397,7 +408,7 @@ a {
   right: 0;
   z-index: 60;
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto 1fr auto auto auto;
   align-items: center;
   gap: clamp(16px, 3vw, 44px);
   padding: 18px var(--pad);
@@ -531,6 +542,26 @@ a {
   transition:
     color 0.25s,
     border-color 0.25s;
+}
+
+.power-mode {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+
+.power-mode:hover,
+.power-mode.is-on {
+  border-color: rgba(200, 255, 22, 0.5);
+  color: var(--acid);
+  background: rgba(200, 255, 22, 0.045);
 }
 
 .audio:hover,
@@ -3817,7 +3848,7 @@ body.is-orbiting * {
   }
 
   .topbar {
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: auto 1fr auto auto;
   }
 
   .topbar__status {
@@ -3835,7 +3866,7 @@ body.is-orbiting * {
   }
 
   .topbar {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr auto auto;
   }
 
   .hero__aside {
@@ -4189,6 +4220,7 @@ body.is-orbiting * {
   .brand__mark { width: 32px; height: 32px; font-size: 16px; }
   .brand__text b { font-size: 13px; }
   .audio { height: 38px; padding: 0 9px; font-size: 9px; }
+  .power-mode { min-height: 38px; padding: 0 7px; font-size: 8px; }
   .section { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
   .hero { min-height: 100svh; min-height: 100dvh; padding-left: 16px; padding-right: 16px; padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
   .hero__title { margin-top: auto; }

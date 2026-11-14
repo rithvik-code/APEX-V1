@@ -64,6 +64,10 @@ function renderPixelRatio(): number {
   return Math.min(dpr, cores && cores <= 4 ? 1.5 : 2);
 }
 
+function powerSavePixelRatio(): number {
+  return Math.min(window.devicePixelRatio || 1, 1);
+}
+
 type Keyframe = {
   p: number;
   pos: [number, number, number];
@@ -280,6 +284,8 @@ export class ApexEngine {
   private pointerTarget = new THREE.Vector2();
   private clockTime = 0;
   private reducedMotion: boolean;
+  private batterySaver = false;
+  private systemReducedMotion: boolean;
   private disposed = false;
   private lastCameraPos = new THREE.Vector3();
   private basePos = new THREE.Vector3();
@@ -307,6 +313,7 @@ export class ApexEngine {
   private onReady?: () => void;
   private readySent = false;
   private paused = false;
+  private powerSaveRequested = false;
   private aeroCar: AeroFlow;
   private aeroBike: AeroFlow;
   private bloom: UnrealBloomPass;
@@ -415,6 +422,7 @@ export class ApexEngine {
     this.labelsEl = labelsEl;
     this.onReady = onReady;
     this.reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    this.systemReducedMotion = this.reducedMotion;
     primeClipEncoder();
 
     this.renderer = new THREE.WebGLRenderer({
@@ -423,7 +431,7 @@ export class ApexEngine {
       powerPreference: "high-performance",
       preserveDrawingBuffer: true,
     });
-    this.renderer.setPixelRatio(renderPixelRatio());
+    this.renderer.setPixelRatio(this.currentPixelRatio());
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
@@ -538,7 +546,7 @@ export class ApexEngine {
     this.scene.add(this.portalFlare);
 
     this.composer = new EffectComposer(this.renderer);
-    this.composer.setPixelRatio(renderPixelRatio());
+    this.composer.setPixelRatio(this.currentPixelRatio());
     this.composer.setSize(window.innerWidth, window.innerHeight);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.bloom = new UnrealBloomPass(
@@ -559,7 +567,7 @@ export class ApexEngine {
     window.addEventListener("pointermove", this.onPointer, { passive: true });
     window.addEventListener("resize", this.onResize);
     window.addEventListener("pointerdown", this.onDragStart);
-    window.addEventListener("pointermove", this.onDragMove, { passive: true });
+    window.addEventListener("pointermove", this.onDragMove, { passive: false });
     window.addEventListener("pointermove", this.onPointerLook, { passive: true });
     window.addEventListener("pointerout", this.onPointerOut);
     window.addEventListener("pointerup", this.onDragEnd);
@@ -926,7 +934,8 @@ export class ApexEngine {
       this.lastOrbitInput = performance.now();
       return;
     }
-    if (event.pointerType === "touch") return;
+    // Touch users can orbit the showroom with a swipe just like a mouse drag.
+    // Only capture gestures over the hero scene; other page swipes keep scrolling.
     if (!this.heroVisible() || !this.orbitTarget(event)) return;
     this.dragging = true;
     this.dragX = event.clientX;
@@ -939,6 +948,7 @@ export class ApexEngine {
 
   private onDragMove = (event: PointerEvent): void => {
     if (!this.dragging) return;
+    if (event.pointerType === "touch") event.preventDefault();
     const dx = event.clientX - this.dragX;
     const dy = event.clientY - this.dragY;
     this.dragX = event.clientX;
@@ -1063,13 +1073,49 @@ export class ApexEngine {
     const h = window.innerHeight;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
-    this.renderer.setPixelRatio(renderPixelRatio());
+    this.renderer.setPixelRatio(this.currentPixelRatio());
     this.renderer.setSize(w, h);
-    this.composer.setPixelRatio(renderPixelRatio());
+    this.composer.setPixelRatio(this.currentPixelRatio());
     this.composer.setSize(w, h);
     this.crt.uniforms.uRes.value.set(w, h);
-    this.aeroCar.setPointScale(renderPixelRatio());
-    this.aeroBike.setPointScale(renderPixelRatio());
+    this.aeroCar.setPointScale(this.currentPixelRatio());
+    this.aeroBike.setPointScale(this.currentPixelRatio());
+  }
+
+  private currentPixelRatio(): number {
+    return this.batterySaver || this.reducedMotion
+      ? powerSavePixelRatio()
+      : renderPixelRatio();
+  }
+
+  setBatterySaver(enabled: boolean): void {
+    if (this.powerSaveRequested === enabled) return;
+    this.powerSaveRequested = enabled;
+    this.batterySaver = enabled;
+    this.reducedMotion = enabled || this.systemReducedMotion;
+    const ratio = this.currentPixelRatio();
+    this.renderer.setPixelRatio(ratio);
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.composer.setPixelRatio(ratio);
+    this.composer.setSize(window.innerWidth, window.innerHeight);
+    this.aeroCar.setPointScale(ratio);
+    this.aeroBike.setPointScale(ratio);
+    this.bloom.enabled = !this.reducedMotion;
+    this.crt.enabled = !this.reducedMotion;
+  }
+
+  setReducedMotion(enabled: boolean): void {
+    this.systemReducedMotion = enabled;
+    this.reducedMotion = enabled || this.batterySaver;
+    this.bloom.enabled = !this.reducedMotion;
+    this.crt.enabled = !this.reducedMotion;
+    const ratio = this.currentPixelRatio();
+    this.renderer.setPixelRatio(ratio);
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.composer.setPixelRatio(ratio);
+    this.composer.setSize(window.innerWidth, window.innerHeight);
+    this.aeroCar.setPointScale(ratio);
+    this.aeroBike.setPointScale(ratio);
   }
 
   // Catmull-Rom over the keyframes keeps keyframe pacing while making camera
