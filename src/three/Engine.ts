@@ -286,6 +286,7 @@ export class ApexEngine {
   private reducedMotion: boolean;
   private batterySaver = false;
   private systemReducedMotion: boolean;
+  private lastPowerSaveFrame = 0;
   private disposed = false;
   private lastCameraPos = new THREE.Vector3();
   private basePos = new THREE.Vector3();
@@ -2389,6 +2390,9 @@ export class ApexEngine {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.tick);
     if (this.paused) return;
+    const frameNow = performance.now();
+    if (this.batterySaver && frameNow - this.lastPowerSaveFrame < 1000 / 30) return;
+    this.lastPowerSaveFrame = frameNow;
     const dt = Math.min(0.05, this.clock.getDelta());
     const adt = dt * this.timeScale;
     this.clockTime += adt;

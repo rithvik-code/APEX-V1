@@ -2,17 +2,19 @@ import { useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
 import { cyrus, useCyrus } from "../lib/cyrus";
 
 const isolate = (event: SyntheticEvent) => event.stopPropagation();
-const privacy = "Chat uses your configured AI model and this session's conversation. Web Speech may use your browser's speech service; Whisper runs on-device after download. Keep this page open.";
+const privacy = "Chat uses your configured AI model and recent conversation saved on this device. Clear it any time. Web Speech may use your browser's speech service; Whisper runs on-device after download.";
 
 export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
   const { phase, ear, heard, reply, status, brain, error, log } = useCyrus();
   const [expanded, setExpanded] = useState(mode === "garage");
   const [text, setText] = useState("");
+  const [search, setSearch] = useState("");
+  const [responsePrefs, setResponsePrefs] = useState(() => cyrus.getResponseSettings());
   const rootRef = useRef<HTMLElement>(null);
   const id = useId();
   const enabled = cyrus.on;
-  const visible = mode !== "page" || enabled || phase !== "off";
-  const showPanel = mode !== "page" && expanded;
+  const visible = true;
+  const showPanel = expanded;
   const active = phase !== "off";
   const output = phase === "thinking" || phase === "speaking";
   const lastHeard = heard || [...log].reverse().find((line) => line.who === "you")?.text;
@@ -177,11 +179,10 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
           </button>
         )}
-        {mode !== "page" && (
-          <button
+        <button
             type="button"
             className="cyrus-hud__expand"
-            aria-label={showPanel ? "Collapse CYRUS" : "Expand CYRUS"}
+            aria-label={showPanel ? "Collapse CYRUS" : "Open CYRUS conversation"}
             aria-expanded={showPanel}
             aria-controls={`${id}-panel`}
             onClick={() => setExpanded((value) => !value)}
@@ -189,12 +190,10 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
               <path d={showPanel ? "m6 9 6 6 6-6" : "m6 15 6-6 6 6"} />
             </svg>
-          </button>
-        )}
+        </button>
       </div>
       {error && <p className="cyrus-hud__error" role="alert" title={error}>{error}</p>}
-      {mode !== "page" && (
-        <div id={`${id}-panel`} className="cyrus-hud__panel" hidden={!showPanel}>
+      <div id={`${id}-panel`} className="cyrus-hud__panel" hidden={!showPanel}>
           <div className="cyrus-hud__channel">
             <span>{phase.toUpperCase()}</span>
             <span>{ear === "web-speech" ? "WEB SPEECH" : ear === "whisper" ? "WHISPER" : "NO SPEECH EAR"}</span>
@@ -210,6 +209,28 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
             </span>
             <span className="cyrus-hud__motion-note">Level animation paused · reduced motion</span>
           </div>
+          <details className="cyrus-hud__preferences">
+            <summary>VOICE & RESPONSE SETTINGS</summary>
+            <label>ANSWER DETAIL
+              <select value={responsePrefs.detail} onChange={(event) => {
+                const detail = event.target.value as typeof responsePrefs.detail;
+                const next = { ...responsePrefs, detail };
+                setResponsePrefs(next); cyrus.setResponseSettings({ detail });
+              }}>
+                <option value="brief">BRIEF</option><option value="balanced">BALANCED</option><option value="detailed">DETAILED</option>
+              </select>
+            </label>
+            <label>VOICE PACE <b>{responsePrefs.rate.toFixed(2)}×</b>
+              <input type="range" min="0.8" max="1.3" step="0.05" value={responsePrefs.rate} onChange={(event) => {
+                const rate = Number(event.target.value); setResponsePrefs((value) => ({ ...value, rate })); cyrus.setResponseSettings({ rate });
+              }} />
+            </label>
+            <label>VOICE PITCH <b>{responsePrefs.pitch.toFixed(2)}×</b>
+              <input type="range" min="0.8" max="1.35" step="0.05" value={responsePrefs.pitch} onChange={(event) => {
+                const pitch = Number(event.target.value); setResponsePrefs((value) => ({ ...value, pitch })); cyrus.setResponseSettings({ pitch });
+              }} />
+            </label>
+          </details>
           <div
             className="cyrus-hud__captions"
             role="region"
@@ -223,6 +244,24 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
             {!lastHeard && !lastReply && (
               <p className="cyrus-hud__empty">Ask about anything, talk through an idea, or give a garage command. Enable the mic to say “Hey Cyrus”.</p>
             )}
+          </div>
+          <div className="cyrus-hud__history-head">
+            <label className="cyrus-hud__sr" htmlFor={`${id}-search`}>Search recent CYRUS conversation</label>
+            <input id={`${id}-search`} type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search recent chat…" />
+            <button type="button" onClick={() => { cyrus.clearConversation(); setSearch(""); }} disabled={!log.length}>CLEAR</button>
+          </div>
+          {log.length > 0 && (
+            <div className="cyrus-hud__history" role="region" aria-label="Searchable recent conversation">
+              {log.filter((line) => !search.trim() || line.text.toLowerCase().includes(search.trim().toLowerCase())).map((line, index) => (
+                <p key={`${index}-${line.who}`}><b>{line.who === "you" ? "YOU" : "CYRUS"}</b><span>{line.text}</span></p>
+              ))}
+              {search.trim() && !log.some((line) => line.text.toLowerCase().includes(search.trim().toLowerCase())) && <p className="cyrus-hud__empty">NO MATCHES IN RECENT CHAT</p>}
+            </div>
+          )}
+          <div className="cyrus-hud__quick" role="group" aria-label="Quick CYRUS prompts">
+            <button type="button" onClick={() => cyrus.submit("What can you do in APEX?")}>WHAT CAN YOU DO?</button>
+            <button type="button" onClick={() => cyrus.submit("Explain this project to me")}>EXPLAIN APEX</button>
+            <button type="button" onClick={() => cyrus.submit("Open the garage")}>OPEN GARAGE</button>
           </div>
           <form
             className="cyrus-hud__form"
@@ -248,8 +287,7 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
             />
             <button type="submit" disabled={!text.trim()} aria-label="Send request to CYRUS">SEND</button>
           </form>
-        </div>
-      )}
+      </div>
       <p id={`${id}-privacy`} className={showPanel ? "cyrus-hud__privacy" : "cyrus-hud__sr"}>{privacy}</p>
     </aside>
   );

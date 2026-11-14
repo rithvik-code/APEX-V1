@@ -454,7 +454,7 @@ export function ModelMesh({ scene, onTune, onDrive, requestedNode, onNodeOpened,
         </div>
       </div>
 
-      <div className="mesh__index">
+      <div className="mesh__index" role="region" aria-label="AI assistant launch cards. On a phone, swipe sideways to explore." tabIndex={0}>
         {NODES.map((node) => (
           <button key={node.id} type="button" className="mesh-card" onClick={() => openNode(node)}>
             <span className="mesh-card__code">{node.code}</span>

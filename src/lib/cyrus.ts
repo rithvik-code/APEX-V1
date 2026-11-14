@@ -31,6 +31,34 @@ export type CyrusSnapshot = {
   log: CyrusLine[];
 };
 
+const CONVERSATION_KEY = "apex-cyrus-conversation-v1";
+export type CyrusResponseSettings = { rate: number; pitch: number; detail: "brief" | "balanced" | "detailed" };
+const RESPONSE_KEY = "apex-cyrus-response-v1";
+const DEFAULT_RESPONSE: CyrusResponseSettings = { rate: 1.08, pitch: 1.12, detail: "balanced" };
+
+function loadResponseSettings(): CyrusResponseSettings {
+  try {
+    const value = JSON.parse(localStorage.getItem(RESPONSE_KEY) || "null") as Partial<CyrusResponseSettings> | null;
+    return {
+      rate: typeof value?.rate === "number" ? Math.min(1.3, Math.max(.8, value.rate)) : DEFAULT_RESPONSE.rate,
+      pitch: typeof value?.pitch === "number" ? Math.min(1.35, Math.max(.8, value.pitch)) : DEFAULT_RESPONSE.pitch,
+      detail: value?.detail === "brief" || value?.detail === "detailed" ? value.detail : "balanced",
+    };
+  } catch { return { ...DEFAULT_RESPONSE }; }
+}
+
+function loadConversation(): CyrusLine[] {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(CONVERSATION_KEY) || "[]");
+    if (!Array.isArray(saved)) return [];
+    return saved.filter((line): line is CyrusLine =>
+      line && typeof line === "object" &&
+      ((line as CyrusLine).who === "you" || (line as CyrusLine).who === "cyrus") &&
+      typeof (line as CyrusLine).text === "string",
+    ).slice(-24);
+  } catch { return []; }
+}
+
 export type CyrusIntent =
   | { kind: "pet"; pet: "dog" | "cat" | "turtles" }
   | { kind: "drive"; vehicle: "car" | "bike" }
@@ -269,7 +297,7 @@ class Cyrus {
     status: "MIC OFF · TAP TO ENABLE",
     brain: "AI connects when you ask",
     error: null,
-    log: [],
+    log: loadConversation(),
   };
   private listeners = new Set<() => void>();
   private handler: CyrusHandler | null = null;
@@ -300,7 +328,11 @@ class Cyrus {
   private spoken = "";
   private speechEndAt = 0;
   private active: AbortController | null = null;
-  private history: ChatMessage[] = [];
+  private history: ChatMessage[] = loadConversation().map((line) => ({
+    role: line.who === "you" ? "user" : "assistant",
+    content: line.text,
+  }));
+  private responseSettings = loadResponseSettings();
   private model: { at: number; endpoint: string; requested: string; settings: AiSettings } | null = null;
 
   /* ---- store ---- */
@@ -311,6 +343,13 @@ class Cyrus {
   };
 
   snapshot = (): CyrusSnapshot => this.snap;
+
+  getResponseSettings = (): CyrusResponseSettings => ({ ...this.responseSettings });
+
+  setResponseSettings(patch: Partial<CyrusResponseSettings>): void {
+    this.responseSettings = { ...this.responseSettings, ...patch };
+    try { localStorage.setItem(RESPONSE_KEY, JSON.stringify(this.responseSettings)); } catch { /* preferences remain for this session */ }
+  }
 
   private set(patch: Partial<CyrusSnapshot>): void {
     this.snap = { ...this.snap, ...patch };
@@ -323,7 +362,15 @@ class Cyrus {
       this.history.shift();
     }
     if (this.history[0]?.role === "assistant") this.history.shift();
-    this.set({ log: [...this.snap.log, { who, text }].slice(-24) });
+    const log = [...this.snap.log, { who, text }].slice(-24);
+    this.set({ log });
+    try { localStorage.setItem(CONVERSATION_KEY, JSON.stringify(log)); } catch { /* private contexts may not persist */ }
+  }
+
+  clearConversation(): void {
+    this.history = [];
+    this.set({ log: [], heard: "", reply: "" });
+    try { localStorage.removeItem(CONVERSATION_KEY); } catch { /* live session still clears */ }
   }
 
   setHandler(handler: CyrusHandler | null): void {
@@ -812,8 +859,8 @@ class Cyrus {
       utterance.voice = voice;
       utterance.lang = voice.lang;
     }
-    utterance.rate = 1.08;
-    utterance.pitch = 1.12;
+    utterance.rate = this.responseSettings.rate;
+    utterance.pitch = this.responseSettings.pitch;
     utterance.volume = 1;
     this.pending += 1;
     this.utterances.add(utterance);
@@ -953,7 +1000,7 @@ class Cyrus {
         signal: controller.signal,
         grounding,
         knowledge: knowledgeContext(question, 4) || undefined,
-        systemPrompt: PERSONA,
+        systemPrompt: `${PERSONA}\n\nRESPONSE LENGTH PREFERENCE: ${this.responseSettings.detail === "brief" ? "Prefer concise, direct answers unless the user asks for detail." : this.responseSettings.detail === "detailed" ? "Give fuller explanations with useful context and steps when relevant." : "Use a natural, balanced level of detail based on the question."}`,
         temperature: grounding ? 0.25 : 0.6,
         numPredict: 420,
         numCtx: 4096,

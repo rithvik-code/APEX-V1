@@ -169,6 +169,15 @@ export default function App() {
   const [batterySaver, setBatterySaver] = useState(() => {
     try { return localStorage.getItem("apex-battery-saver") === "on"; } catch { return false; }
   });
+  const [highContrast, setHighContrast] = useState(() => {
+    try { return localStorage.getItem("apex-high-contrast") === "on"; } catch { return false; }
+  });
+  const [compareVehicles, setCompareVehicles] = useState(false);
+  const [showroomMode, setShowroomMode] = useState(false);
+  const [tourStep, setTourStep] = useState<number | null>(() => {
+    try { return localStorage.getItem("apex-first-run-tour") === "done" ? null : 0; } catch { return null; }
+  });
+  const tourDialogRef = useRef<HTMLElement>(null);
   const [blueprintOpen, setBlueprintOpen] = useState(false);
   const [requestedCrewNode, setRequestedCrewNode] = useState<string | null>(null);
   const [crewWorkbench, setCrewWorkbench] = useState(false);
@@ -849,6 +858,23 @@ export default function App() {
   }, [batterySaver]);
 
   useEffect(() => {
+    try { localStorage.setItem("apex-high-contrast", highContrast ? "on" : "off"); } catch { /* storage is optional */ }
+  }, [highContrast]);
+
+  useEffect(() => {
+    if (!showroomMode) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowroomMode(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showroomMode]);
+
+  useEffect(() => {
+    if (!booting && tourStep !== null) tourDialogRef.current?.focus();
+  }, [booting, tourStep]);
+
+  useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
     const syncMotionPreference = () => engineRef.current?.setReducedMotion(media.matches);
     syncMotionPreference();
@@ -1206,15 +1232,57 @@ export default function App() {
 
   return (
     <div
-      className={`site${booting ? "" : " is-ready"}${scene.aero ? " aero-on" : ""}${aeroAnimating ? " aero-entering" : ""}`}
+      className={`site${booting ? "" : " is-ready"}${scene.aero ? " aero-on" : ""}${aeroAnimating ? " aero-entering" : ""}${highContrast ? " is-high-contrast" : ""}${showroomMode ? " is-showroom" : ""}`}
     >
       <a className="skip-link" href="#main">
         SKIP TO CONTENT
       </a>
       {booting && <Preloader onDone={finishBoot} />}
+      {!booting && tourStep !== null && (
+        <div className="first-tour__backdrop">
+          <section className="first-tour" role="dialog" aria-modal="true" aria-labelledby="first-tour-title" tabIndex={-1} ref={tourDialogRef} onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              setTourStep(null);
+              try { localStorage.setItem("apex-first-run-tour", "done"); } catch { /* storage is optional */ }
+              return;
+            }
+            if (event.key === "Tab") {
+              const controls = event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)");
+              const first = controls[0];
+              const last = controls[controls.length - 1];
+              if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+              else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+            }
+          }}>
+            <div className="first-tour__top"><span>APEX / QUICK START</span><span>{String(tourStep + 1).padStart(2, "0")} — 03</span></div>
+            <div className="first-tour__mark" aria-hidden="true">{["◈", "◉", "✳"][tourStep]}</div>
+            <p className="micro">{["THE MACHINE", "YOUR CO-DRIVER", "THE CREW BAYS"][tourStep]}</p>
+            <h2 id="first-tour-title">{["Meet the machine.", "Talk to Cyrus.", "Launch a specialist."][tourStep]}</h2>
+            <p>{[
+              "Swipe across the hero vehicle to orbit it, compare the car and bike profiles, or open the clean showroom.",
+              "Cyrus lives in the Pit Wall and the compact HUD. Use the mic for voice or type a question to keep the conversation going.",
+              "The Grid and Crew sections open APEX’s specialist tools. Some connect to optional local services; each bay shows its connection state.",
+            ][tourStep]}</p>
+            <div className="first-tour__actions">
+              <button type="button" className="first-tour__skip" onClick={() => {
+                setTourStep(null);
+                try { localStorage.setItem("apex-first-run-tour", "done"); } catch { /* storage is optional */ }
+              }}>SKIP TOUR</button>
+              <button type="button" className="first-tour__next" onClick={() => {
+                if (tourStep >= 2) {
+                  setTourStep(null);
+                  try { localStorage.setItem("apex-first-run-tour", "done"); } catch { /* storage is optional */ }
+                } else setTourStep((step) => (step === null ? 0 : step + 1));
+              }}>{tourStep >= 2 ? "ENTER APEX ↗" : "NEXT ↗"}</button>
+            </div>
+            <div className="first-tour__progress" aria-hidden="true"><i style={{ width: `${((tourStep + 1) / 3) * 100}%` }} /></div>
+          </section>
+        </div>
+      )}
       <Cursor />
 
       <canvas ref={canvasRef} className="webgl" aria-hidden="true" />
+      {showroomMode && <button type="button" className="showroom-exit" onClick={() => setShowroomMode(false)}>EXIT SHOWROOM <span aria-hidden="true">×</span></button>}
       <div className="vignette" aria-hidden="true" />
       <div className="grain" aria-hidden="true" />
 
@@ -1277,6 +1345,15 @@ export default function App() {
         </button>
         <button
           type="button"
+          className={`contrast-mode${highContrast ? " is-on" : ""}`}
+          onClick={() => setHighContrast((value) => !value)}
+          aria-pressed={highContrast}
+          title="Increase text and interface contrast"
+        >
+          CONTRAST {highContrast ? "HIGH" : "STD"}
+        </button>
+        <button
+          type="button"
           className={`audio${audioOn ? " is-on" : ""}`}
           onClick={toggleAudio}
           aria-pressed={audioOn}
@@ -1309,6 +1386,21 @@ export default function App() {
         </ul>
         <span className="rail__hint">KEYS 0—{CHAPTERS.length - 1}</span>
       </aside>
+
+      <nav className="mobile-dock" aria-label="Quick navigation">
+        {[
+          { id: "top", label: "IGNITE", icon: "⌂" },
+          { id: "machine", label: "MACHINE", icon: "◈" },
+          { id: "pitwall", label: "PIT WALL", icon: "⌘" },
+          { id: "grid", label: "GRID", icon: "▦" },
+          { id: "crew", label: "CREW", icon: "✳" },
+        ].map((item) => (
+          <a key={item.id} href={`#${item.id}`} aria-current={active === item.id ? "location" : undefined}>
+            <span aria-hidden="true">{item.icon}</span>
+            <b>{item.label}</b>
+          </a>
+        ))}
+      </nav>
 
       <main id="main">
         <section className="hero" id="top">
@@ -1371,6 +1463,17 @@ export default function App() {
               >
                 ENTER THE GARAGE <span aria-hidden="true">↘</span>
               </button>
+              <button
+                type="button"
+                className="showroom-enter"
+                onClick={() => {
+                  setScene((prev) => ({ ...prev, focus: "car", camera: "hero", autoOrbit: false }));
+                  window.scrollTo({ top: 0, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+                  setShowroomMode(true);
+                }}
+              >
+                OPEN CLEAN SHOWROOM <span aria-hidden="true">↗</span>
+              </button>
               <div className="hero__revs" role="group" aria-label="Hold to rev the engines">
                 <button
                   type="button"
@@ -1405,19 +1508,46 @@ export default function App() {
               </span>
             </div>
 
-            <div className="hero__telemetry">
-              <div>
-                <span>0–100 TOKENS</span>
-                <b>0.14S</b>
+            <div className="vehicle-orbit" aria-label="Vehicle specification selector">
+              <div className={`vehicle-orbit__ring${batterySaver ? " is-static" : ""}`} aria-hidden="true">
+                <svg viewBox="0 0 160 160">
+                  <circle className="vehicle-orbit__track" cx="80" cy="80" r="69" />
+                  <circle className="vehicle-orbit__arc" cx="80" cy="80" r="69" />
+                  <circle className="vehicle-orbit__node" cx="80" cy="11" r="3" />
+                </svg>
+                <span>{scene.focus === "bike" ? "BIKE" : "CAR"}</span>
               </div>
-              <div>
-                <span>TOKEN CEILING</span>
-                <b>∞</b>
+              <div className="vehicle-orbit__data">
+                <div className="vehicle-orbit__switch" role="group" aria-label="Choose vehicle specifications">
+                  <button type="button" aria-pressed={scene.focus !== "bike"} onClick={() => updateScene({ focus: "car" })}>CAR</button>
+                  <button type="button" aria-pressed={scene.focus === "bike"} onClick={() => updateScene({ focus: "bike" })}>BIKE</button>
+                </div>
+                {scene.focus === "bike" ? <>
+                  <span>POWER / CONFIGURATION</span><b>210 HP · INLINE-4</b>
+                  <span>MASS / AERO</span><b>186 KG · 0.21 CD</b>
+                </> : <>
+                  <span>POWER UNIT</span><b>6.5L V12 BITURBO</b>
+                  <span>AERO / ACCELERATION</span><b>1,240 KG · 0.14 SEC*</b>
+                </>}
+                <small>*APEX SIMULATION PROFILE</small>
+                <button
+                  type="button"
+                  className="vehicle-orbit__compare-trigger"
+                  aria-expanded={compareVehicles}
+                  aria-controls="vehicle-comparison"
+                  onClick={() => setCompareVehicles((value) => !value)}
+                >
+                  {compareVehicles ? "CLOSE COMPARISON −" : "COMPARE CAR / BIKE +"}
+                </button>
               </div>
-              <div>
-                <span>METRICS</span>
-                <b>OFF</b>
-              </div>
+              {compareVehicles && (
+                <div className="vehicle-compare" id="vehicle-comparison">
+                  <div className="vehicle-compare__head"><span>SPEC</span><b>APEX CAR</b><b>APEX BIKE</b></div>
+                  <div><span>POWER</span><b>6.5L V12 BITURBO</b><b>210 HP INLINE-4</b></div>
+                  <div><span>PROFILE</span><b>1,240 KG DOWNFORCE</b><b>186 KG · 0.21 CD</b></div>
+                  <small>SIMULATION PROFILE VALUES</small>
+                </div>
+              )}
             </div>
 
             <button
