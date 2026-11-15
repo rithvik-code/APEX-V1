@@ -72,6 +72,8 @@ type TerminalProps = {
   onTune?: (patch: Partial<SceneConfig>) => void;
   career?: CareerState;
   onAward?: (event: CareerEvent) => void;
+  onPhoto?: () => void;
+  onGarageAction?: (id: string) => void;
 };
 
 // Matches an actionable computer task so a handoff is offered even when the
@@ -100,6 +102,7 @@ function splitControlTag(content: string): { text: string; goal: string | null }
 const COMMANDS = [
   ["/help", "show local commands"],
   ["/race <request>", "race engineer tunes the car live"],
+  ["/photo", "take a garage snapshot and download it as a PNG"],
   ["/vox [on|off]", "speak replies over the racing radio"],
   ["/web [on|off]", "toggle live web grounding"],
   ["/learn", "sync the local knowledge base now"],
@@ -330,6 +333,8 @@ export function Terminal({
   onTune,
   career,
   onAward,
+  onPhoto,
+  onGarageAction,
 }: TerminalProps) {
   const [settings, setSettings] = useState<AiSettings>(() => loadSettings());
   const [draft, setDraft] = useState<AiSettings>(() => loadSettings());
@@ -808,6 +813,14 @@ export function Terminal({
         );
         sound.tick("start");
         onDrive();
+        break;
+      case "/photo":
+        if (!onPhoto && !onGarageAction) {
+          addEntry("meta", "PHOTO MODE NOT WIRED IN THIS VIEW.");
+          break;
+        }
+        addEntry("meta", "CAPTURING BAY 01 → APEX-GARAGE-<DATE>.PNG.");
+        (onPhoto ?? onGarageAction)?.("photo");
         break;
       case "/settings":
         openSettings();

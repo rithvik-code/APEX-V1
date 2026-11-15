@@ -1825,6 +1825,8 @@ export default function App() {
               onTune={tuneScene}
               career={career}
               onAward={award}
+              onPhoto={garageCapture}
+              onGarageAction={runGarageAction}
             />
           </div>
         </section>
