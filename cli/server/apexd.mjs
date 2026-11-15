@@ -597,6 +597,52 @@ async function route(req, res) {
     return;
   }
 
+  if (req.method === "POST" && routePath === "/api/kill") {
+    // The kill switch is an emergency gate: always require the pairing token,
+    // even from loopback. A local console that can reach the daemon can already
+    // hold it, and a stray request should never trip this path.
+    const supplied = String(
+      req.headers["x-apex-token"] || url.searchParams.get("token") || "",
+    );
+    if (TOKEN && (supplied.length !== TOKEN.length || !crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(TOKEN)))) {
+      json(res, 401, { error: "Unauthorized" });
+      return;
+    }
+    const at = new Date().toISOString();
+    try {
+      if (session && activeLike(session.publicState())) {
+        session.stop("Kill switch triggered");
+      }
+    } catch {
+      // Best effort.
+    }
+    stopLiveFeed();
+    releaseLive();
+    for (const client of clients) {
+      try {
+        client.end();
+      } catch {
+        // Already gone.
+      }
+    }
+    clients.clear();
+    for (const res of screenSubs) {
+      try {
+        res.end();
+      } catch {
+        // Already gone.
+      }
+    }
+    screenSubs.clear();
+    killAllPowerShell();
+    stopCommands();
+    stopBrowser();
+    json(res, 202, { killed: true, at });
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 1500).unref();
+    return;
+  }
+
   if (req.method === "POST" && routePath === "/api/control/pause") {
     json(res, 200, requireSession().pause());
     return;

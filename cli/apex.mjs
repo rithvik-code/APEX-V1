@@ -129,6 +129,7 @@ function usage() {
   console.log(`  ${acid("apex mcp")}                     expose desktop tools over MCP (stdio)`);
   console.log(`  ${acid("apex control")}                  desktop control daemon`);
   console.log(`  ${acid("apex control status")}           daemon + live session state`);
+  console.log(`  ${acid("apex kill")}                     kill switch: terminate the control daemon`);
   console.log(`  ${acid("apex control --readonly")}       daemon, screen + accessibility only`);
   console.log(`  ${dim("npm run apexd -- --lan")}          phone remote at /m (token printed)`);
   console.log(`  ${acid('cat file | apex "explain"')}     pipe context in`);
@@ -2275,6 +2276,50 @@ async function runCyrusCli(argv) {
   console.log("");
 }
 
+async function cmdKill(args) {
+  header();
+  const daemon = fileURLToPath(new URL("./server/apexd.mjs", import.meta.url));
+  if (!fs.existsSync(daemon)) {
+    console.error(red(`  control daemon missing at ${daemon}`));
+    process.exitCode = 1;
+    return undefined;
+  }
+  const endpoint = controlBase();
+  header();
+  console.log(`  ${acid("KILL")} ${dim("→")} ${white(endpoint)}`);
+  console.log(faint("  terminate the control daemon, its live feed, screen stream and any running session"));
+  console.log("");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  const token = process.env.APEX_CONTROL_TOKEN;
+  try {
+    const res = await fetch(`${endpoint}/api/kill`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { "x-apex-token": token } : {}),
+      },
+      body: JSON.stringify({}),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    const body = res.ok ? await res.json() : {};
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => "")).slice(0, 200);
+      console.error(red(`  HTTP ${res.status}${detail ? `: ${detail}` : ""}`));
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`  ${white("killed")} ${faint(`at ${body.at ?? "…"}`)}`);
+    console.log(faint("  daemon exited."));
+  } catch (error) {
+    clearTimeout(timer);
+    console.error(red(`  ${error.message}`));
+    process.exitCode = 1;
+    return;
+  }
+}
+
 async function main() {
   let argv = process.argv.slice(2);
   state.autoApprove = process.env.APEX_YES === "1";
@@ -2344,6 +2389,11 @@ async function main() {
 
   if (argv[0] === "control") {
     await cmdControl(argv.slice(1));
+    return;
+  }
+
+  if (argv[0] === "kill") {
+    await cmdKill(argv.slice(1));
     return;
   }
 
