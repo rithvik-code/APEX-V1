@@ -37,6 +37,7 @@ export type GarageStage = {
   dispose: () => void;
   setRev: (rpm: number, kick: number) => void;
   setWeather: (wet: boolean, night: boolean) => void;
+  setAging: (tier: "none" | "wear" | "soot" | "veteran") => void;
   setLift: (raised: number) => void;
   setTrophies: (count: number) => void;
   setActiveHotspot: (id: string | null) => void;
@@ -520,10 +521,37 @@ export function createGarage(): GarageStage {
   /* Room shell                                                          */
   /* ------------------------------------------------------------------ */
 
+  const bayAgingBucket: { meshes: THREE.Mesh[] } = { meshes: [] };
+  let bayAging: "none" | "wear" | "soot" | "veteran" = "none";
+
+  function setAging(tier: "none" | "wear" | "soot" | "veteran") {
+    if (tier === bayAging) return;
+    for (const mesh of bayAgingBucket.meshes) {
+      if (mesh.material) {
+        if (Array.isArray(mesh.material)) {
+          for (const mat of mesh.material) {
+            if (mat && mat.dispose) mat.dispose();
+          }
+        } else {
+          mesh.material.dispose();
+        }
+      }
+      const m = tier === "none" ? rubber.clone() : new THREE.MeshStandardMaterial({
+        color: tier === "wear" ? 0x2a2a2a : tier === "soot" ? 0x0a0a0a : 0x3a2a14,
+        roughness: tier === "veteran" ? 1 : 0.95,
+        metalness: tier === "veteran" ? 0.25 : 0,
+        envMapIntensity: tier === "veteran" ? 0.4 : 0,
+      });
+      (mesh as unknown as { material: THREE.Material }).material = m;
+    }
+    bayAging = tier;
+  }
+
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(16, 18), concrete);
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(0, 0, 0);
   root.add(floor);
+  bayAgingBucket.meshes.push(floor);
 
   // Bay marking under the lift.
   const bayLine = new THREE.MeshBasicMaterial({
@@ -543,6 +571,7 @@ export function createGarage(): GarageStage {
   bayDash.rotation.x = -Math.PI / 2;
   bayDash.position.set(0, 0.012, 3.05);
   root.add(bayDash);
+  bayAgingBucket.meshes.push(bayDash);
 
   // Walls.
   box(0.3, 4.6, 18, wall, -7.85, 2.3, 0);
@@ -1660,6 +1689,7 @@ export function createGarage(): GarageStage {
     mesh.rotation.x = Math.PI / 2;
     mesh.position.set(x, y, z);
     root.add(mesh);
+    bayAgingBucket.meshes.push(mesh);
     cylinder(0.24, 0.1, steel, x, y, z, root, 20);
   };
   for (let i = 0; i < 4; i++) tyre(6.7, 0.16 + i * 0.27, 1.2);
@@ -2807,6 +2837,7 @@ export function createGarage(): GarageStage {
     update,
     setRev,
     setWeather,
+    setAging,
     setLift,
     setTrophies,
     setActiveHotspot,

@@ -844,6 +844,7 @@ export default function App() {
       engine.setCareer(
         unlockSet(careerRef.current),
         currentLicence(careerRef.current.cp).name,
+        careerRef.current.distanceM,
       );
       engine.setDriveLapListener((lap) => {
         award({
@@ -915,6 +916,7 @@ export default function App() {
     engineRef.current?.setCareer(
       unlockSet(career),
       currentLicence(career.cp).name,
+      career.distanceM,
     );
     engineRef.current?.setGarageTrophies(trophyCount);
   }, [career, trophyCount]);

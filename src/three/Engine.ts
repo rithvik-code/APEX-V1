@@ -366,6 +366,8 @@ export class ApexEngine {
   private driveForward = new THREE.Vector3();
   private careerUnlocks: ReadonlySet<string> = new Set();
   private careerLicence = "ROOKIE";
+  private careerDistanceM = 0;
+  private agingTier: "none" | "wear" | "soot" | "veteran" = "none";
   private careerBadgeLabel = "";
   private onDriveLap: ((lap: DriveLapEvent) => void) | null = null;
 
@@ -1283,9 +1285,17 @@ export class ApexEngine {
 
   /* ---- Constructor Series cosmetic unlocks -------------------------------- */
 
-  setCareer(unlocks: ReadonlySet<string>, licence: string): void {
+  setCareer(unlocks: ReadonlySet<string>, licence: string, distanceM = 0): void {
     this.careerUnlocks = new Set(unlocks);
     this.careerLicence = licence;
+    this.careerDistanceM = distanceM;
+    this.agingTier = this.careerDistanceM >= 150
+      ? "veteran"
+      : distanceM >= 80
+        ? "soot"
+        : distanceM >= 30
+          ? "wear"
+          : "none";
     this.applyCareerVisuals();
     this.drive?.setGhostTrail(unlocks.has("ghostTrail"));
   }
@@ -1662,6 +1672,10 @@ export class ApexEngine {
     this.garageStage?.setWeather(wet, night);
   }
 
+  setGarageAging(tier: "none" | "wear" | "soot" | "veteran"): void {
+    this.garageStage?.setAging(tier);
+  }
+
   setGarageTrophies(count: number): void {
     this.garageStage?.setTrophies(count);
   }
@@ -1763,6 +1777,8 @@ export class ApexEngine {
     stage.group.visible = true;
     stage.setDoor(0);
     stage.setLights(0);
+    stage.setAging(this.agingTier);
+    this.setGarageAging(this.agingTier);
     this.loadGarageState();
     stage.setLift(0);
     this.garageLift = 0;
