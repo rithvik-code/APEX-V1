@@ -1,5 +1,5 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
-import type { DriveHudState, DriveTouch, DriveVehicle } from "../three/drive";
+import type { AssistCallout, DriveHudState, DriveTouch, DriveVehicle } from "../three/drive";
 import type { DriveSetup } from "../lib/driveStore";
 import { formatDelta, formatLap } from "../lib/driveStore";
 
@@ -22,6 +22,7 @@ type DriveHUDProps = {
   onSetup: (patch: Partial<DriveSetup>) => void;
   onGhost: (enabled: boolean) => void;
   onAssist: (enabled: boolean) => void;
+  onCallout: (callout: AssistCallout | null) => void;
   onTouch: (touch: DriveTouch) => void;
 };
 
@@ -137,8 +138,20 @@ export function DriveHUD({
   onSetup,
   onGhost,
   onAssist,
+  onCallout,
   onTouch,
 }: DriveHUDProps) {
+  const prevCallout = useRef<AssistCallout | null>(null);
+
+  useEffect(() => {
+    const next = state.assist.on ? state.assist.next : null;
+    if (next && next !== prevCallout.current) {
+      onCallout(next);
+    } else if (!next) {
+      onCallout(null);
+    }
+    prevCallout.current = next;
+  }, [state.assist.on, state.assist.next, onCallout]);
   const countdownNumber = Math.max(0, Math.ceil(state.countdown));
   const showCountdown = state.phase === "countdown";
   const speed = Math.round(state.speedKmh);

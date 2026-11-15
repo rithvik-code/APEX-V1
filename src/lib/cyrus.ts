@@ -133,6 +133,7 @@ export type CyrusIntent =
   | { kind: "drive"; vehicle: "car" | "bike" }
   | { kind: "garage" }
   | { kind: "scroll"; direction: "next" | "previous" | "top"; section?: string }
+  | { kind: "assistCallout"; label: string; active: boolean; distM: number; dir: "L" | "R" | null; kmh: number | null }
   | { kind: "exit" }
   | { kind: "door"; open: boolean | null }
   | { kind: "lift"; up: boolean | null }
@@ -499,6 +500,10 @@ class Cyrus {
 
   setHandler(handler: CyrusHandler | null): void {
     this.handler = handler;
+  }
+
+  speak(text: string): void {
+    this.say(text, false);
   }
 
   /** The user's standing choice; CYRUS starts itself on garage entry unless switched off. */

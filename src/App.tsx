@@ -21,7 +21,7 @@ import { AeroDock, AeroLaunch, type DockBridge, type DockStatus } from "./compon
 import { DriveHUD, type TrackOutline } from "./components/DriveHUD";
 import { Garage } from "./components/Garage";
 import { CyrusHUD } from "./components/CyrusHUD";
-import type { DriveHudState, DriveVehicle } from "./three/drive";
+import type { AssistCallout, DriveHudState, DriveVehicle } from "./three/drive";
 import { DEFAULT_DRIVE_SETUP, loadBoard, type DriveSetup } from "./lib/driveStore";
 import { cyrus } from "./lib/cyrus";
 import {
@@ -596,6 +596,33 @@ export default function App() {
     setDriveHud(engineRef.current?.getDriveState() ?? null);
     sound.tick("click");
   }, []);
+
+  const calloutCooldownUntil = useRef(0);
+  const handleAssistCallout = useCallback(
+    (callout: AssistCallout | null) => {
+      if (!callout) {
+        calloutCooldownUntil.current = 0;
+        return;
+      }
+      const now = performance.now();
+      if (now < calloutCooldownUntil.current) return;
+      calloutCooldownUntil.current = now + 6000;
+      if (callout.active) {
+        cyrus.speak(
+          callout.dir === "L"
+            ? `Left ${callout.label}, ${Math.round(callout.kmh ?? 0)} kilometres per hour.`
+            : callout.dir === "R"
+              ? `Right ${callout.label}, ${Math.round(callout.kmh ?? 0)} kilometres per hour.`
+              : callout.kind === "boost"
+                ? `Boost ahead, ${Math.round(callout.kmh ?? 0)} kilometres per hour.`
+                : `${callout.label}, ${Math.round(callout.kmh ?? 0)} kilometres per hour.`,
+        );
+      } else {
+        cyrus.speak("Clear track.");
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     cyrus.setHandler((intent) => {
@@ -2162,6 +2189,7 @@ export default function App() {
           onSetup={updateDriveSetup}
           onGhost={toggleDriveGhost}
           onAssist={toggleDriveAssist}
+          onCallout={handleAssistCallout}
           onTouch={(touch) => engineRef.current?.setDriveTouch(touch)}
         />
       )}
