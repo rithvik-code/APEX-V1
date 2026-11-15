@@ -40,9 +40,68 @@ function loadPersonalMemory(): string[] {
     return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").map((item) => item.trim().slice(0, 240)).filter(Boolean).slice(0, MEMORY_LIMIT) : [];
   } catch { return []; }
 }
-export type CyrusResponseSettings = { rate: number; pitch: number; detail: "brief" | "balanced" | "detailed"; voice: string };
+export type CyrusPersonaId = "engineer" | "instructor" | "minimal";
+
+export type CyrusResponseSettings = {
+  rate: number;
+  pitch: number;
+  detail: "brief" | "balanced" | "detailed";
+  voice: string;
+  persona: CyrusPersonaId;
+};
 const RESPONSE_KEY = "apex-cyrus-response-v1";
-const DEFAULT_RESPONSE: CyrusResponseSettings = { rate: 1.08, pitch: 1.12, detail: "balanced", voice: "" };
+const DEFAULT_RESPONSE: CyrusResponseSettings = {
+  rate: 1.08,
+  pitch: 1.12,
+  detail: "balanced",
+  voice: "",
+  persona: "engineer",
+};
+
+export type CyrusPersona = {
+  id: CyrusPersonaId;
+  label: string;
+  blurb: string;
+  tone: string;
+  rate: number;
+  pitch: number;
+  detail: "brief" | "balanced" | "detailed";
+};
+
+/** One selection changes both how Cyrus sounds and how he answers. */
+export const CYRUS_PERSONAS: readonly CyrusPersona[] = [
+  {
+    id: "engineer",
+    label: "RACE ENGINEER",
+    blurb: "Trackside radio: warm, quick, low ceremony.",
+    tone: "Speak like a race engineer on the radio: warm, quick and precise. Lead with the answer, keep it under three sentences unless asked to expand, and use trackside shorthand only when it stays clear.",
+    rate: 1.12,
+    pitch: 1.14,
+    detail: "brief",
+  },
+  {
+    id: "instructor",
+    label: "DRY INSTRUCTOR",
+    blurb: "Calm, methodical, exact.",
+    tone: "Speak like a dry driving instructor: calm, methodical and exact. Explain the reasoning in order, name the trade-off, and never oversell.",
+    rate: 1.0,
+    pitch: 1.02,
+    detail: "balanced",
+  },
+  {
+    id: "minimal",
+    label: "MINIMALIST",
+    blurb: "The fewest words that still answer.",
+    tone: "Answer with the fewest words that still resolve the question. No preamble, no restating, and no closing offer of help.",
+    rate: 1.06,
+    pitch: 1.06,
+    detail: "brief",
+  },
+];
+
+export function personaById(id: string | null | undefined): CyrusPersona {
+  return CYRUS_PERSONAS.find((persona) => persona.id === id) ?? CYRUS_PERSONAS[0];
+}
 
 function loadResponseSettings(): CyrusResponseSettings {
   try {
@@ -52,6 +111,7 @@ function loadResponseSettings(): CyrusResponseSettings {
       pitch: typeof value?.pitch === "number" ? Math.min(1.35, Math.max(.8, value.pitch)) : DEFAULT_RESPONSE.pitch,
       detail: value?.detail === "brief" || value?.detail === "detailed" ? value.detail : "balanced",
       voice: typeof value?.voice === "string" ? value.voice : "",
+      persona: value?.persona === "instructor" || value?.persona === "minimal" ? value.persona : "engineer",
     };
   } catch { return { ...DEFAULT_RESPONSE }; }
 }
@@ -371,6 +431,18 @@ class Cyrus {
   setResponseSettings(patch: Partial<CyrusResponseSettings>): void {
     this.responseSettings = { ...this.responseSettings, ...patch };
     try { localStorage.setItem(RESPONSE_KEY, JSON.stringify(this.responseSettings)); } catch { /* preferences remain for this session */ }
+  }
+
+  /** Apply a persona's tone, pace and pitch together; the voice itself is kept. */
+  applyPersona(id: string): CyrusResponseSettings {
+    const persona = personaById(id);
+    this.setResponseSettings({
+      persona: persona.id,
+      rate: persona.rate,
+      pitch: persona.pitch,
+      detail: persona.detail,
+    });
+    return { ...this.responseSettings };
   }
 
   getPersonalMemory = (): string[] => [...this.personalMemory];
@@ -1068,7 +1140,7 @@ class Cyrus {
         signal: controller.signal,
         grounding,
         knowledge: knowledgeContext(question, 4) || undefined,
-        systemPrompt: `${PERSONA}\n\nCURRENT APEX SCREEN: ${this.pageContext}. If the user says “this”, “here”, or “what am I looking at?”, use this screen context. Do not pretend to see pixels or controls beyond this named section.\n\nRESPONSE LENGTH PREFERENCE: ${this.responseSettings.detail === "brief" ? "Prefer concise, direct answers unless the user asks for detail." : this.responseSettings.detail === "detailed" ? "Give fuller explanations with useful context and steps when relevant." : "Use a natural, balanced level of detail based on the question."}${this.personalMemory.length ? `\n\nUSER-APPROVED PERSONAL NOTES (stored on this device; use only when relevant):\n${this.personalMemory.map((item) => `- ${item}`).join("\n")}` : ""}`,
+        systemPrompt: `${PERSONA}\n\nACTIVE PERSONA — ${personaById(this.responseSettings.persona).tone}\n\nCURRENT APEX SCREEN: ${this.pageContext}. If the user says “this”, “here”, or “what am I looking at?”, use this screen context. Do not pretend to see pixels or controls beyond this named section.\n\nRESPONSE LENGTH PREFERENCE: ${this.responseSettings.detail === "brief" ? "Prefer concise, direct answers unless the user asks for detail." : this.responseSettings.detail === "detailed" ? "Give fuller explanations with useful context and steps when relevant." : "Use a natural, balanced level of detail based on the question."}${this.personalMemory.length ? `\n\nUSER-APPROVED PERSONAL NOTES (stored on this device; use only when relevant):\n${this.personalMemory.map((item) => `- ${item}`).join("\n")}` : ""}`,
         temperature: grounding ? 0.25 : 0.6,
         numPredict: 420,
         numCtx: 4096,

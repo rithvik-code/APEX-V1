@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
-import { cyrus, useCyrus } from "../lib/cyrus";
+import { CYRUS_PERSONAS, cyrus, personaById, useCyrus } from "../lib/cyrus";
 
 const isolate = (event: SyntheticEvent) => event.stopPropagation();
 const privacy = "Chat uses your configured AI model and recent conversation saved on this device. Clear it any time. Web Speech may use your browser's speech service; Whisper runs on-device after download.";
@@ -222,6 +222,16 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
           </div>
           <details className="cyrus-hud__preferences">
             <summary>VOICE & RESPONSE SETTINGS</summary>
+            <label>PERSONA
+              <select value={responsePrefs.persona} onChange={(event) => {
+                setResponsePrefs(cyrus.applyPersona(event.target.value));
+              }}>
+                {CYRUS_PERSONAS.map((persona) => (
+                  <option key={persona.id} value={persona.id}>{persona.label}</option>
+                ))}
+              </select>
+              <small>{personaById(responsePrefs.persona).blurb}</small>
+            </label>
             <label>INSTALLED VOICE
               <select value={responsePrefs.voice} onChange={(event) => {
                 const voice = event.target.value;
