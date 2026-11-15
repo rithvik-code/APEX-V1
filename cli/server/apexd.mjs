@@ -350,6 +350,17 @@ async function route(req, res) {
     return;
   }
 
+  if (req.method === "GET" && routePath === "/api/bench") {
+    let models = {};
+    try {
+      models = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".apex", "bench.json"), "utf8"));
+    } catch {
+      models = {};
+    }
+    json(res, 200, { models });
+    return;
+  }
+
   if (req.method === "GET" && routePath === "/api/cyrus") {
     json(res, 200, { ok: true, commands: CYRUS_HELP });
     return;

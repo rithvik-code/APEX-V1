@@ -138,6 +138,54 @@ export async function warmModel(
 
 // Higher is better. Favours modern general-purpose chat models in the 4–9B
 // sweet spot: accurate enough to trust, small enough to stream fast.
+type BenchEntry = { tps?: number; ttftMs?: number; memMB?: number | null };
+
+function readStoredBench(): Record<string, BenchEntry> {
+  try {
+    if (typeof window === "undefined") return {};
+    const raw = window.localStorage.getItem("apex.bench");
+    return raw ? (JSON.parse(raw) as Record<string, BenchEntry>) : {};
+  } catch {
+    return {};
+  }
+}
+
+let benchScores: Record<string, BenchEntry> = readStoredBench();
+
+/** Store real measurements so the picker stops ranking models by name alone. */
+export function applyBenchScores(data: unknown): void {
+  if (!data || typeof data !== "object") return;
+  const clean: Record<string, BenchEntry> = {};
+  for (const [name, value] of Object.entries(data as Record<string, unknown>)) {
+    const entry = value as BenchEntry;
+    if (!entry || typeof entry !== "object") continue;
+    clean[name] = {
+      tps: typeof entry.tps === "number" ? entry.tps : undefined,
+      ttftMs: typeof entry.ttftMs === "number" ? entry.ttftMs : undefined,
+      memMB: typeof entry.memMB === "number" ? entry.memMB : null,
+    };
+  }
+  benchScores = clean;
+  try {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("apex.bench", JSON.stringify(clean));
+    }
+  } catch {
+    // Private mode: keep the in-memory copy for this session.
+  }
+}
+
+/** Pull the CLI's benchmark file through the control daemon, when it is up. */
+export async function loadBenchScores(): Promise<void> {
+  try {
+    const res = await fetch("/api/bench");
+    if (!res.ok) return;
+    applyBenchScores(((await res.json()) as { models?: unknown }).models);
+  } catch {
+    // No daemon: the stored measurements still apply.
+  }
+}
+
 export function scoreModel(name: string): number {
   const n = name.toLowerCase();
   if (/embed|rerank|bge|nomic|minilm|clip|whisper|tts/.test(n)) return -100;
@@ -171,6 +219,13 @@ export function scoreModel(name: string): number {
 
   if (/vl|vision/.test(n)) score -= 5;
   if (/coder|code/.test(n)) score -= 2;
+
+  const measured = benchScores[name] ?? benchScores[n];
+  if (measured) {
+    if (typeof measured.tps === "number" && measured.tps > 0) score += Math.min(24, measured.tps * 1.2);
+    if (typeof measured.ttftMs === "number" && measured.ttftMs > 0) score -= Math.min(12, measured.ttftMs / 400);
+    if (typeof measured.memMB === "number" && measured.memMB > 6000) score -= 4;
+  }
   return score;
 }
 

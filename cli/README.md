@@ -92,6 +92,22 @@ agent can use the same gated executor. Tools: `desktop_command`, `desktop_state`
 {"mcpServers":{"apex":{"command":"node","args":["cli/mcp.mjs"]}}}
 ```
 
+## Benchmarking models
+
+`scoreModel()` ranks by name and parameter count. `apex bench` replaces that guess
+with measurements from your own machine:
+
+```bash
+apex bench                 # every installed model
+apex bench qwen2.5:3b      # just one
+apex bench --apply         # make the fastest measured model the default
+```
+
+Each run records first-token latency, tokens/sec, load time and resident memory to
+`~/.apex/bench.json`. The web console fetches it from the daemon (`/api/bench`) and
+weights the picker by measured throughput and latency, so a fast 3B can outrank a
+slow 8B when that is what your hardware actually does.
+
 ## Run checkpoints
 
 Every `apex do` run writes a checkpoint to `~/.apex/runs/` after each step, so a

@@ -8,8 +8,12 @@ import "@fontsource/ibm-plex-mono/500.css";
 import "./styles.css";
 import "./styles.control.css";
 import App from "./App";
+import { loadBenchScores } from "./lib/ai";
 
 createRoot(document.getElementById("root")!).render(<App />);
+
+// Real benchmark numbers, when the control daemon has them.
+void loadBenchScores();
 
 // The offline shell is a production nicety: it never runs in dev and never
 // blocks startup if the browser refuses service workers.

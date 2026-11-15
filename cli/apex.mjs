@@ -20,6 +20,7 @@ const CONFIG_DIR = path.join(os.homedir(), ".apex");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
 const SHADOW_DIR = path.join(CONFIG_DIR, "shadow");
 const RUNS_DIR = path.join(CONFIG_DIR, "runs");
+const BENCH_PATH = path.join(CONFIG_DIR, "bench.json");
 const LOG_PATH = path.join(CONFIG_DIR, "actions.log");
 
 const TIERS = ["read", "project", "machine"];
@@ -132,6 +133,7 @@ function usage() {
   console.log(`  ${dim("npm run apexd -- --lan")}          phone remote at /m (token printed)`);
   console.log(`  ${acid('cat file | apex "explain"')}     pipe context in`);
   console.log(`  ${acid("apex models")}                   list local models`);
+  console.log(`  ${acid("apex bench")}                    measure ttft, tok/s and memory per model`);
   console.log(`  ${acid("apex undo")}                     roll back the last agent run`);
   console.log(`  ${acid("apex runs")}                     list saved agent runs`);
   console.log(`  ${acid("apex resume <id>")}              continue a run from its checkpoint`);
@@ -181,6 +183,141 @@ async function listModels() {
     console.error(dim("Start Ollama with `ollama serve`, then try again."));
     return [];
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* MODEL BENCHMARK                                                             */
+/* -------------------------------------------------------------------------- */
+
+async function benchModel(model) {
+  const started = Date.now();
+  let firstToken = 0;
+  let text = "";
+  let final = null;
+
+  const res = await fetch(`${endpointBase()}/api/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model,
+      prompt: "Reply with the single word READY.",
+      stream: true,
+      options: { num_predict: 24, temperature: 0 },
+    }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let chunk;
+      try {
+        chunk = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!firstToken && (chunk.response || chunk.message?.content)) {
+        firstToken = Date.now() - started;
+      }
+      if (chunk.response) text += chunk.response;
+      if (chunk.done) final = chunk;
+    }
+  }
+
+  const evalCount = Number(final?.eval_count) || 0;
+  const evalNs = Number(final?.eval_duration) || 0;
+  const tps = evalNs > 0 ? evalCount / (evalNs / 1e9) : 0;
+  const loadMs = Math.round((Number(final?.load_duration) || 0) / 1e6);
+
+  return {
+    ttftMs: firstToken || Date.now() - started,
+    tps: Math.round(tps * 10) / 10,
+    loadMs,
+    tokens: evalCount,
+    sample: text.trim().slice(0, 40),
+    at: Date.now(),
+  };
+}
+
+async function residentMemory(model) {
+  try {
+    const res = await fetch(`${endpointBase()}/api/ps`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const hit = (data.models || []).find((entry) => entry.name === model || entry.model === model);
+    return hit ? Math.round((Number(hit.size) || 0) / 1048576) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readBench() {
+  try {
+    return JSON.parse(fs.readFileSync(BENCH_PATH, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+async function cmdBench(args) {
+  const apply = args.includes("--apply");
+  const wanted = args.filter((arg) => !arg.startsWith("--"));
+  const models = wanted.length ? wanted : await listModels();
+  if (!models.length) return;
+
+  console.log("");
+  console.log(`  ${dim("benchmark")} ${white(`${models.length} model(s)`)} ${faint("· real generations on your hardware")}`);
+  console.log(faint("  " + "─".repeat(64)));
+
+  const bench = readBench();
+  for (const model of models) {
+    process.stdout.write(`  ${white(model.padEnd(28).slice(0, 28))} `);
+    try {
+      const result = await benchModel(model);
+      result.memMB = await residentMemory(model);
+      bench[model] = result;
+      console.log(
+        `${dim("ttft")} ${String(result.ttftMs).padStart(5)}ms  ` +
+          `${dim("tok/s")} ${String(result.tps).padStart(5)}  ` +
+          `${dim("load")} ${String(result.loadMs).padStart(5)}ms` +
+          (result.memMB ? `  ${dim("mem")} ${result.memMB}MB` : ""),
+      );
+    } catch (error) {
+      console.log(red(`failed — ${error.message}`));
+    }
+  }
+
+  try {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(BENCH_PATH, `${JSON.stringify(bench, null, 2)}\n`);
+  } catch {
+    console.log(red(`  could not write ${BENCH_PATH}`));
+  }
+
+  console.log(faint(`  saved ${BENCH_PATH}`));
+  console.log(faint("  scoreModel() now weights measured tok/s and first-token latency."));
+
+  if (apply) {
+    const score = (entry) => (entry.tps || 0) * 2 - (entry.ttftMs || 0) / 500;
+    const best = Object.entries(bench)
+      .filter(([name]) => models.includes(name))
+      .sort((a, b) => score(b[1]) - score(a[1]))[0];
+    if (best) {
+      config.model = best[0];
+      saveConfig(config);
+      console.log(`\n  ${acid("›")} active model ${white(best[0])} ${dim("(fastest measured)")}`);
+    }
+  }
+  console.log("");
 }
 
 function printModels(models) {
@@ -2017,6 +2154,11 @@ async function main() {
   if (argv[0] === "models") {
     const models = await listModels();
     printModels(models);
+    return;
+  }
+
+  if (argv[0] === "bench") {
+    await cmdBench(argv.slice(1));
     return;
   }
 
