@@ -1289,11 +1289,11 @@ export class ApexEngine {
     this.careerUnlocks = new Set(unlocks);
     this.careerLicence = licence;
     this.careerDistanceM = distanceM;
-    this.agingTier = this.careerDistanceM >= 150
+    this.agingTier = this.careerDistanceM >= 15000
       ? "veteran"
-      : distanceM >= 80
+      : distanceM >= 5000
         ? "soot"
-        : distanceM >= 30
+        : distanceM >= 1000
           ? "wear"
           : "none";
     this.applyCareerVisuals();
