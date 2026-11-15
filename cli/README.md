@@ -108,6 +108,19 @@ Each run records first-token latency, tokens/sec, load time and resident memory 
 weights the picker by measured throughput and latency, so a fast 3B can outrank a
 slow 8B when that is what your hardware actually does.
 
+## Watching for changes
+
+```bash
+apex watch --yes "fix the failing tests until they pass"
+apex watch --dir src --yes "keep the types clean"
+```
+
+One agent run per edit burst, using the normal step and minute budgets. If a file
+changes while a run is active, the watcher queues exactly one follow-up instead of
+stacking runs. `node_modules`, `.git`, `dist` and `~/.apex` are ignored. Ctrl+C stops
+it. With `--yes` the agent still keeps `apex undo` snapshots, so a bad pass is
+reversible.
+
 ## Run checkpoints
 
 Every `apex do` run writes a checkpoint to `~/.apex/runs/` after each step, so a

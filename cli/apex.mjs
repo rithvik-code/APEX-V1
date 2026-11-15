@@ -135,6 +135,7 @@ function usage() {
   console.log(`  ${acid("apex models")}                   list local models`);
   console.log(`  ${acid("apex bench")}                    measure ttft, tok/s and memory per model`);
   console.log(`  ${acid("apex undo")}                     roll back the last agent run`);
+  console.log(`  ${acid("apex watch --yes \"…\"")}         rerun the task on every file change`);
   console.log(`  ${acid("apex runs")}                     list saved agent runs`);
   console.log(`  ${acid("apex resume <id>")}              continue a run from its checkpoint`);
   console.log(`  ${acid("apex history")}                  show the action log`);
@@ -1452,6 +1453,150 @@ function loadRun(prefix) {
   return runs.find((run) => run.id === prefix) || runs.find((run) => run.id.startsWith(prefix));
 }
 
+/* -------------------------------------------------------------------------- */
+/* WATCH                                                                       */
+/* -------------------------------------------------------------------------- */
+
+function watchTree(root, onChange) {
+  const ignored = /([\\/])(node_modules|\.git|dist|\.apex|shots|coverage)([\\/]|$)/;
+
+  // Recursive fs.watch is event-driven and instant on Windows and macOS. The
+  // polling fallback exists for platforms without recursive support, but it is
+  // far too slow for a OneDrive-watched tree.
+  try {
+    const watcher = fs.watch(root, { recursive: true }, (_event, filename) => {
+      if (!filename) return;
+      const full = path.join(root, String(filename));
+      if (ignored.test(full)) return;
+      onChange(full);
+    });
+    return () => watcher.close();
+  } catch {
+    // Fall through to polling.
+  }
+
+  const seen = new Map();
+  const scan = () => {
+    const walk = (dir) => {
+      let entries;
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (ignored.test(full)) continue;
+        if (entry.isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        let stat;
+        try {
+          stat = fs.statSync(full);
+        } catch {
+          continue;
+        }
+        const previous = seen.get(full);
+        seen.set(full, stat.mtimeMs);
+        if (previous !== undefined && previous !== stat.mtimeMs) onChange(full);
+      }
+    };
+    walk(root);
+  };
+
+  scan();
+  const timer = setInterval(scan, 900);
+  return () => clearInterval(timer);
+}
+
+async function cmdWatch(args) {
+  let dir = process.cwd();
+  const rest = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === "--dir") {
+      dir = path.resolve(args[i + 1] || dir);
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("--dir=")) {
+      dir = path.resolve(arg.slice(6));
+      continue;
+    }
+    if (arg === "--yes" || arg === "-y") {
+      state.autoApprove = true;
+      continue;
+    }
+    rest.push(arg);
+  }
+
+  const task = rest.join(" ").trim();
+  if (!task) {
+    console.log(dim('  usage: apex watch --yes "fix the tests until they pass"'));
+    console.log(dim("         apex watch --dir src --yes \"...\""));
+    return;
+  }
+  if (!state.autoApprove && !process.stdin.isTTY) {
+    console.error(red("  watch needs an interactive terminal or --yes."));
+    process.exitCode = 1;
+    return;
+  }
+
+  let running = false;
+  let pending = null;
+  let runs = 0;
+  let debounce = null;
+  let queued = null;
+
+  const trigger = async (file) => {
+    if (running) {
+      pending = file;
+      return;
+    }
+    running = true;
+    runs += 1;
+    console.log("");
+    console.log(`  ${acid("watch")} ${dim(`run ${runs} · ${file}`)}`);
+    try {
+      await runAgent(task);
+    } catch (error) {
+      console.log(red(`  watch run failed: ${error?.message || error}`));
+    }
+    running = false;
+    if (pending) {
+      const next = pending;
+      pending = null;
+      void trigger(next);
+    }
+  };
+
+  const stop = watchTree(dir, (file) => {
+    queued = file;
+    if (debounce) clearTimeout(debounce);
+    // Edits arrive in bursts (format-on-save, git checkout); run once per burst.
+    debounce = setTimeout(() => {
+      const changed = queued;
+      queued = null;
+      if (changed) void trigger(changed);
+    }, 900);
+  });
+
+  console.log("");
+  console.log(`  ${acid("APEX")} ${dim("watch")} ${white(task)}`);
+  console.log(faint(`  dir ${dir} · every change triggers one agent run`));
+  console.log(faint("  Ctrl+C stops the watcher. Runs can be skipped while one is active."));
+
+  const shutdown = () => {
+    stop();
+    console.log(dim("\n  watch stopped."));
+    process.exit(0);
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+}
+
 function cmdRuns() {
   const runs = listRuns();
   console.log("");
@@ -2154,6 +2299,11 @@ async function main() {
   if (argv[0] === "models") {
     const models = await listModels();
     printModels(models);
+    return;
+  }
+
+  if (argv[0] === "watch") {
+    await cmdWatch(argv.slice(1));
     return;
   }
 
