@@ -1843,6 +1843,7 @@ export default function App() {
             requestedNode={requestedCrewNode}
             onNodeOpened={() => setRequestedCrewNode(null)}
             workbench={crewWorkbench}
+            batterySaver={batterySaver}
           />
         </section>
 

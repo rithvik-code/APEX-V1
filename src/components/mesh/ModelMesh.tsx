@@ -41,6 +41,7 @@ type Props = {
   requestedNode?: string | null;
   onNodeOpened?: () => void;
   workbench?: boolean;
+  batterySaver?: boolean;
 };
 
 type Positioned = { node: MeshNode; x: number; y: number; scale: number; alpha: number };
@@ -51,13 +52,64 @@ const TIER_COLOR: Record<string, string> = {
   consent: "233, 237, 232",
 };
 
+const TIER_DRAW = {
+  live: 1,
+  link: 2,
+  consent: 3,
+} as const;
+
+type DrawSummary = { live: number; link: number; consent: number };
+
+function drawOf(cost: string): number {
+  const mb = /([\d.]+)\s*MB/i.exec(cost);
+  if (mb) return Number(mb[1]) || 0;
+  const gb = /([\d.]+)(?:\s*-\s*([\d.]+))?\s*GB/i.exec(cost);
+  if (gb) {
+    const low = Number(gb[1]) || 0;
+    const high = Number(gb[2]) || low;
+    return Math.round(((low + high) / 2) * 1024);
+  }
+  return 0;
+}
+
+function formatDraw(mb: number): string {
+  if (!mb) return "0 MB";
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+}
+
+export { drawOf };
+
 type Pulse = { ring: number; from: number; to: number; t: number; speed: number };
 
-export function ModelMesh({ scene, onTune, onDrive, requestedNode, onNodeOpened, workbench }: Props) {
+export function ModelMesh({
+  scene,
+  onTune,
+  onDrive,
+  requestedNode,
+  onNodeOpened,
+  workbench,
+  batterySaver = false,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<MeshNode | null>(null);
   const [booted, setBooted] = useState(false);
+  const [draw, setDraw] = useState<DrawSummary>({ live: 0, link: 0, consent: 0 });
+  useEffect(() => {
+    let live = 0;
+    let link = 0;
+    let consent = 0;
+    for (const node of NODES) {
+      if (node.tier === "live") {
+        live += TIER_DRAW.live;
+      } else if (node.tier === "link") {
+        link += TIER_DRAW.link;
+      } else {
+        consent += TIER_DRAW.consent;
+      }
+    }
+    setDraw({ live, link, consent });
+  }, []);
   const pointerRef = useRef({ x: 0.5, y: 0.5, inside: false });
   const hitRef = useRef<Positioned[]>([]);
   const hoverRef = useRef(-1);
@@ -445,6 +497,15 @@ export function ModelMesh({ scene, onTune, onDrive, requestedNode, onNodeOpened,
           <span>
             <i className="mesh-dot mesh-dot--consent" /> {consentCount} ON YOUR CALL
           </span>
+        </div>
+        <div className="mesh__draw" title="Estimated local mesh cost by tier before you enable a node">
+          <span className="mesh__draw-label">MESH DRAW</span>
+          <div className="mesh__draw-bar">
+            <i className="mesh__draw-fill mesh__draw-fill--live" style={{ width: `${Math.min(100, (draw.live / Math.max(1, draw.live + draw.link + draw.consent)) * 100)}%` }} />
+            {batterySaver && <i className="mesh__draw-fill mesh__draw-fill--saver" style={{ width: `${Math.min(100, (draw.live / Math.max(1, draw.live + draw.link + draw.consent)) * 60)}%` }} />}
+          </div>
+          <b className="mesh__draw-units">{formatDraw(draw.live * 2)} · {draw.live} LIVE{draw.link ? ` · ${draw.link} LINK` : ""}{draw.consent ? ` · ${draw.consent} CONSENT` : ""}</b>
+          {batterySaver && <span className="mesh__draw-tag">SAVER</span>}
         </div>
         <div className="mesh__hud mesh__hud--bl">
           <span>{booted ? "MESH BOOT SEQUENCE COMPLETE" : "BOOT SEQUENCE…"}</span>

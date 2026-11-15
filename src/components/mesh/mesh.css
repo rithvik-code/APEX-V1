@@ -47,6 +47,71 @@
   gap: 7px;
 }
 
+.mesh__draw {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 6px;
+  padding: 5px 8px;
+  background: rgba(8, 10, 9, 0.55);
+  border: 1px solid rgba(233, 237, 232, 0.12);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--paper-soft);
+  user-select: none;
+}
+
+.mesh__draw-label {
+  letter-spacing: 0.12em;
+  color: var(--dim);
+}
+
+.mesh__draw-bar {
+  position: relative;
+  width: 96px;
+  height: 6px;
+  background: rgba(233, 237, 232, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.mesh__draw-fill {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  border-radius: 3px;
+  opacity: 0.85;
+}
+
+.mesh__draw-fill--live {
+  background: rgba(200, 255, 22, 0.85);
+  transition: width 0.35s ease;
+}
+
+.mesh__draw-fill--saver {
+  background: rgba(200, 255, 22, 0.25);
+  box-shadow: 0 0 0 1px rgba(200, 255, 22, 0.5);
+  transition: width 0.35s ease;
+}
+
+.mesh__draw-units {
+  color: var(--paper);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.mesh__draw-tag {
+  margin-left: auto;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(200, 255, 22, 0.14);
+  color: var(--acid);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+}
+
 .mesh__hud-title {
   color: var(--paper);
   font-weight: 600;
