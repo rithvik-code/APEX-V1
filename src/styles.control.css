@@ -1895,3 +1895,59 @@
     animation: none;
   }
 }
+
+/* Set-of-marks: numbered OCR hit targets over the live feed. */
+.ctl-screen__shot {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  max-height: 100%;
+  line-height: 0;
+}
+
+.ctl-screen__shot img {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.ctl-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.ctl-marks__hit {
+  position: absolute;
+  display: block;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border: 1px solid rgba(200, 255, 22, 0.8);
+  border-radius: 2px;
+  background: rgba(200, 255, 22, 0.1);
+  box-shadow: 0 0 0 1px rgba(5, 6, 7, 0.35);
+  cursor: crosshair;
+  pointer-events: auto;
+}
+
+.ctl-marks__hit:hover,
+.ctl-marks__hit:focus-visible {
+  z-index: 2;
+  border-color: var(--acid);
+  outline: 1px solid var(--acid);
+  background: rgba(200, 255, 22, 0.2);
+}
+
+.ctl-marks__hit span {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 1px 3px;
+  border-radius: 0 0 2px 0;
+  background: var(--acid);
+  color: #050607;
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1.2;
+}

@@ -129,6 +129,7 @@ export function Takeover({ control, onRelease, initialGoal }: Props) {
   const [now, setNow] = useState(Date.now());
   const [steerDraft, setSteerDraft] = useState("");
   const [ocrResult, setOcrResult] = useState<OcrResult | null>(null);
+  const [marks, setMarks] = useState(false);
   const [pulls, setPulls] = useState<Record<string, PullState>>({});
   const [feedFailed, setFeedFailed] = useState(false);
   const [playbooks, setPlaybooks] = useState<Playbook[]>(() => loadPlaybooks());
@@ -523,6 +524,41 @@ export function Takeover({ control, onRelease, initialGoal }: Props) {
     }
   };
 
+  const toggleMarks = async () => {
+    if (!state) {
+      flash("Engage a mission first — OCR runs inside a session.");
+      return;
+    }
+    sound.tick("click");
+    if (marks) {
+      setMarks(false);
+      return;
+    }
+    let result = ocrResult;
+    const usable = (value: OcrResult | null) =>
+      (value?.lines ?? []).filter((line) => line.w > 0 && line.h > 0);
+    if (!usable(result).length) {
+      result = await control.ocr();
+      if (result) setOcrResult(result);
+    }
+    const targeted = usable(result ?? null);
+    if (!targeted.length) {
+      flash("OCR found no located text — nothing to mark.");
+      return;
+    }
+    setMarks(true);
+    flash(`MARKS · ${targeted.length} TARGETS · click a number to click the desktop`);
+  };
+
+  const clickMark = (line: OcrResult["lines"][number]) => {
+    if (!state) return;
+    const x = Math.round(line.x + line.w / 2);
+    const y = Math.round(line.y + line.h / 2);
+    sound.tick("click");
+    void control.manual("click", { x, y });
+    flash(`CLICK → ${x}, ${y} · ${line.text.slice(0, 40)}`);
+  };
+
   const installModel = async (name: string) => {
     sound.tick("click");
     try {
@@ -558,6 +594,42 @@ export function Takeover({ control, onRelease, initialGoal }: Props) {
   const plannerChoices = models.filter((model) => model.tools);
   const visionChoices = models.filter((model) => model.vision);
   const shot = mediaUrl(state?.shotUrl);
+  const markW = ocrResult?.width ?? state?.observation?.screen?.w ?? 0;
+  const markH = ocrResult?.height ?? state?.observation?.screen?.h ?? 0;
+  const markLines =
+    marks && markW > 0 && markH > 0
+      ? (ocrResult?.lines ?? []).filter((line) => line.w > 0 && line.h > 0)
+      : [];
+
+  // object-fit: contain letterboxes the frame inside the <img> box, so the
+  // painted pixels are smaller than the element. Marks have to follow the
+  // painted rectangle or every target sits left of the thing it points at.
+  const [paint, setPaint] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  useEffect(() => {
+    const img = imgRef.current;
+    if (!img) {
+      setPaint(null);
+      return;
+    }
+    const measure = () => {
+      const box = img.getBoundingClientRect();
+      const naturalW = img.naturalWidth || box.width;
+      const naturalH = img.naturalHeight || box.height;
+      if (!naturalW || !naturalH || !box.width || !box.height) return;
+      const scale = Math.min(box.width / naturalW, box.height / naturalH);
+      const w = naturalW * scale;
+      const h = naturalH * scale;
+      setPaint({ x: (box.width - w) / 2, y: (box.height - h) / 2, w, h });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(img);
+    img.addEventListener("load", measure);
+    return () => {
+      observer.disconnect();
+      img.removeEventListener("load", measure);
+    };
+  }, [markLines.length]);
   const feedSrc = online && !feedFailed ? mediaUrl("/api/control/screen/stream") : null;
   const screenSrc = feedSrc ?? shot;
   const pending = state?.pendingApproval;
@@ -659,22 +731,57 @@ export function Takeover({ control, onRelease, initialGoal }: Props) {
         <section className="ctl-main">
           <div className={`ctl-screen${clickMode ? " is-manual" : ""}`}>
             {screenSrc ? (
-              <img
-                ref={imgRef}
-                src={screenSrc}
-                alt="Live desktop capture from the APEX control daemon"
-                draggable={false}
-                onClick={onScreenClick}
-                onMouseMove={onScreenMove}
-                onMouseLeave={() => setCursorAt(null)}
-                onError={() => {
-                  if (feedSrc) {
-                    setFeedFailed(true);
-                  } else {
-                    flash("Screen feed dropped; waiting for the next frame.");
-                  }
-                }}
-              />
+              <div className="ctl-screen__shot">
+                <img
+                  ref={imgRef}
+                  src={screenSrc}
+                  alt="Live desktop capture from the APEX control daemon"
+                  draggable={false}
+                  onClick={onScreenClick}
+                  onMouseMove={onScreenMove}
+                  onMouseLeave={() => setCursorAt(null)}
+                  onError={() => {
+                    if (feedSrc) {
+                      setFeedFailed(true);
+                    } else {
+                      flash("Screen feed dropped; waiting for the next frame.");
+                    }
+                  }}
+                />
+                {markLines.length > 0 && (
+                  <div className="ctl-marks" aria-label="Numbered OCR targets">
+                    {markLines.map((line, index) => (
+                      <button
+                        key={`mark-${index}-${line.x}-${line.y}`}
+                        type="button"
+                        className="ctl-marks__hit"
+                        style={
+                          paint
+                            ? {
+                                left: `${paint.x + (line.x / markW) * paint.w}px`,
+                                top: `${paint.y + (line.y / markH) * paint.h}px`,
+                                width: `${(line.w / markW) * paint.w}px`,
+                                height: `${(line.h / markH) * paint.h}px`,
+                              }
+                            : {
+                                left: `${(line.x / markW) * 100}%`,
+                                top: `${(line.y / markH) * 100}%`,
+                                width: `${(line.w / markW) * 100}%`,
+                                height: `${(line.h / markH) * 100}%`,
+                              }
+                        }
+                        title={`${line.text} — ${Math.round(line.x + line.w / 2)}, ${Math.round(line.y + line.h / 2)}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          clickMark(line);
+                        }}
+                      >
+                        <span>{index + 1}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="ctl-screen__empty">
                 {!online ? (
@@ -765,6 +872,14 @@ export function Takeover({ control, onRelease, initialGoal }: Props) {
                 {tool.label}
               </button>
             ))}
+            <button
+              type="button"
+              className={`ctl-tools__click${marks ? " is-on" : ""}`}
+              onClick={() => void toggleMarks()}
+              disabled={!state}
+            >
+              {marks ? "MARKS ON" : "MARKS"}
+            </button>
             <button type="button" onClick={() => void undoWrites()} disabled={!state}>
               UNDO WRITES
             </button>

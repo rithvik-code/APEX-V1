@@ -130,6 +130,10 @@ function html(res, body) {
 // Only enforced in LAN mode; loopback keeps the existing origin/host checks.
 function tokenOk(req, url) {
   if (!LAN) return true;
+  // The machine itself never needs pairing. Only the network hop does, so the
+  // local console keeps working while a phone still has to present a token.
+  const peer = req.socket?.remoteAddress ?? "";
+  if (peer === "127.0.0.1" || peer === "::1" || peer === "::ffff:127.0.0.1") return true;
   const supplied = String(
     req.headers["x-apex-token"] || url.searchParams.get("token") || "",
   );
@@ -652,7 +656,11 @@ async function route(req, res) {
       `${result.lines.length} text regions · ${result.engine}`,
       "low",
     );
-    json(res, 200, result);
+    json(res, 200, {
+      ...result,
+      width: active.screen?.w ?? result.width ?? null,
+      height: active.screen?.h ?? result.height ?? null,
+    });
     return;
   }
 
@@ -726,13 +734,17 @@ server.listen(PORT, HOST, () => {
   console.log(`  mode    ${READ_ONLY ? "READ-ONLY (screen + accessibility)" : "AUTHORIZED CAPABILITIES"}`);
   console.log("");
   if (LAN) {
-    const nets = os.networkInterfaces();
-    const addresses = Object.values(nets)
-      .flat()
-      .filter((entry) => entry && entry.family === "IPv4" && !entry.internal)
-      .map((entry) => entry.address);
-    const address = addresses[0] || "127.0.0.1";
+    const picks = lanCandidates();
+    const address = picks[0]?.address || "127.0.0.1";
     console.log(`  remote  http://${address}:${PORT}/m?token=${TOKEN}`);
+    for (const extra of picks.slice(1, 4)) {
+      console.log(`  also    http://${extra.address}:${PORT}/m?token=${TOKEN}`);
+    }
+    if (!picks.length) {
+      console.log("  No LAN address found — connect Wi-Fi or Ethernet, then restart.");
+    } else if (!picks.some((pick) => /wi-?fi|wlan|ethernet/i.test(pick.name))) {
+      console.log("  Warning: only virtual adapters found. Turn off VPNs, then restart.");
+    }
     console.log(`  token   ${TOKEN}`);
     console.log("  LAN mode: the token is the only gate. Keep it private.");
   } else {
@@ -741,6 +753,27 @@ server.listen(PORT, HOST, () => {
   console.log("  Ctrl+C stops the daemon and any running control session.");
   console.log("");
 });
+
+/* Addresses a phone can actually reach: real Wi-Fi/Ethernet first, never a
+ * VPN tunnel or a virtual switch. WARP, Hyper-V, VirtualBox and Bluetooth
+ * adapters otherwise win the race and print a URL nothing else can open. */
+function lanCandidates() {
+  const virtual = /(warp|vpn|virtualbox|vmware|hyper-?v|vethernet|bluetooth|loopback|tailscale|zerotier|hamachi|tap|tun)/i;
+  const entries = [];
+  for (const [name, list] of Object.entries(os.networkInterfaces())) {
+    for (const entry of list ?? []) {
+      if (!entry || entry.family !== "IPv4" || entry.internal) continue;
+      if (entry.address.startsWith("169.254.")) continue;
+      entries.push({ name, address: entry.address, virtual: virtual.test(name) });
+    }
+  }
+  // Role beats address range: a host-only VirtualBox adapter can be named
+  // "Ethernet 2" and look physical while being unreachable from a phone.
+  const score = (entry) =>
+    (entry.virtual ? 20 : 0) +
+    (/wi-?fi|wlan/i.test(entry.name) ? 0 : /ethernet/i.test(entry.name) ? 1 : 2);
+  return entries.sort((a, b) => score(a) - score(b));
+}
 
 server.on("error", (error) => {
   if (error.code === "EADDRINUSE") {

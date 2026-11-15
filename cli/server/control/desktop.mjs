@@ -493,15 +493,35 @@ if (-not $engine) { throw 'No Windows OCR language is installed' }
 $result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
 $lines = @()
 foreach ($line in $result.Lines) {
-  $r = $line.BoundingRect
+  # OcrLine has no BoundingRect; the boxes live on its words. Union them so the
+  # line gets a real hit target instead of a zero-size rectangle at 0,0.
+  $minX = [double]::MaxValue
+  $minY = [double]::MaxValue
+  $maxX = 0.0
+  $maxY = 0.0
+  foreach ($word in $line.Words) {
+    $wr = $word.BoundingRect
+    if ($wr.X -lt $minX) { $minX = $wr.X }
+    if ($wr.Y -lt $minY) { $minY = $wr.Y }
+    $right = $wr.X + $wr.Width
+    $bottom = $wr.Y + $wr.Height
+    if ($right -gt $maxX) { $maxX = $right }
+    if ($bottom -gt $maxY) { $maxY = $bottom }
+  }
+  if ($maxX -le $minX -or $maxY -le $minY) {
+    $minX = 0.0
+    $minY = 0.0
+    $maxX = 0.0
+    $maxY = 0.0
+  }
   $t = ($line.Text -replace "[\\x00-\\x1F\\x7F]", " ")
   if ($t.Length -gt 240) { $t = $t.Substring(0, 240) }
   $lines += [pscustomobject]@{
     text = $t
-    x = [int]($ox + $r.X / $scale)
-    y = [int]($oy + $r.Y / $scale)
-    w = [int]($r.Width / $scale)
-    h = [int]($r.Height / $scale)
+    x = [int]($ox + $minX / $scale)
+    y = [int]($oy + $minY / $scale)
+    w = [int](($maxX - $minX) / $scale)
+    h = [int](($maxY - $minY) / $scale)
   }
 }
 $full = (@($result.Lines | ForEach-Object { $_.Text }) -join [char]10)
@@ -510,11 +530,20 @@ if (-not $full) { $full = '' }
 if ($full.Length -gt 8000) { $full = $full.Substring(0, 8000) }
 $engineName = 'ocr'
 try { if ($engine.RecognizedLanguage) { $engineName = $engine.RecognizedLanguage.ToString() } } catch {}
-@{ engine = $engineName; lines = @($lines | Select-Object -First 80); text = $full } | ConvertTo-Json -Compress -Depth 3`;
+if ($fromFile) {
+  $outW = [int]($decoder.PixelWidth / $scale)
+  $outH = [int]($decoder.PixelHeight / $scale)
+} else {
+  $outW = [int]$bounds.Width
+  $outH = [int]$bounds.Height
+}
+@{ engine = $engineName; width = $outW; height = $outH; lines = @($lines | Select-Object -First 80); text = $full } | ConvertTo-Json -Compress -Depth 3`;
   const parsed = await runPowerShellJson(script, { timeoutMs: 30_000, signal });
   return {
     engine: String(parsed.engine ?? ""),
     text: String(parsed.text ?? ""),
+    width: Number(parsed.width) || null,
+    height: Number(parsed.height) || null,
     lines: Array.isArray(parsed.lines) ? parsed.lines : [],
   };
 }

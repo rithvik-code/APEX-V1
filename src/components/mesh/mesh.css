@@ -1231,7 +1231,7 @@
 /* Service doctor: target, last probe, state, copyable setup. */
 .mesh-doctor {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
   gap: 8px;
   margin: 12px 0;
   padding: 10px 12px;
@@ -1277,4 +1277,9 @@
 
 @media (max-width: 720px) {
   .mesh-doctor { grid-template-columns: 1fr; }
+}
+
+/* The dossier already carries the blurb on wide layouts. */
+@media (min-width: 900px) {
+  .mesh-standby__copy { display: none; }
 }

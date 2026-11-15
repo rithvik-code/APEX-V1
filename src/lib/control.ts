@@ -260,6 +260,9 @@ export type OcrResult = {
   text: string;
   engine: string;
   lines: OcrLine[];
+  /** Screen pixels the coordinates refer to, when the daemon knows them. */
+  width?: number | null;
+  height?: number | null;
 };
 
 export type PullState = {
