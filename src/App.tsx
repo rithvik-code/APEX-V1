@@ -21,6 +21,7 @@ import { AeroDock, AeroLaunch, type DockBridge, type DockStatus } from "./compon
 import { DriveHUD, type TrackOutline } from "./components/DriveHUD";
 import { Garage } from "./components/Garage";
 import { CyrusHUD } from "./components/CyrusHUD";
+import { ScotchChip } from "./components/ScotchChip";
 import type { AssistCallout, DriveHudState, DriveVehicle } from "./three/drive";
 import { DEFAULT_DRIVE_SETUP, loadBoard, type DriveSetup } from "./lib/driveStore";
 import { cyrus } from "./lib/cyrus";
@@ -175,6 +176,7 @@ export default function App() {
   });
   const [compareVehicles, setCompareVehicles] = useState(false);
   const [showroomMode, setShowroomMode] = useState(false);
+  const [chipOpen, setChipOpen] = useState(false);
   const [tourStep, setTourStep] = useState<number | null>(() => {
     try { return localStorage.getItem("apex-first-run-tour") === "done" ? null : 0; } catch { return null; }
   });
@@ -2228,7 +2230,18 @@ export default function App() {
       )}
 
       {!booting && !takeover && !coreView && (
-        <CyrusHUD mode={garage ? "garage" : drive ? "drive" : "page"} />
+        <>
+          <CyrusHUD mode={garage ? "garage" : drive ? "drive" : "page"} />
+          {cyrus.wanted() && (
+            <ScotchChip
+              open={chipOpen}
+              onToggle={(open) => {
+                setChipOpen(open);
+                if (open) cyrus.submit("hey scotch");
+              }}
+            />
+          )}
+        </>
       )}
 
       {coreView && (

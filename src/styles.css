@@ -10614,3 +10614,219 @@ body.crossing .grain {
     display: block;
   }
 }
+
+/* SCOTCH CHIP — floating mascot that lives in any APEX view and answers to
+   “hey cyrus” and “hey scotch” (tap the dog, or type on the chip). */
+.scotch-chip {
+  position: fixed;
+  z-index: 60;
+  width: 172px;
+  font-family: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  color: #eaeef0;
+  user-select: none;
+  pointer-events: auto;
+  touch-action: none;
+  will-change: transform;
+}
+.scotch-chip__avatar {
+  position: relative;
+  width: 64px;
+  height: 56px;
+  margin: 0 auto 6px;
+  background: radial-gradient(circle at 50% 32%, #fff7e9 0%, #f3e3c4 78%, #d8bd8c 100%);
+  border-radius: 50% 50% 46% 46% / 60% 60% 42% 42%;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.28), inset 0 -6px 8px rgba(120, 86, 36, 0.32);
+}
+.scotch-chip__ears {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  justify-items: center;
+  pointer-events: none;
+}
+.scotch-chip__ears i {
+  width: 14px;
+  height: 18px;
+  background: #f3e3c4;
+  border-radius: 50% 50% 48% 48% / 62% 62% 40% 40%;
+  box-shadow: inset 0 -2px 3px rgba(120, 86, 36, 0.35);
+}
+.scotch-chip__ears i:first-child {
+  align-self: 18%;
+  transform: translate(-3px, -2px) rotate(-14deg);
+}
+.scotch-chip__ears i:last-child {
+  align-self: 18%;
+  transform: translate(3px, -2px) rotate(14deg);
+}
+.scotch-chip__face {
+  position: absolute;
+  left: 50%;
+  top: 52%;
+  transform: translate(-50%, -58%);
+  width: 40px;
+  height: 26px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  justify-items: center;
+  pointer-events: none;
+}
+.scotch-chip__eye {
+  width: 6px;
+  height: 7px;
+  background: #2a2620;
+  border-radius: 50%;
+  align-self: 14%;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.4);
+}
+.scotch-chip__eye--r {
+  align-self: 16%;
+}
+.scotch-chip__nose {
+  grid-column: 1 / -1;
+  width: 9px;
+  height: 6px;
+  background: #2a2620;
+  border-radius: 50% 50% 46% 46% / 62% 62% 42% 42%;
+  margin-top: 2px;
+}
+.scotch-chip__tongue {
+  grid-column: 1 / -1;
+  width: 6px;
+  height: 4px;
+  background: #e98a8a;
+  border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+  margin-top: 1px;
+  opacity: 0.85;
+}
+.scotch-chip__tip {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 9px 8px;
+  background: rgba(12, 14, 12, 0.86);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(200, 255, 22, 0.18);
+  border-radius: 14px;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.32);
+}
+.scotch-chip__wake {
+  width: 100%;
+  background: #c8ff16;
+  color: #141a0f;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  border: 0;
+  border-radius: 9px;
+  padding: 6px 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+}
+.scotch-chip__wake:hover {
+  background: #dfff42;
+}
+.scotch-chip__form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px;
+}
+.scotch-chip__input {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #f3f6f4;
+  border-radius: 9px;
+  padding: 7px 9px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: 0;
+  width: 100%;
+}
+.scotch-chip__input::placeholder {
+  color: rgba(234, 238, 240, 0.5);
+}
+.scotch-chip__input:focus {
+  border-color: #c8ff16;
+  box-shadow: 0 0 0 2px rgba(200, 255, 22, 0.25);
+}
+.scotch-chip__send {
+  background: rgba(200, 255, 22, 0.14);
+  border: 1px solid rgba(200, 255, 22, 0.4);
+  color: #c8ff16;
+  border-radius: 9px;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.scotch-chip__send:hover {
+  background: rgba(200, 255, 22, 0.26);
+}
+.scotch-chip__send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.scotch-chip__bar {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 5px;
+  align-items: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 6px;
+  margin-top: 2px;
+}
+.scotch-chip__follow,
+.scotch-chip__close {
+  background: transparent;
+  border: 0;
+  color: rgba(234, 238, 240, 0.72);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 700;
+  padding: 3px 0;
+  border-radius: 7px;
+  text-align: left;
+}
+.scotch-chip__close {
+  text-align: center;
+  color: rgba(234, 238, 240, 0.5);
+}
+.scotch-chip__close:hover {
+  color: #eaeef0;
+}
+.scotch-chip__follow:hover,
+.scotch-chip__close:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.scotch-chip__dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: #c8ff16;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+  box-shadow: 0 0 6px rgba(200, 255, 22, 0.7);
+}
+.scotch-chip__micro {
+  font-size: 9.5px;
+  color: rgba(234, 238, 240, 0.5);
+  letter-spacing: 0.02em;
+  margin: 0;
+  line-height: 1.3;
+}
+.scotch-chip:focus-within {
+  outline: 2px solid #c8ff16;
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scotch-chip {
+    transition: none;
+  }
+}
