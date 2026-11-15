@@ -92,6 +92,21 @@ agent can use the same gated executor. Tools: `desktop_command`, `desktop_state`
 {"mcpServers":{"apex":{"command":"node","args":["cli/mcp.mjs"]}}}
 ```
 
+## Run checkpoints
+
+Every `apex do` run writes a checkpoint to `~/.apex/runs/` after each step, so a
+crash, a Ctrl+C or a closed laptop does not throw the work away.
+
+```bash
+apex runs                    # recent runs: id, status, steps, goal
+apex resume R-20261115T085649-kkf1
+```
+
+Resume reloads the saved transcript (system prompt, goal, tool results and the last
+answer) and continues at the next step. Large tool outputs are truncated inside the
+checkpoint at 20 KB once a run passes 8 MB, so a run that read a huge log still
+leaves a usable file.
+
 ## Audit
 
 `apex history` tails `~/.apex/actions.log` — tier, target, exit code, and whether you

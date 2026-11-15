@@ -19,6 +19,7 @@ const VERSION = "1.4.0";
 const CONFIG_DIR = path.join(os.homedir(), ".apex");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
 const SHADOW_DIR = path.join(CONFIG_DIR, "shadow");
+const RUNS_DIR = path.join(CONFIG_DIR, "runs");
 const LOG_PATH = path.join(CONFIG_DIR, "actions.log");
 
 const TIERS = ["read", "project", "machine"];
@@ -132,6 +133,8 @@ function usage() {
   console.log(`  ${acid('cat file | apex "explain"')}     pipe context in`);
   console.log(`  ${acid("apex models")}                   list local models`);
   console.log(`  ${acid("apex undo")}                     roll back the last agent run`);
+  console.log(`  ${acid("apex runs")}                     list saved agent runs`);
+  console.log(`  ${acid("apex resume <id>")}              continue a run from its checkpoint`);
   console.log(`  ${acid("apex history")}                  show the action log`);
   console.log(`  ${acid("apex config")}                   show config + path`);
   console.log(`  ${acid("apex config --set model=…")}     edit a config key`);
@@ -1256,7 +1259,107 @@ async function streamAgentTurn(messages, signal) {
   }
 }
 
-async function runAgent(task) {
+/* -------------------------------------------------------------------------- */
+/* RUN CHECKPOINTS                                                             */
+/* -------------------------------------------------------------------------- */
+
+function runId() {
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 15);
+  return `R-${stamp}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function saveRun(run) {
+  try {
+    fs.mkdirSync(RUNS_DIR, { recursive: true });
+    run.updatedAt = Date.now();
+    let body = JSON.stringify(run);
+    // A run that read a huge log should still leave a usable checkpoint.
+    if (body.length > 8_000_000) {
+      const trimmed = {
+        ...run,
+        messages: run.messages.map((message) =>
+          typeof message.content === "string" && message.content.length > 20_000
+            ? { ...message, content: `${message.content.slice(0, 20_000)}\n[checkpoint truncated]` }
+            : message,
+        ),
+      };
+      body = JSON.stringify(trimmed);
+    }
+    fs.writeFileSync(path.join(RUNS_DIR, `${run.id}.json`), body);
+  } catch {
+    // Checkpointing is best-effort; never lose the run over a disk hiccup.
+  }
+}
+
+function listRuns() {
+  try {
+    return fs
+      .readdirSync(RUNS_DIR)
+      .filter((file) => file.endsWith(".json"))
+      .map((file) => {
+        try {
+          return JSON.parse(fs.readFileSync(path.join(RUNS_DIR, file), "utf8"));
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  } catch {
+    return [];
+  }
+}
+
+function loadRun(prefix) {
+  const runs = listRuns();
+  return runs.find((run) => run.id === prefix) || runs.find((run) => run.id.startsWith(prefix));
+}
+
+function cmdRuns() {
+  const runs = listRuns();
+  console.log("");
+  if (!runs.length) {
+    console.log(dim("  no agent runs recorded yet — apex do writes a checkpoint every step."));
+    console.log("");
+    return;
+  }
+  console.log(`  ${dim(`${runs.length} run(s) · ${RUNS_DIR}`)}`);
+  for (const run of runs.slice(0, 12)) {
+    const when = new Date(run.updatedAt || run.startedAt || Date.now()).toLocaleString();
+    const status =
+      run.status === "done" ? acid("done") : run.status === "error" ? red("error") : white(run.status || "?");
+    console.log(
+      `  ${white(run.id)} ${status} ${dim(`${String(run.steps || 0).padStart(2, "0")} steps`)} ${faint(when)}`,
+    );
+    console.log(`    ${clip(String(run.goal || ""), 96)}`);
+  }
+  console.log(faint("  apex resume <id> continues a run from its saved transcript."));
+  console.log("");
+}
+
+async function cmdResume(id) {
+  if (!id) {
+    console.log(dim('  usage: apex resume <run id from "apex runs">'));
+    return;
+  }
+  const run = loadRun(id);
+  if (!run) {
+    console.error(red(`  no run matches "${id}" — try apex runs.`));
+    process.exitCode = 1;
+    return;
+  }
+  if (!Array.isArray(run.messages) || !run.messages.length) {
+    console.error(red("  that checkpoint has no transcript to resume from."));
+    process.exitCode = 1;
+    return;
+  }
+  if (run.status === "done") {
+    console.log(dim("  that run already finished; resuming continues from its transcript."));
+  }
+  await runAgent(run.goal, run);
+}
+
+async function runAgent(task, resumed = null) {
   if (state.streaming) {
     console.log(dim("  a stream is already active — wait or press Ctrl+C"));
     return;
@@ -1300,7 +1403,29 @@ async function runAgent(task) {
     { role: "user", content: task },
   ];
 
-  let step = 0;
+  const run = resumed
+    ? { ...resumed, status: "running", model: config.model }
+    : {
+        id: runId(),
+        goal: task,
+        model: config.model,
+        cwd: process.cwd(),
+        tier: state.tier,
+        startedAt: Date.now(),
+        status: "running",
+        steps: 0,
+        messages: [],
+      };
+
+  if (resumed) {
+    messages.length = 0;
+    messages.push(...resumed.messages);
+    const prior = Number(resumed.steps) || 0;
+    if (prior > 0) console.log(faint(`  resume ${run.id} · continuing from step ${prior + 1}`));
+  }
+  saveRun({ ...run, messages, steps: Number(run.steps) || 0 });
+
+  let step = Number(resumed ? resumed.steps : 0) || 0;
   const maxSteps = Math.max(1, Number(config.maxSteps) || 24);
   const deadline = Date.now() + Math.max(1, Number(config.maxMinutes) || 12) * 60000;
   const callCounts = new Map();
@@ -1323,6 +1448,9 @@ async function runAgent(task) {
 
       if (!toolCalls.length) {
         if (!content.trim()) console.log(dim("  [no output]"));
+        // Keep the final answer in the checkpoint so a resume has the full
+        // conversation, not just the goal and the tool trace.
+        if (content.trim()) messages.push({ role: "assistant", content });
         break;
       }
 
@@ -1366,6 +1494,10 @@ async function runAgent(task) {
         if (controller.signal.aborted) break;
       }
 
+      run.messages = messages;
+      run.steps = step;
+      saveRun(run);
+
       if (haltLoop) break;
 
       if (controller.signal.aborted) {
@@ -1377,6 +1509,11 @@ async function runAgent(task) {
     if (step >= maxSteps) {
       console.log(dim(`  step limit (${maxSteps}) reached — stopping the agent.`));
     }
+
+    run.status = controller.signal.aborted ? "aborted" : "done";
+    run.steps = step;
+    run.messages = messages;
+    saveRun(run);
 
     const changes = state.session?.manifest.length || 0;
     logAction({ tool: "_agent_stop", session: session.id, steps: step, changes });
@@ -1390,6 +1527,11 @@ async function runAgent(task) {
     }
     console.log("");
   } catch (error) {
+    run.status = "error";
+    run.error = String(error?.message || error);
+    run.steps = step;
+    run.messages = messages;
+    saveRun(run);
     if (controller.signal.aborted) console.log(dim("  [aborted]"));
     else printLinkError(error);
   } finally {
@@ -1875,6 +2017,16 @@ async function main() {
   if (argv[0] === "models") {
     const models = await listModels();
     printModels(models);
+    return;
+  }
+
+  if (argv[0] === "runs") {
+    cmdRuns();
+    return;
+  }
+
+  if (argv[0] === "resume") {
+    await cmdResume(argv[1]);
     return;
   }
 
