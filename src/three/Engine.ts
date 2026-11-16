@@ -338,6 +338,8 @@ export class ApexEngine {
   private rpmCurrent = 0.32;
   private dynoOn = false;
   private engineTime = 0;
+  private paintColorTarget = new THREE.Color(0xaab2ba);
+  private accentColorTarget = new THREE.Color(ACID);
   private carRoundels: THREE.Object3D[] = [];
   private clip: ClipRecorder | null = null;
   private envTarget: THREE.WebGLRenderTarget | null = null;
@@ -354,6 +356,7 @@ export class ApexEngine {
   private replayTgt = new THREE.Vector3();
   private drive: DriveSession | null = null;
   private track: Track | null = null;
+  private raceLineMood: "apex" | "rotation" = "apex";
   private driveVehicle: DriveVehicle = "car";
   private lastConfig: SceneConfig | null = null;
   private savedCarPos = new THREE.Vector3();
@@ -466,6 +469,7 @@ export class ApexEngine {
     this.groundDecor = ground.decor;
 
     this.car = createSupercar();
+    this.paintColorTarget.copy(this.car.paint.color);
     this.carGroup.add(this.car.group);
     this.scene.add(this.carGroup);
     this.car.group.traverse((object) => {
@@ -479,6 +483,7 @@ export class ApexEngine {
     );
 
     this.bike = createSuperbike();
+    this.accentColorTarget.copy(this.bike.accent.color);
     this.bikeGroup.add(this.bike.group);
     this.bikeGroup.position.set(-9, 0, -6);
     this.bikeGroup.rotation.y = 0.18;
@@ -1253,9 +1258,8 @@ export class ApexEngine {
 
     if (config.paint.enabled) {
       // Livery painter overrides the preset swatches with a custom scheme.
-      this.car.paint.color.set(config.paint.base);
-      for (const material of this.car.accentMats) material.color.set(config.paint.accent);
-      (this.car.stripe.material as THREE.MeshBasicMaterial).color.set(config.paint.accent);
+      this.paintColorTarget.set(config.paint.base);
+      this.accentColorTarget.set(config.paint.accent);
       this.car.stripe.visible = config.paint.stripe;
       this.car.numberMat.map?.dispose();
       this.car.numberMat.map = numberTexture(config.paint.number, config.paint.accent);
@@ -1263,13 +1267,10 @@ export class ApexEngine {
       for (const roundel of this.carRoundels) roundel.visible = true;
       this.bike.accent.color.set(config.paint.accent);
     } else {
-      this.car.paint.color.setHex(livery.hex);
-      for (const material of this.car.accentMats) material.color.setHex(ACID);
+      this.paintColorTarget.setHex(livery.hex);
+      this.accentColorTarget.setHex(livery.id === "silver" || livery.id === "graphite" ? ACID : livery.hex);
       this.car.stripe.visible = false;
       for (const roundel of this.carRoundels) roundel.visible = false;
-      this.bike.accent.color.setHex(
-        livery.id === "silver" || livery.id === "graphite" ? ACID : livery.hex,
-      );
     }
     this.applyCareerVisuals();
     if (this.drive) this.applyDriveVisibility();
@@ -1625,6 +1626,10 @@ export class ApexEngine {
     this.garageStage?.callPet(pet);
   }
 
+  fetchGarageTrophy(): void {
+    this.garageStage?.fetchTrophy();
+  }
+
   scanGarageCar(): void {
     this.garageStage?.scanCar();
   }
@@ -1952,6 +1957,7 @@ export class ApexEngine {
       this.track = buildTrack();
       this.scene.add(this.track.group);
     }
+    this.track.setLineMood(this.raceLineMood);
     this.track.group.visible = true;
     this.driveVehicle = vehicle;
 
@@ -2094,6 +2100,11 @@ export class ApexEngine {
 
     this.engineTime += dt * (1 + this.revRpm * 30);
     this.car.engine.update(this.engineTime);
+    const paintEase = 1 - Math.exp(-dt * 2.8);
+    this.car.paint.color.lerp(this.paintColorTarget, paintEase);
+    for (const material of this.car.accentMats) material.color.lerp(this.accentColorTarget, paintEase);
+    (this.car.stripe.material as THREE.MeshBasicMaterial).color.lerp(this.accentColorTarget, paintEase);
+    this.bike.accent.color.lerp(this.accentColorTarget, paintEase);
     this.bike.engine.update(this.clockTime);
 
     if (e < GARAGE_ENTRY_DURATION) {
@@ -2272,6 +2283,14 @@ export class ApexEngine {
       (exposureTarget - this.renderer.toneMappingExposure) * lightEase;
   }
 
+  private updateLiveryGlow(dt: number, boost = 0): void {
+    const edgeActivity = Math.max(this.dynoOn ? this.rpmCurrent : 0, this.revRpm / 12000, boost);
+    const edgeGlowTarget = (this.lastConfig?.paint.enabled ? 0.16 : 0.035) + edgeActivity * (this.lastConfig?.paint.enabled ? 0.2 : 0.08) + (this.lastConfig?.nightRace ? 0.035 : 0);
+    for (const material of this.car.accentMats) {
+      if (material.transparent) material.opacity += (edgeGlowTarget - material.opacity) * (1 - Math.exp(-dt * 4));
+    }
+  }
+
   private updateDrive(dt: number, adt: number): void {
     const drive = this.drive!;
     drive.update(dt);
@@ -2390,8 +2409,18 @@ export class ApexEngine {
     this.drive?.setGhostEnabled(enabled);
   }
 
+  setDriveGhostReplayTime(time: number | null): void {
+    this.drive?.setGhostReplayTime(time);
+  }
+
   setDriveAssist(enabled: boolean): void {
     this.drive?.setAssist(enabled);
+  }
+
+  setRaceLineMood(mood: "apex" | "rotation"): void {
+    this.raceLineMood = mood;
+    this.track?.setLineMood(mood);
+    this.track?.setAssist(true);
   }
 
   restartDrive(): void {
@@ -2417,6 +2446,7 @@ export class ApexEngine {
       this.updateGarage(dt);
       this.animateCareer();
       this.animateRev(dt);
+      this.updateLiveryGlow(dt);
       this.composer.render();
       this.clip?.frame(this.renderer.domElement);
       if (!this.readySent) {
@@ -2428,6 +2458,7 @@ export class ApexEngine {
 
     if (this.drive) {
       this.updateDrive(dt, adt);
+      this.updateLiveryGlow(dt, this.drive?.boost ?? 0);
       this.animateCareer();
       this.updateLighting(dt);
       this.weather.update(dt);
@@ -2589,6 +2620,7 @@ export class ApexEngine {
       (glowTarget - this.car.exhaustGlow.opacity) * (1 - Math.exp(-dt * 8));
     this.animateCareer();
     this.animateRev(dt);
+    this.updateLiveryGlow(dt);
 
     this.weather.update(dt);
     this.bikeGroup.position.y = Math.sin(this.clockTime * 0.6) * 0.008;

@@ -23,6 +23,7 @@ import { Garage } from "./components/Garage";
 import { CyrusHUD } from "./components/CyrusHUD";
 import { ScotchChip } from "./components/ScotchChip";
 import type { AssistCallout, DriveHudState, DriveVehicle } from "./three/drive";
+import { composeCircuitPoem, type CircuitPoem } from "./lib/circuitPoetry";
 import { DEFAULT_DRIVE_SETUP, loadBoard, type DriveSetup } from "./lib/driveStore";
 import { cyrus } from "./lib/cyrus";
 import {
@@ -205,6 +206,8 @@ export default function App() {
   const audioLockedRef = useRef(false);
   const [drive, setDrive] = useState<{ vehicle: DriveVehicle } | null>(null);
   const [driveHud, setDriveHud] = useState<DriveHudState | null>(null);
+  const [lapPoem, setLapPoem] = useState<CircuitPoem | null>(null);
+  const lapPoemTimer = useRef<number | null>(null);
   const [driveTrack, setDriveTrack] = useState<TrackOutline | null>(null);
   const [driveSetup, setDriveSetup] = useState<DriveSetup>(DEFAULT_DRIVE_SETUP);
   const driveSetupRef = useRef(driveSetup);
@@ -252,6 +255,9 @@ export default function App() {
     const place = drive ? `driving the ${drive.vehicle} on the circuit` : garage ? `inside the walkable garage${garageFocus ? `, viewing ${garageFocus.label}` : ""}` : `${activeChapter.label} section of the APEX page`;
     cyrus.setPageContext(place);
   }, [activeChapter.label, drive, garage, garageFocus]);
+  useEffect(() => {
+    sound.setAcousticTreatment(`${scene.livery}|${scene.paint.enabled ? scene.paint.base : "stock"}|${scene.paint.accent}|${scene.aero ? "open-body" : "closed-body"}|${scene.lighting}`);
+  }, [scene.livery, scene.paint.enabled, scene.paint.base, scene.paint.accent, scene.aero, scene.lighting]);
   const licenceName = currentLicence(career.cp).name;
   const unlockCount = useMemo(() => unlockSet(career).size, [career]);
   const trophyCount = useMemo(() => Math.min(8, Math.floor(career.cp / 120)), [career.cp]);
@@ -429,6 +435,10 @@ export default function App() {
         case "dog":
           sound.bark();
           break;
+        case "fetch-trophy":
+          engine.fetchGarageTrophy();
+          sound.bark();
+          break;
         case "turtles":
           sound.tick("click");
           break;
@@ -599,6 +609,12 @@ export default function App() {
     sound.tick("click");
   }, []);
 
+  const replayDriveSector = useCallback((time: number | null) => {
+    engineRef.current?.setDriveGhostReplayTime(time);
+    setDriveHud(engineRef.current?.getDriveState() ?? null);
+    sound.tick("click");
+  }, []);
+
   const calloutCooldownUntil = useRef(0);
   const handleAssistCallout = useCallback(
     (callout: AssistCallout | null) => {
@@ -655,6 +671,10 @@ export default function App() {
           engine.callGaragePet(intent.pet);
           runGarageAction(intent.pet === "dog" ? "dog" : "cat");
           return intent.pet === "dog" ? "Scotch, come here. He's on his way to you." : "Mario is coming over. At a cat's pace, naturally.";
+        case "fetchTrophy":
+          if (!inGarage) openGarage();
+          runGarageAction("fetch-trophy");
+          return "Scotch is off to the trophy shelf and back. Fetch quest accepted.";
         case "drive":
           window.clearTimeout(cyrusRevTimer.current);
           if (inGarage) driveOutGarage(intent.vehicle);
@@ -882,6 +902,9 @@ export default function App() {
           cp: lap.best ? 40 : 25,
         });
         if (lap.best) {
+          setLapPoem(composeCircuitPoem(lap.vehicle, lap.time, lap.sectors));
+          if (lapPoemTimer.current !== null) window.clearTimeout(lapPoemTimer.current);
+          lapPoemTimer.current = window.setTimeout(() => setLapPoem(null), 9000);
           award({
             kind: "ghost",
             id: `${lap.vehicle}-best-${Math.round(lap.time * 1000)}`,
@@ -1829,6 +1852,7 @@ export default function App() {
               onAward={award}
               onPhoto={garageCapture}
               onGarageAction={runGarageAction}
+              onRaceLine={(mood) => engineRef.current?.setRaceLineMood(mood)}
             />
           </div>
         </section>
@@ -2180,6 +2204,8 @@ export default function App() {
       {drive && driveHud && (
         <DriveHUD
           state={driveHud}
+          lapPoem={lapPoem}
+          liveryGlow={scene.paint.enabled}
           track={driveTrack}
           audioOn={audioOn}
           onAudio={toggleAudio}
@@ -2192,6 +2218,7 @@ export default function App() {
           onVehicle={switchDriveVehicle}
           onSetup={updateDriveSetup}
           onGhost={toggleDriveGhost}
+          onReplaySector={replayDriveSector}
           onAssist={toggleDriveAssist}
           onCallout={handleAssistCallout}
           onTouch={(touch) => engineRef.current?.setDriveTouch(touch)}
@@ -2218,6 +2245,10 @@ export default function App() {
           liftUp={garageBits.lift}
           service={garageBits.service}
           paint={scene.paint}
+          weather={scene.weather}
+          rainAmount={scene.rainAmount}
+          night={scene.nightRace}
+          windSpeed={scene.windSpeed}
           onPaint={(patch) =>
             updateScene({ paint: { ...sceneRef.current.paint, ...patch } })
           }
@@ -2235,6 +2266,9 @@ export default function App() {
           {cyrus.wanted() && (
             <ScotchChip
               open={chipOpen}
+              weather={scene.weather}
+              night={scene.nightRace}
+              proud={lapPoem !== null}
               onToggle={(open) => {
                 setChipOpen(open);
                 if (open) cyrus.submit("hey scotch");

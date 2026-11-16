@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cyrus } from "../lib/cyrus";
+import type { Weather } from "../lib/scene";
 
 type ScotchChipProps = {
   open: boolean;
   onToggle: (open: boolean) => void;
+  weather: Weather;
+  night: boolean;
+  proud: boolean;
 };
 
-export function ScotchChip({ open, onToggle }: ScotchChipProps) {
+export function ScotchChip({ open, onToggle, weather, night, proud }: ScotchChipProps) {
   const [input, setInput] = useState("");
   const [follow, setFollow] = useState(false);
   const [placed, setPlaced] = useState<"corner" | "cursor">("corner");
+  const [curious, setCurious] = useState(false);
   const tipRef = useRef<HTMLDivElement>(null);
   const chipRef = useRef<HTMLDivElement>(null);
   const nextRef = useRef(0);
@@ -69,10 +74,15 @@ export function ScotchChip({ open, onToggle }: ScotchChipProps) {
 
   if (!open) return null;
 
+  const mood = proud ? "proud" : night ? "sleepy" : curious ? "curious" : "ready";
+  const moodLine = proud ? "Clean lap! That one had paws on the podium." : mood === "sleepy" ? "Mmm. Saving my zoomies for tomorrow." : mood === "curious" ? "What’s that? I’m listening." : "Scotch is right here.";
+
   return (
     <div
       ref={chipRef}
-      className="scotch-chip"
+      className={`scotch-chip scotch-chip--${mood}${weather === "rain" ? " scotch-chip--rain" : ""}${night ? " scotch-chip--night" : ""}`}
+      onMouseEnter={() => setCurious(true)}
+      onMouseLeave={() => setCurious(false)}
       onClick={() => {
         callScotch();
         onToggle(false);
@@ -80,6 +90,7 @@ export function ScotchChip({ open, onToggle }: ScotchChipProps) {
       title="Hey Scotch — tap to call him"
     >
       <div className="scotch-chip__avatar" aria-hidden="true">
+        <span className="scotch-chip__tail" />
         <span className="scotch-chip__ears">
           <i />
           <i />
@@ -91,6 +102,9 @@ export function ScotchChip({ open, onToggle }: ScotchChipProps) {
           <span className="scotch-chip__tongue" />
         </span>
       </div>
+      <span className="scotch-chip__weather" role="status" aria-live="polite">
+        {moodLine} {weather === "rain" ? "· RAIN" : night ? "· NIGHT" : ""}
+      </span>
       <div className="scotch-chip__tip" ref={tipRef}>
         <button
           type="button"

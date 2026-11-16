@@ -39,6 +39,7 @@ import {
 import type { SceneConfig } from "../lib/scene";
 import { currentLicence, type CareerEvent, type CareerState } from "../lib/career";
 import { sound } from "../lib/sound";
+import { publishPitMemo } from "../lib/pitMemos";
 import { ArcadeCard } from "./ArcadeCard";
 import type { XpKind } from "./ArcadeCard";
 import {
@@ -64,6 +65,7 @@ type Entry = {
 };
 
 type LinkState = "checking" | "online" | "offline";
+type PitPlan = { laps: number; request: string };
 
 type TerminalProps = {
   onTakeControl?: (goal: string) => void;
@@ -74,6 +76,7 @@ type TerminalProps = {
   onAward?: (event: CareerEvent) => void;
   onPhoto?: () => void;
   onGarageAction?: (id: string) => void;
+  onRaceLine?: (mood: "apex" | "rotation") => void;
 };
 
 // Matches an actionable computer task so a handoff is offered even when the
@@ -335,10 +338,12 @@ export function Terminal({
   onAward,
   onPhoto,
   onGarageAction,
+  onRaceLine,
 }: TerminalProps) {
   const [settings, setSettings] = useState<AiSettings>(() => loadSettings());
   const [draft, setDraft] = useState<AiSettings>(() => loadSettings());
   const [entries, setEntries] = useState<Entry[]>(INITIAL_ENTRIES);
+  const [pitPlan, setPitPlan] = useState<PitPlan | null>(null);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -367,6 +372,19 @@ export function Terminal({
   const recognizerRef = useRef<Recognizer | null>(null);
   const sendRef = useRef<(value: string) => void>(() => {});
   const chips = useMemo(() => buildChips(entries), [entries]);
+  const memoryThreads = useMemo(() => entries.flatMap((entry, index) => {
+    if (entry.role !== "user" || !entries.slice(index + 1).some((next) => next.role === "assistant")) return [];
+    return [{ id: entry.id, label: entry.content.replace(/\s+/g, " ").trim().slice(0, 38) }];
+  }).slice(-5).reverse(), [entries]);
+
+  const reopenMemoryThread = useCallback((id: string) => {
+    const node = bodyRef.current?.querySelector<HTMLElement>(`[data-entry-id="${CSS.escape(id)}"]`);
+    if (!node) return;
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+    node.classList.remove("is-memory-rewind");
+    window.requestAnimationFrame(() => node.classList.add("is-memory-rewind"));
+    window.setTimeout(() => node.classList.remove("is-memory-rewind"), 1500);
+  }, []);
 
   useEffect(() => {
     voxRef.current = vox;
@@ -852,12 +870,37 @@ export function Terminal({
       return;
     }
     setInput("");
+    if (/\b(tire|tyre)s?\b/i.test(text) && /\b(shorter|shorten|earlier|window|stint)\b/i.test(text)) {
+      const requestedLaps = text.match(/\b(\d{1,2})\s*(?:lap|laps)\b/i);
+      setPitPlan({ laps: Math.max(3, Math.min(20, Number(requestedLaps?.[1] ?? 8))), request: text });
+    }
     setHistory((prev) => [text, ...prev].slice(0, 30));
     setHistoryIndex(-1);
     sound.tick("click");
 
     if (text.startsWith("/")) {
       handleCommand(text);
+      return;
+    }
+
+    const lineMood = /\b(more apex|tighter apex|take more apex)\b/i.test(text)
+      ? "apex"
+      : /\b(less rotation|reduce rotation|calmer rotation)\b/i.test(text)
+        ? "rotation"
+        : null;
+    if (lineMood && onRaceLine) {
+      setEntries((prev) => [
+        ...prev,
+        { id: uid(), role: "user", content: text },
+        {
+          id: uid(), role: "assistant", engineer: true,
+          content: lineMood === "apex"
+            ? "RACING LINE → DEEPER APEX. The motes are drawing toward the inside of each corner."
+            : "RACING LINE → REDUCED ROTATION. The swarm is smoothing its corner offsets for a calmer line.",
+        },
+      ]);
+      onRaceLine(lineMood);
+      sound.whoosh();
       return;
     }
 
@@ -1086,6 +1129,7 @@ export function Terminal({
       }
       if (mounted.current) setStreaming(false);
       abortRef.current = null;
+      if (settled) publishPitMemo(display);
       if (voxRef.current && settled) speakRadio(display);
     }
   };
@@ -1181,6 +1225,24 @@ export function Terminal({
 
   return (
     <div className="term" id="terminal-widget">
+      {pitPlan && (
+        <aside className="pit-board" aria-label="Holographic race strategy board" aria-live="polite">
+          <button className="pit-board__close" type="button" onClick={() => setPitPlan(null)} aria-label="Dismiss pit strategy board">×</button>
+          <span className="pit-board__eyebrow">APEX / PIT WALL · STRATEGY SYNC</span>
+          <h3>TYRE WINDOW <i>SHORTENED</i></h3>
+          <p className="pit-board__request">{pitPlan.request}</p>
+          <div className="pit-board__chips" aria-label="Suggested pit plan">
+            <span>STINT 01</span><span>BOX · LAP {String(pitPlan.laps).padStart(2, "0")}</span><span>SOFT → MEDIUM</span>
+          </div>
+          <div className="pit-board__stem" aria-label={`Illustrative stint lap markers through lap ${pitPlan.laps}`}>
+            <b>STINT LAP / LEAF</b>
+            <span><i>0</i><em>{Array.from({ length: Math.min(4, pitPlan.laps) }, (_, i) => ` ${i + 1}`).join("")}</em></span>
+            <span><i>0</i><em>{Array.from({ length: Math.max(0, pitPlan.laps - 4) }, (_, i) => ` ${i + 5}`).join("")}</em></span>
+            <small>PROPOSED WINDOW · REVIEW BEFORE APPLYING</small>
+          </div>
+          <button className="pit-board__drive" type="button" onClick={() => onDrive?.()}>OPEN TIME ATTACK ↗</button>
+        </aside>
+      )}
       <div className="term__bar">
         <div className="term__lights" aria-hidden="true">
           <span />
@@ -1264,6 +1326,17 @@ export function Terminal({
           <span>WEB GROUNDING · LIVE F1 + WIKIPEDIA</span>
         </div>
 
+        {memoryThreads.length > 0 && (
+          <nav className="term__memory-threads" aria-label="Recent conversation memory threads">
+            <span>MEMORY THREADS</span>
+            {memoryThreads.map((thread) => (
+              <button key={thread.id} type="button" onClick={() => reopenMemoryThread(thread.id)} title={`Reopen conversation: ${thread.label}`}>
+                <i aria-hidden="true" />{thread.label}
+              </button>
+            ))}
+          </nav>
+        )}
+
         {entries.map((entry) => {
           const isStreamingEntry =
             streaming && entry.id === entries[entries.length - 1]?.id;
@@ -1276,6 +1349,7 @@ export function Terminal({
           return (
             <div
               key={entry.id}
+              data-entry-id={entry.id}
               className={`term__entry term__entry--${entry.role}${entry.engineer ? " term__entry--engineer" : ""}`}
             >
               {entry.role === "user" ? (

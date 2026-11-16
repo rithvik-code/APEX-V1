@@ -45,6 +45,7 @@ export type GarageStage = {
   setDiecast: (unlocks: ReadonlySet<string>) => void;
   setService: (on: boolean) => void;
   callPet: (pet: "dog" | "cat") => void;
+  fetchTrophy: () => void;
   setCyrus: (state: CyrusVisual) => void;
   scanCar: () => void;
   hotspots: GarageHotspot[];
@@ -2294,11 +2295,20 @@ export function createGarage(): GarageStage {
 
   // Pets answering a voice call.
   let dogCall = 0;
+  let dogFetch = false;
+  let dogFetchReturning = false;
+  let dogFetchPause = 0;
   let catCall = 0;
   const lastPlayer = { x: 0, z: 6.3 };
   const callPet = (pet: "dog" | "cat"): void => {
     if (pet === "dog") dogCall = 20;
     else catCall = 40;
+  };
+  const fetchTrophy = (): void => {
+    dogFetch = true;
+    dogFetchReturning = false;
+    dogFetchPause = 0;
+    dogCall = 0;
   };
   const scanCar = (): void => {
     scanT = 0;
@@ -2721,7 +2731,46 @@ export function createGarage(): GarageStage {
     let dogAttn = attention(dog.position.x, dog.position.z, 5.2);
     let dogFrozen = dogAttn > 0.45;
     let dogStep: number;
-    if (dogCall > 0 && player) {
+    if (dogFetch) {
+      const returning = dogFetchReturning;
+      if (dogFetchPause > 0) {
+        dogFetchPause = Math.max(0, dogFetchPause - dt);
+        dogStep = 0;
+        dogFrozen = true;
+        dogAttn = 1;
+        if (dogFetchPause === 0) dogFetchReturning = true;
+      } else {
+        const targetX = returning ? -4.6 : 7.0;
+        const targetZ = returning ? 4.8 : -3.1;
+        const dx = targetX - dog.position.x;
+        const dz = targetZ - dog.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 0.42) {
+          dogStep = 0;
+          dogFrozen = true;
+          dogAttn = 1;
+          if (!returning) dogFetchPause = 1.15;
+          else {
+            dogFetch = false;
+            dogRoam.homeX = dog.position.x;
+            dogRoam.homeZ = dog.position.z;
+            dogRoam.tx = dog.position.x;
+            dogRoam.tz = dog.position.z;
+            dogRoam.wait = 5;
+          }
+        } else {
+          const heading = Math.atan2(dx, dz);
+          turnToward(dog, heading, 4.5);
+          const move = Math.min(dist - 0.28, 2.55 * dt);
+          dog.position.x += Math.sin(dog.rotation.y) * move;
+          dog.position.z += Math.cos(dog.rotation.y) * move;
+          dogRoam.stride += move * 5.5;
+          dogStep = move > 1e-4 ? 1 : 0;
+          dogFrozen = dogStep === 0;
+          dogAttn = 0.8;
+        }
+      }
+    } else if (dogCall > 0 && player) {
       dogCall -= dt;
       const moved = runToPlayer(dog, player, 1.05, 3.4, dt);
       dogRoam.stride += moved * 5.5;
@@ -2845,6 +2894,7 @@ export function createGarage(): GarageStage {
     setDiecast,
     setService,
     callPet,
+    fetchTrophy,
     setCyrus,
     scanCar,
     hotspots,

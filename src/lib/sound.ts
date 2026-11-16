@@ -17,6 +17,9 @@ class SoundEngine {
   private engineOscA: OscillatorNode | null = null;
   private engineOscB: OscillatorNode | null = null;
   private engineFilter: BiquadFilterNode | null = null;
+  private acousticSend: GainNode | null = null;
+  private acousticFilter: BiquadFilterNode | null = null;
+  private acousticTreatment = 0;
   private rainGain: GainNode | null = null;
   private rainFilter: BiquadFilterNode | null = null;
   private rev: {
@@ -136,6 +139,29 @@ class SoundEngine {
     engineB.connect(engineFilter);
     engineFilter.connect(engineGain);
     engineGain.connect(master);
+    const acousticSend = ctx.createGain();
+    acousticSend.gain.value = 0;
+    const room = ctx.createConvolver();
+    const roomFilter = ctx.createBiquadFilter();
+    roomFilter.type = "lowpass";
+    roomFilter.frequency.value = 3200;
+    const roomLength = Math.floor(ctx.sampleRate * 1.05);
+    const impulse = ctx.createBuffer(2, roomLength, ctx.sampleRate);
+    for (let channel = 0; channel < 2; channel++) {
+      const samples = impulse.getChannelData(channel);
+      for (let i = 0; i < roomLength; i++) {
+        const decay = Math.pow(1 - i / roomLength, 2.7);
+        samples[i] = (Math.random() * 2 - 1) * decay * (i < ctx.sampleRate * 0.08 ? 0.45 : 0.2);
+      }
+    }
+    room.buffer = impulse;
+    engineGain.connect(acousticSend);
+    acousticSend.connect(room);
+    room.connect(roomFilter);
+    roomFilter.connect(master);
+    this.acousticSend = acousticSend;
+    this.acousticFilter = roomFilter;
+    roomFilter.frequency.value = 2300 + this.acousticTreatment * 3100;
     this.engineFilter = engineFilter;
     this.engineGain = engineGain;
     this.engineOscA = engineA;
@@ -185,12 +211,23 @@ class SoundEngine {
       ctx.currentTime,
       0.35,
     );
+    this.acousticSend?.gain.setTargetAtTime(this.enabled ? 0.035 + this.acousticTreatment * 0.035 : 0, ctx.currentTime, 0.55);
     if (this.enabled) this.tick("start");
     return this.enabled;
   }
 
   get isOn(): boolean {
     return this.enabled;
+  }
+
+  setAcousticTreatment(signature: string): void {
+    let hash = 0;
+    for (const char of signature) hash = (hash * 31 + char.charCodeAt(0)) | 0;
+    this.acousticTreatment = (Math.abs(hash) % 1000) / 999;
+    if (!this.ctx || !this.acousticFilter || !this.acousticSend) return;
+    const now = this.ctx.currentTime;
+    this.acousticFilter.frequency.setTargetAtTime(2300 + this.acousticTreatment * 3100, now, 0.45);
+    this.acousticSend.gain.setTargetAtTime(this.enabled ? 0.035 + this.acousticTreatment * 0.035 : 0, now, 0.55);
   }
 
   setWind(level: number): void {

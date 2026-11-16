@@ -9,12 +9,14 @@ export type DriveSetup = {
   downforce: number; // 0..1 — grip in corners, traded against top speed
   power: number; // 0..1 — acceleration and top speed
   tires: TireCompound;
+  damping: number; // 0..1 — soft sit-back to firm lean-in response
 };
 
 export const DEFAULT_DRIVE_SETUP: DriveSetup = {
   downforce: 0.55,
   power: 0.62,
   tires: "medium",
+  damping: 0.5,
 };
 
 export const TIRE_GRIP: Record<TireCompound, number> = {
@@ -93,6 +95,7 @@ function sanitizeEntry(raw: unknown): DriveEntry | null {
       downforce: clamp01(setupRaw.downforce, DEFAULT_DRIVE_SETUP.downforce),
       power: clamp01(setupRaw.power, DEFAULT_DRIVE_SETUP.power),
       tires,
+      damping: clamp01(setupRaw.damping, DEFAULT_DRIVE_SETUP.damping),
     },
     date: finite(value.date) ?? Date.now(),
   };

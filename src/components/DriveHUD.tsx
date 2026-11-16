@@ -1,7 +1,8 @@
-import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { AssistCallout, DriveHudState, DriveTouch, DriveVehicle } from "../three/drive";
 import type { DriveSetup } from "../lib/driveStore";
 import { formatDelta, formatLap } from "../lib/driveStore";
+import type { CircuitPoem } from "../lib/circuitPoetry";
 
 export type TrackOutline = {
   points: Array<[number, number]>;
@@ -12,6 +13,8 @@ export type TrackOutline = {
 
 type DriveHUDProps = {
   state: DriveHudState;
+  lapPoem: CircuitPoem | null;
+  liveryGlow: boolean;
   track: TrackOutline | null;
   audioOn: boolean;
   onAudio: () => void;
@@ -21,12 +24,13 @@ type DriveHUDProps = {
   onVehicle: (vehicle: DriveVehicle) => void;
   onSetup: (patch: Partial<DriveSetup>) => void;
   onGhost: (enabled: boolean) => void;
+  onReplaySector: (time: number | null) => void;
   onAssist: (enabled: boolean) => void;
   onCallout: (callout: AssistCallout | null) => void;
   onTouch: (touch: DriveTouch) => void;
 };
 
-function Minimap({ state, track }: { state: DriveHudState; track: TrackOutline | null }) {
+function Minimap({ state, track, sketch }: { state: DriveHudState; track: TrackOutline | null; sketch: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -60,6 +64,25 @@ function Minimap({ state, track }: { state: DriveHudState; track: TrackOutline |
     ctx.lineWidth = 2;
     ctx.strokeStyle = "rgba(200,255,22,0.55)";
     ctx.stroke();
+
+    if (sketch) {
+      const redraw = Math.max(0.35, 2.2 - state.lapCount * 0.12);
+      ctx.save();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(111,249,255,0.3)";
+      ctx.setLineDash([2, 4]);
+      ctx.beginPath();
+      track.points.forEach(([x, z], i) => {
+        const wobble = Math.sin(i * 1.71 + state.lapCount * 0.77) * redraw;
+        const pointX = px(x) + wobble;
+        const pointY = py(z) + Math.cos(i * 1.23 + state.lapCount * 0.61) * redraw;
+        if (i === 0) ctx.moveTo(pointX, pointY);
+        else ctx.lineTo(pointX, pointY);
+      });
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
 
     for (const feature of track.features) {
       const x = px(feature.x);
@@ -128,6 +151,8 @@ function SectorRow({
 
 export function DriveHUD({
   state,
+  lapPoem,
+  liveryGlow,
   track,
   audioOn,
   onAudio,
@@ -137,11 +162,14 @@ export function DriveHUD({
   onVehicle,
   onSetup,
   onGhost,
+  onReplaySector,
   onAssist,
   onCallout,
   onTouch,
 }: DriveHUDProps) {
   const prevCallout = useRef<AssistCallout | null>(null);
+  const [speedMotion, setSpeedMotion] = useState<"steady" | "snap-in" | "snap-out">("steady");
+  const [sketchOn, setSketchOn] = useState(false);
 
   useEffect(() => {
     const next = state.assist.on ? state.assist.next : null;
@@ -155,6 +183,22 @@ export function DriveHUD({
   const countdownNumber = Math.max(0, Math.ceil(state.countdown));
   const showCountdown = state.phase === "countdown";
   const speed = Math.round(state.speedKmh);
+  const lineOffset = useMemo(() => {
+    if (!track?.points.length) return 0;
+    let nearest = Infinity;
+    for (const [x, z] of track.points) nearest = Math.min(nearest, Math.hypot(state.pos.x - x, state.pos.z - z));
+    return nearest;
+  }, [state.pos.x, state.pos.z, track]);
+  const lineAlert = state.offTrack || lineOffset > 3.8;
+  const previousSpeed = useRef(speed);
+  useEffect(() => {
+    const delta = speed - previousSpeed.current;
+    previousSpeed.current = speed;
+    if (Math.abs(delta) < 5) return;
+    setSpeedMotion(delta < 0 ? "snap-in" : "snap-out");
+    const timer = window.setTimeout(() => setSpeedMotion("steady"), 190);
+    return () => window.clearTimeout(timer);
+  }, [speed]);
 
   const hold = (flag: "throttle" | "brake" | "handbrake") => ({
     onPointerDown: (event: ReactPointerEvent) => {
@@ -191,6 +235,7 @@ export function DriveHUD({
       <div className="dhud__timing">
         <div className="dhud__tag">
           <span className="dot" /> TIME ATTACK / {state.vehicle === "bike" ? "SUPERBIKE" : "SUPERCAR"}
+          {liveryGlow && <span className="dhud__livery-glow" title="Livery edge glow follows rpm and boost">EDGE GLOW</span>}
           {state.wet && <em>WET</em>}
         </div>
         <div className="dhud__lap">
@@ -218,8 +263,28 @@ export function DriveHUD({
             />
           ))}
         </div>
+        {state.hasGhost && (
+          <>
+          <div className="dhud__replay-ribbons" aria-label="Checkpoint replay ribbons">
+            {[0, 1, 2].map((i) => (
+              <button key={i} type="button" className={`dhud__replay-ribbon is-sector-${i + 1}${state.ghostReplayTime === state.bestSectors[i] ? " is-selected" : ""}`} disabled={!state.hasGhost || state.bestSectors[i] === null} onClick={() => state.bestSectors[i] !== null && onReplaySector(state.bestSectors[i])} aria-label={state.bestSectors[i] === null ? `Sector ${i + 1}, no recorded checkpoint` : `Replay best lap at sector ${i + 1}, ${formatLap(state.bestSectors[i]!)}`}>
+                <b>S{i + 1}</b><span>{state.bestSectors[i] === null ? "NO DATA" : formatLap(state.bestSectors[i]!)}</span>
+              </button>
+            ))}
+            <button type="button" className="dhud__replay-live" disabled={state.ghostReplayTime === null} onClick={() => onReplaySector(null)}>LIVE RUN</button>
+          </div>
+          <p className="dhud__replay-caption" aria-live="polite">{state.ghostReplayTime === null ? "SELECT A RIBBON TO SCRUB YOUR BEST LAP GHOST TO THAT CHECKPOINT." : `BEST LAP GHOST · CHECKPOINT ${state.bestSectors.findIndex((time) => time === state.ghostReplayTime) + 1} · ${formatLap(state.ghostReplayTime)}`}</p>
+          </>
+        )}
         <div className="dhud__minimap">
-          <Minimap state={state} track={track} />
+          <Minimap state={state} track={track} sketch={sketchOn} />
+        </div>
+        <button type="button" className={`dhud__sketch-toggle${sketchOn ? " is-on" : ""}`} onClick={() => setSketchOn((value) => !value)} aria-pressed={sketchOn}>
+          CIRCUIT SKETCH {sketchOn ? "ON" : "OFF"}<span>{Math.min(100, state.lapCount * 7)}% LEARNED</span>
+        </button>
+        <div className={`dhud__line-feedback${lineAlert ? " is-alert" : ""}`} role="status" aria-label={`Racing line ${lineAlert ? "off-line" : "centered"}; ${lineOffset.toFixed(1)} meters from center line`}>
+          <i aria-hidden="true" style={{ transform: `scale(${lineAlert ? 1.2 + Math.min(1.2, lineOffset / 8) : 1})` }} />
+          <span>{lineAlert ? "OFF LINE · RETURN" : "LINE CENTERED"}</span><b>{lineOffset.toFixed(1)} M</b>
         </div>
       </div>
 
@@ -299,6 +364,21 @@ export function DriveHUD({
           <b>{Math.round(state.setup.power * 100)}%</b>
         </label>
 
+        <label className="dhud__slider dhud__body-language">
+          <span>COCKPIT / BODY FEEL</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={state.setup.damping}
+            aria-label="Body feel: sit back to lean in"
+            aria-valuetext={state.setup.damping < 0.35 ? "Sit back, soft response" : state.setup.damping > 0.65 ? "Lean in, firm response" : "Balanced response"}
+            onChange={(event) => onSetup({ damping: Number(event.target.value) })}
+          />
+          <b>{state.setup.damping < 0.35 ? "SIT BACK" : state.setup.damping > 0.65 ? "LEAN IN" : "BALANCED"}</b>
+        </label>
+
         <div className="dhud__row">
           <span>TIRES</span>
           <div className="dhud__seg dhud__seg--three">
@@ -313,6 +393,13 @@ export function DriveHUD({
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="dhud__tire-life" role="img" aria-label={`Tire wear ${Math.round(state.tireWear * 100)} percent; outer shoulder wear ${Math.round(state.shoulderWear * 100)} percent`}>
+          <span>TYRE CONDITION</span>
+          <div className="dhud__tire-visual" aria-hidden="true">{[0, 1, 2, 3].map((tire) => <i key={tire} className={`is-wheel-${tire}`}><b /><em style={{ opacity: Math.max(0.12, state.tireWear), transform: `scaleX(${Math.max(0.12, state.shoulderWear)})` }} /></i>)}</div>
+          <div className="dhud__tire-life-track"><i style={{ width: `${Math.round(state.tireWear * 100)}%` }} /><b style={{ width: `${Math.round(state.shoulderWear * 100)}%` }} /></div>
+          <small>{Math.round(state.tireWear * 100)}% USED <em>·</em> SHOULDER {Math.round(state.shoulderWear * 100)}%</small>
         </div>
 
         <div className="dhud__ghost">
@@ -341,7 +428,7 @@ export function DriveHUD({
           <span>GEAR</span>
           <b>{state.gear}</b>
         </div>
-        <div className="dhud__speed-num">
+        <div className={`dhud__speed-num is-${speedMotion}${state.brake > 0.2 ? " is-braking" : ""}`}>
           <b>{speed}</b>
           <span>KM/H</span>
         </div>
@@ -397,6 +484,14 @@ export function DriveHUD({
         <div className={`dhud__flash dhud__flash--${state.flash.kind}`}>
           {state.flash.text}
         </div>
+      )}
+
+      {lapPoem && (
+        <section className="dhud__poem" role="status" aria-label="Cyrus circuit poem for your new personal best">
+          <span>CYRUS // CIRCUIT POEM</span>
+          <div>{lapPoem.lines.map((line) => <p key={line}>{line}</p>)}</div>
+          <footer><b>{lapPoem.vehicle.toUpperCase()} · {formatLap(lapPoem.time)}</b><span>{lapPoem.sectors.map(formatLap).join(" / ")}</span></footer>
+        </section>
       )}
 
       {state.offTrack && <div className="dhud__offtrack">OFF TRACK</div>}

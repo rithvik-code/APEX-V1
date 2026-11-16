@@ -44,6 +44,7 @@ export type DriveLapEvent = {
   time: number;
   best: boolean;
   lapCount: number;
+  sectors: SectorTimes;
 };
 
 export type AssistCallout = {
@@ -81,10 +82,13 @@ export type DriveHudState = {
   offTrack: boolean;
   drift: number;
   distanceM: number;
+  tireWear: number;
+  shoulderWear: number;
   pos: { x: number; z: number };
   heading: number;
   ghostPos: { x: number; z: number } | null;
   ghostEnabled: boolean;
+  ghostReplayTime: number | null;
   hasGhost: boolean;
   board: DriveEntry[];
   lastRank: number;
@@ -123,6 +127,8 @@ export class DriveSession {
   setup: DriveSetup;
   wet: boolean;
   distanceM = 0;
+  private tireWear = 0;
+  private shoulderWear = 0;
   onLap: ((lap: DriveLapEvent) => void) | null = null;
 
   pos = new THREE.Vector3();
@@ -169,6 +175,7 @@ export class DriveSession {
 
   private ghost: GhostLap | null;
   private ghostEnabled: boolean;
+  private ghostReplayTime: number | null = null;
   private ghostRecording: GhostSample[] = [];
   private lastGhostSample = 0;
   private ghostPos = new THREE.Vector3();
@@ -176,6 +183,8 @@ export class DriveSession {
   private ghostHasPos = false;
   private ghostGroup: THREE.Group;
   private ghostBody: THREE.Group;
+  private ghostTunnel: THREE.Group;
+  private ghostTunnelUntil = 0;
   private trail: THREE.Line;
   private trailPositions: Float32Array;
   private trailCount = 0;
@@ -218,6 +227,22 @@ export class DriveSession {
     this.ghostGroup = new THREE.Group();
     this.ghostBody = this.buildGhostBody();
     this.ghostGroup.add(this.ghostBody);
+    this.ghostTunnel = new THREE.Group();
+    this.ghostTunnel.visible = false;
+    for (let i = 0; i < 6; i++) {
+      const material = new THREE.MeshBasicMaterial({
+        color: i % 2 ? 0x72eaff : ACID,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      const frame = new THREE.Mesh(new THREE.TorusGeometry(2.5 - i * 0.12, 0.025, 6, 48), material);
+      frame.position.z = -i * 1.5;
+      this.ghostTunnel.add(frame);
+    }
+    this.ghostGroup.add(this.ghostTunnel);
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(0.85, 1.05, 40),
       new THREE.MeshBasicMaterial({
@@ -348,6 +373,12 @@ export class DriveSession {
 
   setGhostEnabled(enabled: boolean): void {
     this.ghostEnabled = enabled;
+    if (!enabled) this.ghostReplayTime = null;
+  }
+
+  setGhostReplayTime(time: number | null): void {
+    this.ghostReplayTime = time;
+    this.ghostEnabled = time !== null || this.ghostEnabled;
   }
 
   setAssist(on: boolean): void {
@@ -396,6 +427,8 @@ export class DriveSession {
     this.totalProgress = 0;
     this.boost = 0;
     this.onPad = false;
+    this.tireWear = 0;
+    this.shoulderWear = 0;
     this.snapToGround();
     this.lastT = this.probe.t;
     this.sectors = [null, null, null];
@@ -432,7 +465,7 @@ export class DriveSession {
     const tire = TIRE_GRIP[this.setup.tires];
     const topSpeed = baseTop * (0.74 + power * 0.5) * (1 - down * 0.16);
     const accel = baseAccel * (0.66 + power * 0.7);
-    const grip = baseGrip * (0.62 + tire * 0.42 + down * 0.5) * (this.wet ? 0.66 : 1);
+    const grip = baseGrip * (0.62 + tire * 0.42 + down * 0.5) * (this.wet ? 0.66 : 1) * (1 - this.tireWear * 0.22);
     const steerAuth = baseSteer * (0.9 + tire * 0.16);
     return { topSpeed, accel, grip, steerAuth, brake: accel * 1.7 + 8 };
   }
@@ -533,7 +566,11 @@ export class DriveSession {
 
     this.pos.x += Math.sin(this.velDir) * this.speed * dt;
     this.pos.z += Math.cos(this.velDir) * this.speed * dt;
-    this.distanceM += Math.abs(this.speed) * dt;
+    const traveled = Math.abs(this.speed) * dt;
+    this.distanceM += traveled;
+    const compoundWear = this.setup.tires === "soft" ? 0.000038 : this.setup.tires === "hard" ? 0.000019 : 0.000027;
+    this.tireWear = clamp(this.tireWear + traveled * compoundWear, 0, 1);
+    this.shoulderWear = clamp(this.shoulderWear + traveled * compoundWear * clamp(Math.abs(this.slip) * 0.9 + (this.offTrack ? 0.7 : 0), 0, 1), 0, 1);
 
     // Barrier at the runoff limit: kill the outward velocity component and
     // let the car scrape along the wall instead of gluing to it.
@@ -578,7 +615,8 @@ export class DriveSession {
     const leanTarget = this.airborne ? 0 : this.vehicle === "bike"
       ? -this.yaw * speedFactor * 0.5
       : -this.yaw * speedFactor * 0.12;
-    this.lean += (leanTarget - this.lean) * (1 - Math.exp(-dt * 6));
+    const damping = this.setup.damping ?? 0.5;
+    this.lean += (leanTarget - this.lean) * (1 - Math.exp(-dt * (3 + damping * 9)));
     const pitchTarget = clamp(-accel * 0.004, -0.05, 0.05);
     this.accelPitch += (pitchTarget - this.accelPitch) * (1 - Math.exp(-dt * 5));
 
@@ -592,6 +630,7 @@ export class DriveSession {
 
   private updateVertical(dt: number): void {
     const p = this.probe;
+    const damping = this.setup.damping ?? 0.5;
     const ground = p.height;
     const groundVy = (ground - this.prevGround) / dt;
     this.prevGround = ground;
@@ -599,7 +638,7 @@ export class DriveSession {
     this.y += this.vy * dt;
     if (this.y <= ground) {
       if (this.airborne) {
-        const hit = clamp((groundVy - this.vy) / 16, 0, 1);
+        const hit = clamp(((groundVy - this.vy) / 16) * (1.25 - damping * 0.5), 0, 1);
         this.impact = hit;
         this.speed *= 1 - hit * 0.08;
         if (hit > 0.15) sound.tick("key");
@@ -691,6 +730,7 @@ export class DriveSession {
       time,
       best: result.isBest,
       lapCount: this.lapCount,
+      sectors,
     });
   }
 
@@ -717,7 +757,7 @@ export class DriveSession {
     }
 
     const samples = this.ghost.samples;
-    const gt = clamp(lapElapsed, 0, this.ghost.time);
+    const gt = clamp(this.ghostReplayTime ?? lapElapsed, 0, this.ghost.time);
     let i = 0;
     while (i < samples.length - 2 && samples[i + 1].t < gt) i++;
     const a = samples[i];
@@ -735,10 +775,20 @@ export class DriveSession {
     this.ghostHeading = a.h + angleDelta(b.h, a.h) * f;
     this.ghostHasPos = true;
 
+    if (!this.ghostGroup.visible) this.ghostTunnelUntil = performance.now() + 1900;
     this.ghostGroup.visible = true;
     this.ghostGroup.position.copy(this.ghostPos);
     this.ghostGroup.rotation.y = this.ghostHeading;
     this.ghostBody.rotation.z = Math.sin(lapElapsed * 2) * 0.02;
+    this.ghostTunnel.visible = performance.now() < this.ghostTunnelUntil;
+    if (this.ghostTunnel.visible) {
+      const left = clamp((this.ghostTunnelUntil - performance.now()) / 1900, 0, 1);
+      this.ghostTunnel.children.forEach((frame, index) => {
+        const material = (frame as THREE.Mesh).material as THREE.MeshBasicMaterial;
+        material.opacity = (0.28 + 0.3 * (1 - index / 6)) * left;
+        frame.position.z = -index * 1.5 + Math.sin(performance.now() * 0.003 - index * 0.5) * 0.08;
+      });
+    }
 
     // Fading trail behind the ghost.
     const maxTrail = this.trailPositions.length / 3;
@@ -811,10 +861,13 @@ export class DriveSession {
       offTrack: this.offTrack,
       drift: clamp(Math.abs(this.slip) / 0.6, 0, 1),
       distanceM: this.distanceM,
+      tireWear: this.tireWear,
+      shoulderWear: this.shoulderWear,
       pos: { x: this.pos.x, z: this.pos.z },
       heading: this.heading,
       ghostPos: this.ghostHasPos ? { x: this.ghostPos.x, z: this.ghostPos.z } : null,
       ghostEnabled: this.ghostEnabled,
+      ghostReplayTime: this.ghostReplayTime,
       hasGhost: this.ghost !== null,
       board: this.board,
       lastRank: this.lastRank,

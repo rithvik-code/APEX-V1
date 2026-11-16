@@ -4,7 +4,7 @@ export type FlowColorMode = "velocity" | "pressure" | "acid";
 
 const SAMPLES = 110;
 
-type Streamline = {
+export type Streamline = {
   points: Float32Array;
   speed: Float32Array;
   pressure: Float32Array;
@@ -12,6 +12,28 @@ type Streamline = {
   seed: number;
   hot: boolean;
 };
+
+export type AeroPressureNode = { label: string; value: number };
+
+export function aeroPressureNodes(lines: Streamline[]): AeroPressureNode[] {
+  return [
+    { label: "NOSE", z: 2.35 },
+    { label: "CANOPY", z: -0.2 },
+    { label: "REAR WING", z: -2.05 },
+  ].map(({ label, z }) => {
+    let total = 0;
+    for (const line of lines) {
+      let nearest = 0;
+      let distance = Infinity;
+      for (let i = 0; i < SAMPLES; i++) {
+        const candidate = Math.abs(line.points[i * 3 + 2] - z);
+        if (candidate < distance) { distance = candidate; nearest = i; }
+      }
+      total += line.pressure[nearest];
+    }
+    return { label, value: THREE.MathUtils.clamp(total / Math.max(1, lines.length), 0, 1) };
+  });
+}
 
 function knots(z: number, table: Array<[number, number]>): number {
   if (z >= table[0][0]) return table[0][1];
@@ -423,6 +445,7 @@ export class AeroFlow {
   private hotMaterial: THREE.ShaderMaterial;
   private pointMaterial: THREE.ShaderMaterial;
   private points: THREE.Points;
+  private ribbonMaterial: THREE.MeshBasicMaterial;
   private particleCount: number;
   private particleLine: Uint16Array;
   private particleT: Float32Array;
@@ -449,6 +472,46 @@ export class AeroFlow {
     const hot = lines.filter((l) => l.hot);
     this.group.add(this.buildLineMesh(ext, false));
     if (hot.length) this.group.add(this.buildLineMesh(hot, true));
+    const ribbonLines = lines.filter((line, index) => !line.hot && index % Math.max(1, Math.floor(lines.length / 8)) === 2).slice(0, 8);
+    const ribbonGeometries = ribbonLines.map((line) => {
+      const curve = new THREE.CatmullRomCurve3(Array.from({ length: SAMPLES }, (_, i) => new THREE.Vector3(line.points[i * 3], line.points[i * 3 + 1], line.points[i * 3 + 2])), false, "centripetal", 0.4);
+      const geometry = new THREE.TubeGeometry(curve, 88, 0.012, 4, false);
+      const colors = new Float32Array(geometry.attributes.position.count * 3);
+      for (let vertex = 0; vertex < geometry.attributes.position.count; vertex++) {
+        const sample = Math.min(SAMPLES - 1, Math.floor(vertex / 5));
+        this.tmpColor.copy(C_P_LOW).lerp(C_P_HIGH, line.pressure[sample]);
+        colors[vertex * 3] = this.tmpColor.r;
+        colors[vertex * 3 + 1] = this.tmpColor.g;
+        colors[vertex * 3 + 2] = this.tmpColor.b;
+      }
+      geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      return geometry;
+    });
+    const ribbonGeometry = new THREE.BufferGeometry();
+    const ribbonPositions: number[] = [];
+    const ribbonColors: number[] = [];
+    const ribbonIndices: number[] = [];
+    let ribbonVertexOffset = 0;
+    for (const geometry of ribbonGeometries) {
+      const position = geometry.getAttribute("position");
+      const color = geometry.getAttribute("color");
+      for (let i = 0; i < position.count; i++) {
+        ribbonPositions.push(position.getX(i), position.getY(i), position.getZ(i));
+        ribbonColors.push(color.getX(i), color.getY(i), color.getZ(i));
+      }
+      const sourceIndex = geometry.getIndex();
+      if (sourceIndex) for (let i = 0; i < sourceIndex.count; i++) ribbonIndices.push(sourceIndex.getX(i) + ribbonVertexOffset);
+      ribbonVertexOffset += position.count;
+      geometry.dispose();
+    }
+    ribbonGeometry.setAttribute("position", new THREE.Float32BufferAttribute(ribbonPositions, 3));
+    ribbonGeometry.setAttribute("color", new THREE.Float32BufferAttribute(ribbonColors, 3));
+    ribbonGeometry.setIndex(ribbonIndices);
+    this.ribbonMaterial = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
+    const ribbons = new THREE.Mesh(ribbonGeometry, this.ribbonMaterial);
+    ribbons.renderOrder = 11;
+    ribbons.frustumCulled = false;
+    this.group.add(ribbons);
 
     this.extMaterial = (this.group.children[0] as THREE.LineSegments)
       .material as THREE.ShaderMaterial;
@@ -586,6 +649,7 @@ export class AeroFlow {
       material.uniforms.uTurb.value = this.turbulence;
     }
     this.pointMaterial.uniforms.uOpacity.value = this.opacity * 0.9;
+    this.ribbonMaterial.opacity = this.opacity * (0.15 + this.turbulence * 0.12);
 
     const active = Math.floor(this.particleCount * this.density);
     this.points.geometry.setDrawRange(0, active);

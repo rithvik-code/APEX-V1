@@ -130,6 +130,7 @@ function loadConversation(): CyrusLine[] {
 
 export type CyrusIntent =
   | { kind: "pet"; pet: "dog" | "cat" | "turtles" }
+  | { kind: "fetchTrophy" }
   | { kind: "drive"; vehicle: "car" | "bike" }
   | { kind: "garage" }
   | { kind: "scroll"; direction: "next" | "previous" | "top"; section?: string }
@@ -197,6 +198,9 @@ export function parseIntent(raw: string): CyrusIntent {
     .replace(/ please$/, "");
   const on = (yes: RegExp, no: RegExp): boolean | null =>
     no.test(t) ? false : yes.test(t) ? true : null;
+
+  if (/^(?:fetch|get|bring|retrieve) (?:me )?(?:the )?(?:trophy|cup)|^fetch the (?:car|bike) trophy$/.test(t))
+    return { kind: "fetchTrophy" };
 
   const pet = /^(?:(?:hey|hi|hello|call|bring|fetch)\s+)?(?:(?:me|my)\s+)?(?:the\s+)?(scotch|scotty|scottie|scott|scot|dog|doggo|doggy|puppy|mario|cat|kitty|kitten|turtles?|(?:mr and )?mrs? turtle)(?:\s+(?:come here|come to me|over here|to me|here))?$/.exec(t);
   if (pet) return { kind: "pet", pet: /turtle/.test(pet[1]) ? "turtles" : /mario|cat|kitty|kitten/.test(pet[1]) ? "cat" : "dog" };

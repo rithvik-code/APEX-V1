@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   aeroTelemetry,
   CAMERA_PRESETS,
@@ -26,6 +26,7 @@ import {
   type LapRecording,
 } from "../lib/clip";
 import { loadBoard } from "../lib/driveStore";
+import { aeroPressureNodes, buildBikeStreamlines, buildCarStreamlines } from "../three/aero";
 import {
   currentLicence,
   formatKm,
@@ -382,7 +383,15 @@ export function AeroDock({
   const [buildName, setBuildName] = useState("");
   const [importCode, setImportCode] = useState("");
   const [shareMsg, setShareMsg] = useState("");
+  const [dnaNote, setDnaNote] = useState("");
   const telemetry = aeroTelemetry(config.windSpeed);
+  const pressureNodes = useMemo(() => {
+    const lines = [
+      ...(config.focus !== "bike" ? buildCarStreamlines() : []),
+      ...(config.focus !== "car" ? buildBikeStreamlines() : []),
+    ];
+    return aeroPressureNodes(lines);
+  }, [config.focus]);
   const livery =
     LIVERIES.find((entry) => entry.id === config.livery) ?? LIVERIES[0];
   const dyno = dynoPoint(config.rpm);
@@ -392,6 +401,11 @@ export function AeroDock({
   const licence = currentLicence(career.cp);
   const next = nextLicence(career.cp);
   const unlockTotal = Object.keys(UNLOCK_LABELS).length;
+  const mutateLivery = (name: string, base: string, accent: string) => {
+    setDnaNote(`${name}: base ${base.toUpperCase()} with ${accent.toUpperCase()} edge, blended across the bodywork.`);
+    onChange({ paint: { ...config.paint, enabled: true, base, accent, stripe: true } });
+    sound.tick("start");
+  };
   const [scanState, setScanState] = useState<"idle" | "loading" | "ready" | "offline">("idle");
   const [scanMsg, setScanMsg] = useState("");
   const [careerMsg, setCareerMsg] = useState("");
@@ -559,6 +573,10 @@ export function AeroDock({
 
             <div className="aero-dock__group">
               <Segmented label="FLOW COLOR" value={config.colorMode} options={[{ id: "velocity" as const, name: "VELOCITY" }, { id: "pressure" as const, name: "PRESSURE" }, { id: "acid" as const, name: "ACID" }]} onChange={(colorMode) => onChange({ colorMode })} />
+              <div className="aero-pressure-read" aria-label="Plain text pressure reading across airflow ribbons">
+                <span>RIBBON PRESSURE / NORMALIZED</span>
+                {pressureNodes.map((node) => <div key={node.label}><b>{node.label}</b><i><em style={{ width: `${Math.round(node.value * 100)}%` }} /></i><strong>{node.value < .36 ? "LOW" : node.value > .68 ? "HIGH" : "MID"} {Math.round(node.value * 100)}%</strong></div>)}
+              </div>
               <Segmented label="FLOW FOCUS" value={config.focus} options={[{ id: "both" as const, name: "BOTH" }, { id: "car" as const, name: "CAR" }, { id: "bike" as const, name: "BIKE" }]} onChange={(focus) => onChange({ focus })} />
               <Segmented label="CAMERA" value={config.camera} options={CAMERA_PRESETS} onChange={(camera) => onChange({ camera })} />
               <Segmented label="LIGHTING" value={config.lighting} options={LIGHTING_PRESETS} onChange={(lighting) => onChange({ lighting })} />
@@ -632,6 +650,14 @@ export function AeroDock({
                   <span>NUMBER</span>
                   <input type="text" maxLength={3} value={config.paint.number} disabled={!config.paint.enabled} onChange={(e) => onChange({ paint: { ...config.paint, number: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 3), enabled: true } })} />
                 </label>
+              </div>
+              <div className="aero-dna">
+                <div><span>CYRUS / LIVERY DNA</span><small>{dnaNote || "Choose a mutation. The paint eases into its new palette."}</small></div>
+                <div className="aero-dna__choices">
+                  <button type="button" onClick={() => mutateLivery("SHARPER ACID EDGE", "#20251c", "#c8ff16")}><i style={{ background: "#c8ff16" }} />ACID EDGE</button>
+                  <button type="button" onClick={() => mutateLivery("ION BLUE VEIL", "#132430", "#6ff9ff")}><i style={{ background: "#6ff9ff" }} />ION VEIL</button>
+                  <button type="button" onClick={() => mutateLivery("EMBER VEIN", "#351c18", "#ff5a1f")}><i style={{ background: "#ff5a1f" }} />EMBER VEIN</button>
+                </div>
               </div>
             </div>
 

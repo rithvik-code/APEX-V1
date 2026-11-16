@@ -6,7 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import type { CustomPaint } from "../lib/scene";
+import { loadGarage, type CustomPaint, type GarageEntry, type Weather } from "../lib/scene";
 import {
   knowledgeState,
   subscribeKnowledge,
@@ -14,7 +14,10 @@ import {
   type KnowledgeState,
 } from "../lib/knowledge";
 import { sound } from "../lib/sound";
+import { speakRadio } from "../lib/radio";
 import { DIE_CAST_CATALOG, diecastUnlocked } from "../lib/diecast";
+import { subscribePitMemos, type PitMemo } from "../lib/pitMemos";
+import { formatLap, loadBoard, type DriveEntry } from "../lib/driveStore";
 
 type GarageAction = { id: string; seq: number };
 
@@ -37,6 +40,10 @@ type GarageProps = {
   liftUp: boolean;
   service: boolean;
   paint: CustomPaint;
+  weather: Weather;
+  rainAmount: number;
+  night: boolean;
+  windSpeed: number;
   onPaint: (patch: Partial<CustomPaint>) => void;
   onDriveOut: (vehicle: "car" | "bike") => void;
   onSummon: (vehicle: "car" | "bike") => void;
@@ -46,12 +53,20 @@ type GarageProps = {
 };
 
 type Panel = null | "shelf" | "computer" | "trophies" | "radio" | "launch";
+type MemoryPreview = { kind: "lap"; entry: DriveEntry } | { kind: "build"; entry: GarageEntry };
 
 const STATIONS = [
   { name: "PIT FM", note: "race control + team radio" },
   { name: "SYNTH 88", note: "midnight drive synthwave" },
   { name: "V12 AM", note: "engine mic, no commentary" },
   { name: "LO-FI BAY", note: "tape hiss, crackle, midnight chords" },
+];
+
+const RADIO_CONSTELLATIONS = [
+  [[50,8],[72,18],[92,50],[72,82],[50,92],[28,82],[8,50],[28,18],[50,28],[70,50],[50,72],[30,50]],
+  [[50,8],[71,13],[87,29],[92,50],[87,71],[71,87],[50,92],[29,87],[13,71],[8,50],[13,29],[29,13]],
+  [[50,8],[65,23],[82,35],[92,50],[72,58],[65,77],[50,92],[35,77],[18,65],[8,50],[28,42],[35,23]],
+  [[50,8],[72,18],[84,38],[92,50],[74,65],[68,84],[50,92],[36,75],[14,70],[8,50],[27,35],[34,17]],
 ];
 
 const PAINTS = [
@@ -84,8 +99,11 @@ function LaunchPractice({
   const [phase, setPhase] = useState<"idle" | "live" | "done">("idle");
   const [rpm, setRpm] = useState(0);
   const [result, setResult] = useState("");
+  const [countdown, setCountdown] = useState<number | null>(null);
   const rpmRef = useRef(0);
   const timer = useRef<number | null>(null);
+  const countdownTimer = useRef<number | null>(null);
+  const countdownValue = useRef(0);
   const live = useRef(false);
 
   const stop = useCallback(() => {
@@ -96,6 +114,27 @@ function LaunchPractice({
   }, []);
 
   useEffect(() => stop, [stop]);
+  useEffect(() => () => { if (countdownTimer.current !== null) window.clearInterval(countdownTimer.current); }, []);
+
+  const stage = useCallback(() => {
+    if (countdownTimer.current !== null) window.clearInterval(countdownTimer.current);
+    countdownValue.current = 3;
+    setCountdown(3);
+    speakRadio("Three");
+    countdownTimer.current = window.setInterval(() => {
+      const next = countdownValue.current - 1;
+      countdownValue.current = next;
+      setCountdown(next);
+      speakRadio(next > 0 ? String(next) : "Go");
+      sound.tick("start");
+      if (next <= 0) {
+        if (countdownTimer.current !== null) window.clearInterval(countdownTimer.current);
+        countdownTimer.current = null;
+        onToast("GREEN LIGHT — launch practice is staged");
+        window.setTimeout(() => setCountdown(null), 900);
+      }
+    }, 1000);
+  }, [onToast]);
 
   const evaluate = useCallback(() => {
     stop();
@@ -147,6 +186,9 @@ function LaunchPractice({
         <span>78</span>
         <span>100</span>
       </div>
+      <button type="button" className="garage__launch-stage" onClick={stage} disabled={countdown !== null && countdown > 0}>
+        <span>STAGE LAUNCH</span><b>3 SEC / VOICE COUNT</b>
+      </button>
       <button
         type="button"
         className="garage__launch-btn"
@@ -174,6 +216,12 @@ function LaunchPractice({
         <span>BUILD &amp; RELEASE</span>
         <b>{phase === "live" ? `${Math.round(rpm)}%` : "HOLD"}</b>
       </button>
+      {countdown !== null && (
+        <div className="garage__launch-clock" role="status" aria-live="assertive" aria-label={countdown === 0 ? "Go" : `${countdown} seconds to launch`}>
+          <svg viewBox="0 0 120 120" aria-hidden="true"><circle className="launch-clock__track" cx="60" cy="60" r="50"/><circle className="launch-clock__sweep" cx="60" cy="60" r="50" style={{ strokeDashoffset: `${314 * (1 - (3 - countdown) / 3)}` }}/><text x="60" y="67">{countdown === 0 ? "GO" : countdown}</text></svg>
+          <span>{countdown === 0 ? "GREEN LIGHT" : "STAGED SEQUENCE"}</span>
+        </div>
+      )}
       {result && (
         <p
           className={`garage__launch-result${
@@ -206,6 +254,10 @@ export function Garage({
   liftUp,
   service,
   paint,
+  weather,
+  rainAmount,
+  night,
+  windSpeed,
   onPaint,
   onDriveOut,
   onSummon,
@@ -222,6 +274,11 @@ export function Garage({
   const [tone, setTone] = useState(0.6);
   const [diecast, setDiecast] = useState(DIE_CAST_CATALOG[0].id);
   const [knowledge, setKnowledge] = useState<KnowledgeState>(() => knowledgeState());
+  const [memos, setMemos] = useState<PitMemo[]>([]);
+  const [bestLapPlaques] = useState(() => [...loadBoard("car"), ...loadBoard("bike")].sort((a, b) => a.time - b.time).slice(0, 4));
+  const [savedPlaybooks] = useState(() => loadGarage().slice(0, 4));
+  const [memoryPreview, setMemoryPreview] = useState<MemoryPreview | null>(null);
+  const memoTimers = useRef(new Map<number, number>());
   // Seed from the incoming action so a stale action held by App while the
   // garage was closed does not replay on the next entry.
   const lastAction = useRef(action?.seq ?? 0);
@@ -229,6 +286,22 @@ export function Garage({
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribePitMemos((memo) => {
+      setMemos((current) => [...current.slice(-2), memo]);
+      const timer = window.setTimeout(() => {
+        setMemos((current) => current.filter((item) => item.id !== memo.id));
+        memoTimers.current.delete(memo.id);
+      }, 5200);
+      memoTimers.current.set(memo.id, timer);
+    });
+    return () => {
+      unsubscribe();
+      memoTimers.current.forEach((timer) => window.clearTimeout(timer));
+      memoTimers.current.clear();
+    };
   }, []);
 
   useEffect(
@@ -256,6 +329,19 @@ export function Garage({
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [photo, panel]);
+
+  useEffect(() => {
+    if (photo) return;
+    const onFetchKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "f" || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+      event.preventDefault();
+      onInteract("fetch-trophy");
+    };
+    window.addEventListener("keydown", onFetchKey);
+    return () => window.removeEventListener("keydown", onFetchKey);
+  }, [photo, onInteract]);
 
   useEffect(() => {
     if (!action || action.seq === lastAction.current) return;
@@ -373,6 +459,29 @@ export function Garage({
       <div className="garage__backdrop" aria-hidden="true" />
 
       {!photo && (
+        <aside className={`garage__weather-mural${weather === "rain" ? " is-rain" : ""}${night ? " is-night" : ""}`} aria-label={`${weather === "rain" ? `Rain ${(rainAmount * 100).toFixed(0)} percent` : "Clear weather"}, ${night ? "night" : "day"}, wind ${Math.round(windSpeed)} kilometers per hour`}>
+          <svg viewBox="0 0 180 88" role="img" aria-label="Abstract live weather painting">
+            <defs><linearGradient id="garageWeatherStroke" x1="0" y1="0" x2="1" y2="1"><stop stopColor="var(--weather-a)"/><stop offset="1" stopColor="var(--weather-b)"/></linearGradient></defs>
+            <path className="weather-stroke weather-stroke--one" d="M8 60 C38 18 51 72 83 38 S126 19 171 49" />
+            <path className="weather-stroke weather-stroke--two" d="M8 69 C40 40 59 84 94 54 S137 37 171 62" />
+            <path className="weather-stroke weather-stroke--three" d="M18 34 C42 12 58 40 82 23 S128 7 160 28" />
+            {weather === "rain" && [0,1,2,3,4,5,6].map((drop) => <path key={drop} className="weather-drop" d={`M${20 + drop * 23} ${18 + (drop % 3) * 14} l-5 12`} style={{ animationDelay: `${drop * -0.21}s` }} />)}
+          </svg>
+          <div><b>{night ? "NOCTURNE" : "DAYLIGHT"} / {weather === "rain" ? "RAIN STUDY" : "CLEAR AIR"}</b><span>WIND {Math.round(windSpeed)} KM/H · {weather === "rain" ? `PRECIP ${Math.round(rainAmount * 100)}%` : "DRY LINE"}</span></div>
+        </aside>
+      )}
+
+      {!photo && memos.length > 0 && (
+        <aside className="garage__memo-slugs" aria-label="Recent Cyrus pit-wall notes" aria-live="polite">
+          {memos.map((memo) => (
+            <div className="garage__memo-slug" key={memo.id}>
+              <b>CYRUS / PIT NOTE</b><span>{memo.text}</span>
+            </div>
+          ))}
+        </aside>
+      )}
+
+      {!photo && (
         <header className="garage__bar">
           <div className="garage__brand">
             <span className="garage__dot" aria-hidden="true" />
@@ -415,6 +524,9 @@ export function Garage({
               <b>HOLD</b>
             </button>
           </div>
+          <button type="button" className="garage__fetch-quest" onClick={() => onInteract("fetch-trophy")}>
+            <span>SCOTCH / FETCH THE TROPHY</span><kbd>F</kbd>
+          </button>
 
           <div className="garage__toggle-row">
             <button
@@ -539,6 +651,23 @@ export function Garage({
                   </em>
                 )}
               </div>
+              <section className="garage__memory-shelf" aria-label="Memory lane garage shelf">
+                <header><b>MEMORY LANE</b><span>BEST LAPS / SAVED PLAYBOOKS</span></header>
+                <div className="garage__memory-plaques">
+                  {bestLapPlaques.map((entry) => <button key={entry.id} type="button" onClick={() => setMemoryPreview({ kind: "lap", entry })}>
+                    <i>GHOST LAP · {entry.vehicle.toUpperCase()}</i><b>{formatLap(entry.time)}</b><span>{entry.sectors.map(formatLap).join(" / ")}</span>
+                  </button>)}
+                  {savedPlaybooks.map((entry) => <button key={entry.id} type="button" onClick={() => setMemoryPreview({ kind: "build", entry })}>
+                    <i>SAVED PLAYBOOK</i><b>{entry.name}</b><span>{entry.config.livery.toUpperCase()} · {new Date(entry.createdAt).toLocaleDateString()}</span>
+                  </button>)}
+                  {bestLapPlaques.length + savedPlaybooks.length === 0 && <p>Run a clean lap or save a setup to leave the first memory on this shelf.</p>}
+                </div>
+                {memoryPreview && <div className="garage__memory-preview" role="status" aria-live="polite">
+                  <div><b>{memoryPreview.kind === "lap" ? `REPLAY · ${memoryPreview.entry.vehicle.toUpperCase()} SECTOR TRACE` : `PLAYBOOK · ${memoryPreview.entry.name}`}</b><button type="button" onClick={() => setMemoryPreview(null)} aria-label="Close memory preview">×</button></div>
+                  <svg viewBox="0 0 220 48" aria-hidden="true"><path d="M3 37 C22 35 24 13 48 18 S68 43 92 27 S119 7 141 16 S174 42 217 9"/><path d="M3 37 C22 35 24 13 48 18 S68 43 92 27 S119 7 141 16 S174 42 217 9" className="is-glow"/></svg>
+                  <span>{memoryPreview.kind === "lap" ? `PERSONAL BEST ${formatLap(memoryPreview.entry.time)} · ${memoryPreview.entry.sectors.map(formatLap).join(" / ")}` : `SAVED ${memoryPreview.entry.config.livery.toUpperCase()} LIVERY · TAP TO REOPEN THE SETUP IN THE WIND TUNNEL`}</span>
+                </div>}
+              </section>
             </div>
           )}
 
@@ -637,6 +766,18 @@ export function Garage({
           {panel === "radio" && (
             <div className="garage__stations">
               <p>Bay speakers. The engine mic feed is the honest one.</p>
+              <div className={`garage__constellation is-${station}`} aria-hidden="true">
+                <svg viewBox="0 0 100 100" focusable="false">
+                  <polyline points={RADIO_CONSTELLATIONS[Math.max(0, station - 1)].map(([x, y]) => `${x},${y}`).join(" ")} />
+                  <circle className="garage__constellation-core" cx="50" cy="50" r="4" />
+                </svg>
+                {RADIO_CONSTELLATIONS[Math.max(0, station - 1)].map(([x, y], index) => (
+                  <i key={index} style={{ left: `${x}%`, top: `${y}%`, animationDelay: `${index * -0.13}s` }} />
+                ))}
+              </div>
+              <p className={`garage__constellation-label is-${station}`} aria-live="polite">
+                {station === 0 ? "RADIO SILENT · IDLE ONLY" : `${STATIONS[station - 1].name} · SIGNAL CONSTELLATION`}
+              </p>
               <button
                 type="button"
                 className={station === 0 ? "is-active" : ""}

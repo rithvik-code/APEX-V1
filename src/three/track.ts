@@ -404,6 +404,7 @@ export type Track = {
   tangentAt: (t: number, out: THREE.Vector3) => THREE.Vector3;
   distanceFromCenter: (x: number, z: number) => number;
   setAssist: (on: boolean) => void;
+  setLineMood: (mood: "apex" | "rotation") => void;
   update: (dt: number) => void;
   dispose: () => void;
 };
@@ -814,6 +815,25 @@ export function buildTrack(): Track {
     strip((i) => plan.line[i] + 0.42, (i) => plan.line[i] - 0.42, 0.026, 0, n, 0.5, lineColor),
     lineMat,
   ));
+  // A small flock rides the racing line. Each point eases toward its neighbour
+  // while a slow phase shift carries the swarm around the circuit.
+  const moteCount = 54;
+  const motePositions = new Float32Array(moteCount * 3);
+  const motePhases = Float32Array.from({ length: moteCount }, (_, i) => i / moteCount);
+  const moteGeo = keep(new THREE.BufferGeometry());
+  moteGeo.setAttribute("position", new THREE.BufferAttribute(motePositions, 3));
+  const moteMat = keep(new THREE.PointsMaterial({
+    color: 0x76eaff,
+    size: 0.38,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.78,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  }));
+  const motes = new THREE.Points(moteGeo, moteMat);
+  motes.frustumCulled = false;
+  assist.add(motes);
   const boardGeo = keep(new THREE.PlaneGeometry(2.4, 0.9));
   for (const c of plan.corners) {
     if (c.entryKmh - c.kmh < 30) continue;
@@ -918,6 +938,7 @@ export function buildTrack(): Track {
   };
 
   let time = 0;
+  let lineMood: "apex" | "rotation" = "apex";
   const update = (dt: number): void => {
     time += dt;
     boostTex.offset.y -= dt * 2.4;
@@ -927,6 +948,22 @@ export function buildTrack(): Track {
       archMats[k].opacity = 0.55 + 0.35 * (0.5 + 0.5 * Math.sin(time * 3.2 - k));
     }
     lipMat.opacity = 0.7 + 0.28 * Math.sin(time * 6);
+    const lineAttribute = moteGeo.getAttribute("position") as THREE.BufferAttribute;
+    for (let i = 0; i < moteCount; i++) {
+      const phase = (motePhases[i] + time * 0.018) % 1;
+      const f = phase * n;
+      const a = Math.floor(f) % n;
+      const b = (a + 1) % n;
+      const u = f - Math.floor(f);
+      const curvatureSide = Math.sign(plan.curvature[a]);
+      const apexOffset = lineMood === "apex" ? curvatureSide * 0.72 : plan.line[a] * -0.38;
+      const lateral = plan.line[a] + apexOffset;
+      const x = (xs[a] + (xs[b] - xs[a]) * u) + nx[a] * lateral;
+      const z = (zs[a] + (zs[b] - zs[a]) * u) + nz[a] * lateral;
+      const off = lateral;
+      lineAttribute.setXYZ(i, x, height[a] + bank[a] * off + 0.16 + Math.sin(time * 5 + i) * 0.035, z);
+    }
+    lineAttribute.needsUpdate = true;
   };
 
   return {
@@ -958,6 +995,7 @@ export function buildTrack(): Track {
     setAssist: (on) => {
       assist.visible = on;
     },
+    setLineMood: (mood) => { lineMood = mood; },
     update,
     dispose: () => {
       for (const item of disposables) item.dispose();

@@ -165,6 +165,19 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
         </div>
         <button
           type="button"
+          className="cyrus-hud__persona-lens"
+          onClick={() => {
+            const index = CYRUS_PERSONAS.findIndex((persona) => persona.id === responsePrefs.persona);
+            const next = CYRUS_PERSONAS[(index + 1) % CYRUS_PERSONAS.length];
+            setResponsePrefs(cyrus.applyPersona(next.id));
+          }}
+          aria-label={`Switch co-driver persona. Current ${personaById(responsePrefs.persona).label}. Next persona.`}
+          title={`${personaById(responsePrefs.persona).label} · click to switch`}
+        >
+          <i aria-hidden="true" />{personaById(responsePrefs.persona).label.toUpperCase()}
+        </button>
+        <button
+          type="button"
           className="cyrus-hud__mic"
           aria-label={enabled ? "Disable CYRUS microphone" : "Enable CYRUS microphone"}
           aria-pressed={enabled}
