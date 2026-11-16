@@ -9,6 +9,7 @@ import subprocess
 import threading
 import urllib.error
 import urllib.request
+import random
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
@@ -64,7 +65,7 @@ class CyrusCompanion:
         self.messages = []
         self.expanded = False
         self.busy = False
-        self.voice_on = True
+        self.voice_on = False
         self.always_listen = True
         self._drag = None
         self._bubble_pointer = None
@@ -75,6 +76,10 @@ class CyrusCompanion:
         self.auto_send_voice = False
         self.anim_tick = 0
         self._hover_after = None
+        self.hovering = False
+        self._last_pet_motion = 0.0
+        self._wander_target = None
+        self.walking = False
         self._sprite_photo = None
         self.root.wm_attributes("-transparentcolor", TRANSPARENT)
         self._draw_bubble()
@@ -147,25 +152,30 @@ class CyrusCompanion:
         shadow = Image.new("RGBA", im.size, (0,0,0,0))
         ImageDraw.Draw(shadow, "RGBA").ellipse((22*k,87*k,85*k,97*k), fill=(10,15,20,68))
         im.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(4*k)))
-        # Far legs, tail and body establish a three-quarter view.
-        rounded((*p(37,65),*p(48,89)), 4, (222,221,215,255), (191,190,184,255))
-        rounded((*p(66,65),*p(77,88)), 4, (229,228,222,255), (197,196,190,255))
-        poly([p(74,54),p(94,44),p(98,48),p(79,62)], (238,237,231,255), (201,200,194,255))
-        poly([p(31,37),p(73,35),p(81,57),p(76,73),p(34,74),p(27,57)], (252,251,246,255), (216,215,209,255))
-        poly([p(72,39),p(78,40),p(81,57),p(76,71),p(71,70)], (224,223,217,255))
-        rounded((*p(29,66),*p(42,92)), 4, (250,249,244,255), (209,208,202,255))
-        rounded((*p(58,67),*p(72,92)), 4, (247,246,241,255), (207,206,200,255))
-        # Head with shaded cheeks, raised ears and glossy highlight.
-        poly([p(33,21),p(39,24),p(36,42),p(30,40)], (231,230,224,255), (202,201,195,255))
-        poly([p(62,23),p(68,20),p(71,39),p(66,42)], (235,234,228,255), (204,203,197,255))
-        ellipse((*p(31,8),*p(67,47)), (253,252,247,255), (215,214,208,255))
-        ellipse((*p(37,10),*p(51,20)), (255,255,255,150))
-        shift = math.sin(frame*.045)*.8
-        ellipse((*p(39+shift,25),*p(44+shift,31)), (112,110,104,255))
-        ellipse((*p(55+shift,25),*p(60+shift,31)), (112,110,104,255))
-        poly([p(41,32),p(57,32),p(59,42),p(52,46),p(40,42)], (239,238,232,255), (211,210,204,255))
-        rounded((*p(48,36),*p(55,42)), 2, (101,100,96,255))
-        d.arc((29*k,7*k,69*k,49*k), 195, 288, fill=(255,255,255,190), width=2*k)
+        # Side profile: the little tail sits at the left, with the muzzle facing right.
+        wag = math.sin(frame * .42) * (16 if self.hovering else 2)
+        d.line([p(31,52), p(22,49+wag*.25), p(13,42+wag), p(7,45+wag)], fill=(205,203,197,255), width=6*k, joint="curve")
+        d.line([p(29,52), p(22,49+wag*.25)], fill=(255,255,249,255), width=3*k)
+        step = math.sin(frame * .72) * 3 if self.walking else 0
+        # Far legs first, then the long body and the near legs.
+        rounded((*p(39-step,62),*p(48-step,84)), 4, (224,223,217,255), (198,197,191,255))
+        rounded((*p(69+step,62),*p(78+step,83)), 4, (227,226,220,255), (198,197,191,255))
+        rounded((*p(25,39),*p(77,68)), 13, (252,251,246,255), (216,215,209,255))
+        rounded((*p(31+step,64),*p(43+step,89)), 4, (250,249,244,255), (209,208,202,255))
+        rounded((*p(66-step,63),*p(79-step,89)), 4, (247,246,241,255), (207,206,200,255))
+        d.line([p(27,53), p(22,51+wag*.2)], fill=(252,251,246,255), width=5*k)
+        # Neck, upright ear and profile head.
+        poly([p(61,42),p(72,39),p(78,63),p(67,68)], (232,231,225,255), (205,204,198,255))
+        poly([p(63,28),p(68,17),p(77,27),p(74,43),p(64,43)], (231,230,224,255), (202,201,195,255))
+        ellipse((*p(59,17),*p(87,53)), (253,252,247,255), (215,214,208,255))
+        ellipse((*p(65,19),*p(75,27)), (255,255,255,150))
+        shift = math.sin(frame*.045)*.5
+        ellipse((*p(78+shift,31),*p(82+shift,36)), (112,110,104,255))
+        # Forward muzzle, dark nose and a slight happy mouth line.
+        poly([p(78,36),p(96,38),p(99,46),p(94,52),p(78,49)], (239,238,232,255), (211,210,204,255))
+        ellipse((*p(95,39),*p(100,44)), (91,90,87,255))
+        d.line([p(84,48),p(90,50),p(94,48)], fill=(150,147,141,255), width=1*k)
+        d.arc((57*k,15*k,89*k,55*k), 195, 282, fill=(255,255,255,190), width=2*k)
         im = im.resize((w, h), Image.Resampling.LANCZOS)
         if scale != 1:
             im = im.resize((max(1, round(w*scale)), max(1, round(h*scale))), Image.Resampling.LANCZOS)
@@ -215,10 +225,30 @@ class CyrusCompanion:
 
     def _animate_bubble(self):
         if self.expanded: return
+        self._wander_if_idle()
         self._draw_bubble()
         self.root.after(120, self._animate_bubble)
 
+    def _wander_if_idle(self):
+        import time
+        now = time.monotonic()
+        if self.hovering or self._bubble_pointer or now - self._last_pet_motion < 10:
+            self._wander_target = None
+            self.walking = False
+            return
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        x, y = self.root.winfo_x(), self.root.winfo_y()
+        if self._wander_target is None or (abs(self._wander_target[0]-x) < 8 and abs(self._wander_target[1]-y) < 8):
+            self._wander_target = (random.randint(12, max(13, sw-205)), random.randint(12, max(13, sh-150)))
+        tx, ty = self._wander_target
+        dx, dy = tx-x, ty-y
+        distance = max(1.0, math.hypot(dx, dy))
+        self.walking = distance > 8
+        self.root.geometry(f"+{round(x+dx/distance*2)}+{round(y+dy/distance*2)}")
+
     def _bubble_enter(self, _event):
+        self.hovering = True
+        self._last_pet_motion = __import__("time").monotonic()
         if self._hover_after:
             self.root.after_cancel(self._hover_after)
             self._hover_after = None
@@ -227,6 +257,8 @@ class CyrusCompanion:
             self._draw_bubble()
 
     def _bubble_leave(self, _event):
+        self.hovering = False
+        self._last_pet_motion = __import__("time").monotonic()
         if self._hover_after:
             self.root.after_cancel(self._hover_after)
         self._hover_after = self.root.after(420, self._hide_actions)
@@ -253,6 +285,7 @@ class CyrusCompanion:
         self._drag = (event.x_root - self.root.winfo_x(), event.y_root - self.root.winfo_y())
 
     def _bubble_press(self, event):
+        self._last_pet_motion = __import__("time").monotonic()
         self._bubble_pointer = [event.x_root, event.y_root, self.root.winfo_x(), self.root.winfo_y(), False]
 
     def _bubble_move(self, event):
@@ -337,20 +370,20 @@ class CyrusCompanion:
         tk.Button(controls, text="—", command=self.collapse, bg="#1a2a38", fg=TEXT, relief="flat", font=("Segoe UI", 10), width=3, cursor="hand2").pack()
         tk.Button(controls, text="×", command=self.root.destroy, bg="#1a2a38", fg="#ff9b9b", relief="flat", font=("Segoe UI", 10), width=3, cursor="hand2").pack(pady=(4, 0))
 
-        self.chat = tk.Text(self.root, bg=BG, fg=TEXT, insertbackground=CYAN, relief="flat", wrap="word", padx=13, pady=12, font=("Segoe UI", 10), spacing3=5, state="disabled")
+        self.chat = tk.Text(self.root, bg="#08111b", fg=TEXT, insertbackground=CYAN, relief="flat", wrap="word", padx=16, pady=14, font=("Segoe UI", 10), spacing3=6, state="disabled", borderwidth=0)
         self.chat.grid(row=1, column=0, sticky="nsew", padx=1)
-        self.chat.tag_configure("you", foreground=GREEN, font=("Consolas", 8, "bold"))
-        self.chat.tag_configure("cyrus", foreground=CYAN, font=("Consolas", 8, "bold"))
-        self.chat.tag_configure("body", foreground=TEXT)
+        self.chat.tag_configure("you", foreground="#91ff70", font=("Segoe UI Semibold", 9, "bold"), spacing1=5)
+        self.chat.tag_configure("cyrus", foreground="#67e7ff", font=("Segoe UI Semibold", 9, "bold"), spacing1=5)
+        self.chat.tag_configure("body", foreground="#e5f1fb", lmargin1=8, lmargin2=8, spacing3=9)
         if not self.messages: self._append("CYRUS", "Hey. I'm right here on your desktop. Ask me anything.", False)
         else:
             for who, message in self.messages: self._append(who, message, False)
 
         self.status_line = tk.Label(self.root, text="OLLAMA · " + (self.settings["model"] or "CHOOSE A MODEL BELOW"), fg=MUTED, bg=BG, anchor="w", padx=12, font=("Consolas", 7))
         self.status_line.grid(row=2, column=0, sticky="ew", pady=(3, 4))
-        row = tk.Frame(self.root, bg=BG)
+        row = tk.Frame(self.root, bg="#0b1520", highlightthickness=1, highlightbackground="#243c52")
         row.grid(row=3, column=0, sticky="ew", padx=9, pady=(0, 9))
-        self.entry = tk.Entry(row, bg="#111e2a", fg=TEXT, insertbackground=CYAN, relief="flat", font=("Segoe UI", 10))
+        self.entry = tk.Entry(row, bg="#0b1520", fg=TEXT, insertbackground=CYAN, relief="flat", font=("Segoe UI", 10))
         self.entry.pack(side="left", fill="x", expand=True, ipady=9, padx=(0, 6))
         self.entry.bind("<Return>", lambda _e: self.send())
         tk.Button(row, text="MIC", command=self.listen, bg="#172732", fg=CYAN, relief="flat", font=("Consolas", 8, "bold"), padx=9, pady=8, cursor="hand2").pack(side="right", padx=(0, 5))
@@ -382,7 +415,7 @@ class CyrusCompanion:
         self.entry.delete(0, "end")
         self._append("YOU", message)
         self.busy = True
-        self.status.configure(text="CYRUS IS THINKING…", fg=GREEN)
+        self.status.configure(text="● CONNECTED  ·  THINKING", fg=GREEN)
         threading.Thread(target=self._ask, args=(message,), daemon=True).start()
 
     def _ask(self, message):
@@ -399,15 +432,23 @@ class CyrusCompanion:
             self.events.put(("error", "I couldn't reach Ollama. Start Ollama and install a chat model, then ask me again."))
             return
 
-        history = [{"role": "system", "content": "You are CYRUS, a confident, warm and thoughtful female desktop AI companion for K Rithvik. Answer naturally and directly. Help with any topic. You are a small native Windows companion that follows the user across apps. If asked who made you, say K Rithvik made you. If asked your name, say Cyrus."}]
+        history = [{"role": "system", "content": "You are Cyrus, a confident, warm, concise female desktop AI companion for K Rithvik. Output only the final answer. Never reveal internal reasoning or narrate thoughts. Answer directly in one to three short sentences. Help with any topic. You live on this Windows desktop and are the companion for the APEX/CYRUS OS project; use that context when relevant, but never pretend you can inspect files or control apps unless a connected tool actually did so. If asked who made you, say K Rithvik. If asked your name, say Cyrus."}]
         history.extend({"role": "user" if who == "YOU" else "assistant", "content": text} for who, text in self.messages[-14:])
 
-        payload = json.dumps({"model": model, "messages": history, "stream": False, "options": {"temperature": .65, "num_predict": 500}}).encode()
+        payload = json.dumps({"model": model, "messages": history, "stream": True, "think": False, "keep_alive": "24h", "options": {"temperature": .35, "num_predict": 120}}).encode()
         request = urllib.request.Request(endpoint + "/api/chat", data=payload, headers={"Content-Type": "application/json"}, method="POST")
         try:
-            with urllib.request.urlopen(request, timeout=90) as response:
-                result = json.loads(response.read().decode())
-            answer = result.get("message", {}).get("content", "").strip()
+            parts = []
+            with urllib.request.urlopen(request, timeout=120) as response:
+                for raw_line in response:
+                    if not raw_line.strip():
+                        continue
+                    packet = json.loads(raw_line)
+                    token = packet.get("message", {}).get("content", "")
+                    if token:
+                        parts.append(token)
+                        self.events.put(("token", token))
+            answer = "".join(parts).strip()
             if not answer: raise RuntimeError("The model returned an empty answer.")
             self.events.put(("answer", answer, model))
             if self.voice_on: threading.Thread(target=self._speak, args=(answer,), daemon=True).start()
@@ -448,11 +489,22 @@ class CyrusCompanion:
                 event = self.events.get_nowait()
                 if event[0] == "answer":
                     _, answer, model = event
-                    self._append("CYRUS", answer)
+                    self.messages.append(("CYRUS", answer))
+                    self.messages = self.messages[-40:]
                     self.settings["model"] = model
                     if self.expanded:
                         self.status_line.configure(text=f"OLLAMA · {model}")
                         self.status.configure(text="READY WHEN YOU ARE", fg=CYAN)
+                    if self.expanded:
+                        self.chat.configure(state="normal")
+                        self.chat.insert("end", "\n\n")
+                        self.chat.configure(state="disabled")
+                elif event[0] == "token":
+                    if self.expanded:
+                        self.chat.configure(state="normal")
+                        self.chat.insert("end", event[1], "body")
+                        self.chat.see("end")
+                        self.chat.configure(state="disabled")
                 elif event[0] == "heard":
                     if self.expanded:
                         self.entry.delete(0, "end")
@@ -469,8 +521,13 @@ class CyrusCompanion:
                     if self.expanded: self.status.configure(text=event[1][:72], fg="#ffbb69")
                 else:
                     self._append("CYRUS", event[1])
-                    if self.expanded: self.status.configure(text="CHECK LOCAL AI CONNECTION", fg="#ffbb69")
-                self.busy = False
+                    if self.expanded:
+                        self.status.configure(text="CHECK LOCAL AI CONNECTION", fg="#ffbb69")
+                        self.chat.configure(state="normal")
+                        self.chat.insert("end", "\n\n")
+                        self.chat.configure(state="disabled")
+                if event[0] in ("answer", "error"):
+                    self.busy = False
         except queue.Empty: pass
         if self.root.winfo_exists(): self.root.after(80, self._drain_events)
 
