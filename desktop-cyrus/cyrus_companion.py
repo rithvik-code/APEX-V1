@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import queue
 import subprocess
@@ -11,6 +12,7 @@ import urllib.request
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk
+from PIL import Image, ImageDraw, ImageFilter, ImageTk
 
 
 BG = "#071016"
@@ -20,6 +22,7 @@ CYAN = "#83edff"
 TEXT = "#e9f3f8"
 MUTED = "#8ca2ae"
 GREEN = "#b7fa42"
+TRANSPARENT = "#010101"
 APP_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / "CyrusCompanion"
 SETTINGS_PATH = APP_DIR / "settings.json"
 
@@ -35,15 +38,27 @@ def read_settings():
         return {"endpoint": "http://127.0.0.1:11434", "model": ""}
 
 
+def discover_ollama_model(endpoint):
+    """Prefer a model currently loaded by this Ollama server, then its first installed model."""
+    for route, key in (("/api/ps", "models"), ("/api/tags", "models")):
+        req = urllib.request.Request(endpoint.rstrip("/") + route, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=4) as response:
+            models = json.loads(response.read().decode()).get(key, [])
+        if models:
+            return str(models[0].get("name") or models[0].get("model") or "").strip()
+    return ""
+
+
 class CyrusCompanion:
-    HOTKEY = "<Control-Alpha>"
+    # Tk uses Mod1 for the Alt key on Windows; "Alt" is parsed as an event name.
+    HOTKEY = "<Control-Mod1-c>"
 
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("SCOTCH Desktop Companion")
+        self.root.title("CYRUS Desktop Companion")
         self.root.configure(bg=BG)
         self.root.attributes("-topmost", True)
-        self.root.overrideredirect(False)
+        self.root.overrideredirect(True)
         self.settings = read_settings()
         self.events = queue.Queue()
         self.messages = []
@@ -56,10 +71,21 @@ class CyrusCompanion:
         self._wake_repeat_until = 0.0
         self._last_heard_lowercase = ""
         self.bubble = None
+        self.actions_visible = False
+        self.auto_send_voice = False
+        self.anim_tick = 0
+        self._hover_after = None
+        self._sprite_photo = None
+        self.root.wm_attributes("-transparentcolor", TRANSPARENT)
         self._draw_bubble()
-        self.root.bind(self.HOTKEY, lambda _e: self._on_hotkey(), "+")
+        # Key-sequence parsing differs across bundled Windows Tk versions.
+        # A malformed optional shortcut must never prevent the desktop pet opening.
+        try:
+            self.root.bind(self.HOTKEY, lambda _e: self._on_hotkey(), "+")
+        except tk.TclError:
+            pass
         self.root.bind("<Escape>", lambda _e: self.collapse())
-        self.root.after(350, self._animate_bubble)
+        self.root.after(120, self._animate_bubble)
         self.root.after(80, self._drain_events)
         self.root.after(60, self._wake_poll)
         self.root.mainloop()
@@ -97,76 +123,131 @@ class CyrusCompanion:
         canvas.create_oval(*xy(-4, 42), *xy(4, 50), fill=GREEN, outline="#e8ffae")
 
     def _scotch(self, canvas, cx, cy, scale=1.0, animated=False):
-        s = scale
-        def box(x1, y1, x2, y2, radius, fill, outline=""):
-            x1, y1, x2, y2 = cx + int(x1*s), cy + int(y1*s), cx + int(x2*s), cy + int(y2*s)
-            r = int(radius*s)
-            canvas.create_arc(x1, y1, x1+2*r, y1+2*r, start=90, extent=90, fill=fill, outline=outline, style="pieslice")
-            canvas.create_arc(x2-2*r, y1, x2, y1+2*r, start=0, extent=90, fill=fill, outline=outline, style="pieslice")
-            canvas.create_arc(x1, y2-2*r, x2, y2, start=180, extent=90, fill=fill, outline=outline, style="pieslice")
-            canvas.create_arc(x2-2*r, y2-2*r, x2, y2, start=270, extent=90, fill=fill, outline=outline, style="pieslice")
-            canvas.create_rectangle(x1+r, y1, x2-r, y2, fill=fill, outline=fill)
-            canvas.create_rectangle(x1, y1+r, x2, y2-r, fill=fill, outline=fill)
-        def xy(x, y): return cx + int(x*s), cy + int(y*s)
+        # Render a shaded, orthographic 3D-style dog into a transparent sprite.
+        # Supersampling keeps the rounded toy-like forms crisp at desktop size.
+        frame = self.anim_tick if animated else 0
+        w, h, k = 104, 104, 3
+        im = Image.new("RGBA", (w*k, h*k), (0, 0, 0, 0))
+        d = ImageDraw.Draw(im, "RGBA")
+        yaw = math.sin(frame * .045) * 2.2
+        lift = math.sin(frame * .09) * 1.3
+        def p(x, y): return (x + (y-52)*yaw/52, y + lift)
+        def poly(points, fill, edge=None):
+            pts = [(round(x*k), round(y*k)) for x,y in points]
+            d.polygon(pts, fill=fill)
+            if edge: d.line(pts+[pts[0]], fill=edge, width=2*k)
+        def ellipse(bounds, fill, edge=None):
+            b = tuple(round(v*k) for v in bounds)
+            d.ellipse(b, fill=fill, outline=edge, width=2*k if edge else 1)
+        def rounded(bounds, radius, fill, edge=None):
+            b = tuple(round(v*k) for v in bounds)
+            d.rounded_rectangle(b, radius=radius*k, fill=fill, outline=edge, width=2*k if edge else 1)
 
-        # Soft floating shadow and warm cream-white Labrador body.
-        canvas.create_oval(*xy(-46, 36), *xy(46, 54), fill="#09101a", outline="")
-        box(-38, -30, 38, 33, 15, "#fff6e7", "#d8b88c")
-        box(-30, -20, 30, 23, 9, "#f4e2c8", "#caa46a")
-        # Floppy ears.
-        canvas.create_oval(*xy(-34, -18), *xy(-22, -6), fill="#e9c9a3", outline="#caa46a")
-        canvas.create_oval(*xy(34, -18), *xy(22, -6), fill="#e9c9a3", outline="#caa46a")
-        # Scotch muzzle.
-        canvas.create_oval(*xy(-13, -3), *xy(13, 15), fill="#fff0db", outline="#e6c499")
-        # Warm brown eyes.
-        if animated and (self.root.winfo_fpixels("1i") and (int(self.root.tk.call("clock", "seconds")) % 7 == 0)):
-            canvas.create_line(*xy(-9, -1), *xy(-5, -1), fill="#7a4a25", width=max(2, int(3*s)), capstyle="round")
-            canvas.create_line(*xy(5, -1), *xy(9, -1), fill="#7a4a25", width=max(2, int(3*s)), capstyle="round")
-        else:
-            canvas.create_oval(*xy(-9, -5), *xy(-6, -1), fill="#7a4a25", outline="")
-            canvas.create_oval(*xy(6, -5), *xy(9, -1), fill="#7a4a25", outline="")
-        canvas.create_oval(*xy(-8, 2), *xy(-6, 4), fill="#fff6e7")
-        canvas.create_oval(*xy(6, 2), *xy(8, 4), fill="#fff6e7")
-        # Nose.
-        canvas.create_oval(*xy(-3, 6), *xy(3, 10), fill="#3a2417", outline="#24160f")
-        # Happy mouth.
-        canvas.create_arc(*xy(-7, 8), *xy(7, 12), start=180, extent=180, style="arc", outline="#3a2417", width=max(1, int(s)))
-        # Scotchy collar tag.
-        canvas.create_oval(*xy(-3, 26), *xy(3, 33), fill="#c8ff16", outline="#7a7a00")
-        canvas.create_text(*xy(0, 30), text="S", fill="#1a1a00", font=("Segoe UI Semibold", max(7, int(9*s)), "bold"))
-        canvas.create_arc(*xy(-8, 0), *xy(8, 12), start=205, extent=130, style="arc", outline="#b2f8ff", width=max(1, int(s)))
-        # Tiny flight jacket and reactor badge.
-        canvas.create_polygon(*sum((xy(x, y) for x, y in [(-19, 30), (-27, 39), (-24, 56), (-11, 50), (0, 55), (11, 50), (24, 56), (27, 39), (19, 30)]), ()), fill="#4059e9", outline="")
-        canvas.create_polygon(*sum((xy(x, y) for x, y in [(-11, 31), (0, 40), (11, 31)]), ()), fill="#a6f5ff", outline="")
-        canvas.create_oval(*xy(-4, 42), *xy(4, 50), fill=GREEN, outline="#e8ffae")
+        # soft contact shadow, not a circle or badge behind the character
+        shadow = Image.new("RGBA", im.size, (0,0,0,0))
+        ImageDraw.Draw(shadow, "RGBA").ellipse((22*k,87*k,85*k,97*k), fill=(10,15,20,68))
+        im.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(4*k)))
+        # Far legs, tail and body establish a three-quarter view.
+        rounded((*p(37,65),*p(48,89)), 4, (222,221,215,255), (191,190,184,255))
+        rounded((*p(66,65),*p(77,88)), 4, (229,228,222,255), (197,196,190,255))
+        poly([p(74,54),p(94,44),p(98,48),p(79,62)], (238,237,231,255), (201,200,194,255))
+        poly([p(31,37),p(73,35),p(81,57),p(76,73),p(34,74),p(27,57)], (252,251,246,255), (216,215,209,255))
+        poly([p(72,39),p(78,40),p(81,57),p(76,71),p(71,70)], (224,223,217,255))
+        rounded((*p(29,66),*p(42,92)), 4, (250,249,244,255), (209,208,202,255))
+        rounded((*p(58,67),*p(72,92)), 4, (247,246,241,255), (207,206,200,255))
+        # Head with shaded cheeks, raised ears and glossy highlight.
+        poly([p(33,21),p(39,24),p(36,42),p(30,40)], (231,230,224,255), (202,201,195,255))
+        poly([p(62,23),p(68,20),p(71,39),p(66,42)], (235,234,228,255), (204,203,197,255))
+        ellipse((*p(31,8),*p(67,47)), (253,252,247,255), (215,214,208,255))
+        ellipse((*p(37,10),*p(51,20)), (255,255,255,150))
+        shift = math.sin(frame*.045)*.8
+        ellipse((*p(39+shift,25),*p(44+shift,31)), (112,110,104,255))
+        ellipse((*p(55+shift,25),*p(60+shift,31)), (112,110,104,255))
+        poly([p(41,32),p(57,32),p(59,42),p(52,46),p(40,42)], (239,238,232,255), (211,210,204,255))
+        rounded((*p(48,36),*p(55,42)), 2, (101,100,96,255))
+        d.arc((29*k,7*k,69*k,49*k), 195, 288, fill=(255,255,255,190), width=2*k)
+        im = im.resize((w, h), Image.Resampling.LANCZOS)
+        if scale != 1:
+            im = im.resize((max(1, round(w*scale)), max(1, round(h*scale))), Image.Resampling.LANCZOS)
+        self._sprite_photo = ImageTk.PhotoImage(im)
+        canvas.create_image(cx, cy, image=self._sprite_photo, anchor="center")
 
     def _draw_bubble(self):
         c = self.bubble
         if c is None:
-            x = max(12, self.root.winfo_screenwidth() - 140)
-            y = max(12, self.root.winfo_screenheight() - 180)
-            self.root.geometry(f"112x126+{x}+{y}")
-            c = tk.Canvas(self.root, width=112, height=126, bg=BG, highlightthickness=0)
+            x = max(12, self.root.winfo_screenwidth() - 202)
+            y = max(12, self.root.winfo_screenheight() - 260)
+            self.root.geometry(f"190x122+{x}+{y}")
+            self.root.configure(bg=TRANSPARENT, highlightthickness=0)
+            c = tk.Canvas(self.root, width=190, height=122, bg=TRANSPARENT, highlightthickness=0)
             self.bubble = c
             c.pack()
         else:
             c.pack()
             c.delete("all")
-        c.create_oval(9, 4, 103, 98, fill="#0c1b2b", outline="#7086ff", width=2)
-        self._mascot(c, 56, 48, .82, True)
-        c.create_text(56, 111, text="SCOTCH", fill=TEXT, font=("Segoe UI Semibold", 9, "bold"))
-        c.create_text(56, 122, text="TAP TO TALK", fill=CYAN, font=("Consolas", 6, "bold"))
+        self.anim_tick += 1
+        bob = math.sin(self.anim_tick / 8) * 1.7
+        # The mascot floats directly on the transparent desktop; no badge or disc.
+        self._scotch(c, 47, 48 + bob, .70, True)
+        c.create_text(47, 108, text="CYRUS", fill=TEXT, font=("Segoe UI Semibold", 8, "bold"))
+        if self.actions_visible:
+            self._action_pill(c, 105, 31, 187, 65, "TALK TO CYRUS", "talk")
+            self._action_pill(c, 105, 72, 187, 106, "TEXT CYRUS", "text")
         c.bind("<ButtonPress-1>", self._bubble_press)
         c.bind("<B1-Motion>", self._bubble_move)
         c.bind("<ButtonRelease-1>", self._bubble_release)
         c.bind("<Button-3>", self._bubble_menu)
         c.bind("<Double-Button-1>", lambda _e: self.expand())
+        c.bind("<Enter>", self._bubble_enter)
+        c.bind("<Leave>", self._bubble_leave)
         c.configure(cursor="hand2")
+
+    def _action_pill(self, canvas, x1, y1, x2, y2, label, action):
+        canvas.create_rectangle(x1, y1, x2, y2, fill="#101c29", outline="#526dff", width=1, tags=(action,))
+        canvas.create_text((x1+x2)//2, (y1+y2)//2, text=label, fill=CYAN if action == "talk" else TEXT, font=("Segoe UI Semibold", 8, "bold"), tags=(action,))
+        canvas.tag_bind(action, "<Enter>", lambda _event, name=action: self._highlight_action(name, True))
+        canvas.tag_bind(action, "<Leave>", lambda _event, name=action: self._highlight_action(name, False))
+
+    def _highlight_action(self, action, hovered):
+        if self.bubble is None:
+            return
+        self.bubble.itemconfigure(action, fill="#2944df" if hovered else "#101c29")
 
     def _animate_bubble(self):
         if self.expanded: return
         self._draw_bubble()
-        self.root.after(350, self._animate_bubble)
+        self.root.after(120, self._animate_bubble)
+
+    def _bubble_enter(self, _event):
+        if self._hover_after:
+            self.root.after_cancel(self._hover_after)
+            self._hover_after = None
+        if not self.actions_visible:
+            self.actions_visible = True
+            self._draw_bubble()
+
+    def _bubble_leave(self, _event):
+        if self._hover_after:
+            self.root.after_cancel(self._hover_after)
+        self._hover_after = self.root.after(420, self._hide_actions)
+
+    def _hide_actions(self):
+        self._hover_after = None
+        if self.expanded or not self.actions_visible: return
+        px, py = self.root.winfo_pointerxy()
+        inside = self.root.winfo_rootx() <= px < self.root.winfo_rootx()+self.root.winfo_width() and self.root.winfo_rooty() <= py < self.root.winfo_rooty()+self.root.winfo_height()
+        if not inside:
+            self.actions_visible = False
+            self._draw_bubble()
+
+    def _talk_action(self):
+        self.expand()
+        self.auto_send_voice = True
+        self.root.after(160, lambda: self.listen(auto_send=True))
+
+    def _text_action(self):
+        self.expand()
+        self.root.after(100, self.entry.focus_force)
 
     def _start_drag(self, event):
         self._drag = (event.x_root - self.root.winfo_x(), event.y_root - self.root.winfo_y())
@@ -183,7 +264,16 @@ class CyrusCompanion:
 
     def _bubble_release(self, _event):
         pointer, self._bubble_pointer = self._bubble_pointer, None
-        if pointer and not pointer[4]: self.expand()
+        if not pointer or pointer[4]: return
+        x, y = self.root.winfo_pointerxy()
+        x -= self.root.winfo_rootx()
+        y -= self.root.winfo_rooty()
+        if self.actions_visible and 105 <= x <= 187 and 31 <= y <= 65:
+            self._talk_action()
+        elif self.actions_visible and 105 <= x <= 187 and 72 <= y <= 106:
+            self._text_action()
+        else:
+            self.expand()
 
     def _drag_window(self, event):
         if self._drag:
@@ -198,7 +288,10 @@ class CyrusCompanion:
     def expand(self):
         if self.expanded: return
         self.expanded = True
+        self.actions_visible = False
         if self.bubble is not None: self.bubble.pack_forget()
+        self.root.overrideredirect(False)
+        self.root.configure(bg=BG, highlightthickness=1, highlightbackground="#334fff")
         x = min(self.root.winfo_x(), max(12, self.root.winfo_screenwidth()-372))
         y = min(self.root.winfo_y(), max(12, self.root.winfo_screenheight()-578))
         self.root.geometry(f"360x550+{x}+{y}")
@@ -210,11 +303,13 @@ class CyrusCompanion:
     def collapse(self):
         if not self.expanded: return
         self.expanded = False
+        self.actions_visible = False
         for child in self.root.winfo_children(): child.destroy()
         self.bubble = None
-        self.root.configure(highlightthickness=0)
+        self.root.overrideredirect(True)
+        self.root.configure(bg=TRANSPARENT, highlightthickness=0)
         self._draw_bubble()
-        self.root.after(350, self._animate_bubble)
+        self.root.after(120, self._animate_bubble)
 
     def _panel(self):
         self.root.grid_columnconfigure(0, weight=1)
@@ -229,7 +324,7 @@ class CyrusCompanion:
         self._scotch(art, 39, 39, .61)
         identity = tk.Frame(head, bg="#111e2e")
         identity.pack(side="left", fill="both", expand=True, pady=17)
-        tk.Label(identity, text="SCOTCH", fg=TEXT, bg="#111e2e", font=("Segoe UI Semibold", 15, "bold")).pack(anchor="w")
+        tk.Label(identity, text="CYRUS", fg=TEXT, bg="#111e2e", font=("Segoe UI Semibold", 15, "bold")).pack(anchor="w")
         self.status = tk.Label(identity, text="DESKTOP COMPANION · LOCAL AI", fg=CYAN, bg="#111e2e", font=("Consolas", 7))
         self.status.pack(anchor="w", pady=(3, 0))
         for widget in (art, identity, *identity.winfo_children()):
@@ -292,22 +387,19 @@ class CyrusCompanion:
 
     def _ask(self, message):
         endpoint = self.settings["endpoint"].rstrip("/")
-        model = self.settings["model"].strip()
-        if not model:
-            try:
-                req = urllib.request.Request(endpoint + "/api/tags", headers={"Accept": "application/json"})
-                with urllib.request.urlopen(req, timeout=4) as response:
-                    models = json.loads(response.read().decode()).get("models", [])
-                    model = models[0]["name"] if models else ""
-                    if model: self.settings["model"] = model
-            except Exception:
-                pass
+        try:
+            # Never pin Cyrus to a stale saved model: follow the active server each request.
+            model = discover_ollama_model(endpoint)
+            if model:
+                self.settings["model"] = model
+        except Exception:
+            model = ""
 
         if not model:
             self.events.put(("error", "I couldn't reach Ollama. Start Ollama and install a chat model, then ask me again."))
             return
 
-        history = [{"role": "system", "content": "You are SCOTCH, a confident, warm and thoughtful desktop AI companion for K Rithvik. Answer naturally and directly. Help with any topic. You are a small native Windows companion that follows the user across websites. If asked who made you, say K Rithvik made you. If asked your name, say Scotch."}]
+        history = [{"role": "system", "content": "You are CYRUS, a confident, warm and thoughtful female desktop AI companion for K Rithvik. Answer naturally and directly. Help with any topic. You are a small native Windows companion that follows the user across apps. If asked who made you, say K Rithvik made you. If asked your name, say Cyrus."}]
         history.extend({"role": "user" if who == "YOU" else "assistant", "content": text} for who, text in self.messages[-14:])
 
         payload = json.dumps({"model": model, "messages": history, "stream": False, "options": {"temperature": .65, "num_predict": 500}}).encode()
@@ -324,7 +416,8 @@ class CyrusCompanion:
         except Exception as error:
             self.events.put(("error", f"That request didn't complete: {error}"))
 
-    def listen(self):
+    def listen(self, auto_send=False):
+        self.auto_send_voice = auto_send
         self.status.configure(text="LISTENING · SPEAK NOW", fg=GREEN)
         threading.Thread(target=self._recognize, daemon=True).start()
 
@@ -364,7 +457,12 @@ class CyrusCompanion:
                     if self.expanded:
                         self.entry.delete(0, "end")
                         self.entry.insert(0, event[1])
-                        self.status.configure(text="VOICE CAPTURED · REVIEW AND SEND", fg=CYAN)
+                        if self.auto_send_voice:
+                            self.auto_send_voice = False
+                            self.status.configure(text="VOICE CAPTURED · SENDING…", fg=CYAN)
+                            self.root.after(120, self.send)
+                        else:
+                            self.status.configure(text="VOICE CAPTURED · REVIEW AND SEND", fg=CYAN)
                     else:
                         self._last_heard_lowercase = event[1]
                 elif event[0] == "mic_error":
@@ -389,8 +487,8 @@ class CyrusCompanion:
 
     def _bubble_menu(self, event):
         menu = tk.Menu(self.root, tearoff=False, bg=PANEL, fg=TEXT, activebackground=BLUE, activeforeground="white")
-        menu.add_command(label="Open Scotch", command=self.expand)
-        menu.add_command(label="Quit Scotch", command=self.root.destroy)
+        menu.add_command(label="Open Cyrus", command=self.expand)
+        menu.add_command(label="Quit Cyrus", command=self.root.destroy)
         menu.tk_popup(event.x_root, event.y_root)
 
     def _toggle_pin(self):
@@ -419,10 +517,6 @@ class CyrusCompanion:
         tick = self.root.tk.call("clock", "seconds")
 
         if phrase:
-            if phrase.startswith("hey scotch"):
-                self._on_hotkey()
-                self._say("I'm here.")
-
             lowered_and_clean = phrase.lower().replace("_", " ").strip()
             wake = lowered_and_clean.split(" ", 1)[0] if " " in lowered_and_clean else lowered_and_clean
             if wake in ("hey", "hi", "hello", "ok", "okay", "yo"):
