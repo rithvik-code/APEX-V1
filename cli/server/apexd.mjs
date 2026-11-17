@@ -50,6 +50,9 @@ const clients = new Set();
 const screenSubs = new Set();
 const pulls = new Map();
 const healthCache = { at: 0, value: null };
+// Last state frame written to the SSE clients. Repeating an identical frame is
+// pure waste: the client re-renders the whole control deck for no new data.
+let lastStatePayload = "";
 
 const MODEL_NAME_OK = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$/;
 
@@ -147,6 +150,8 @@ function tokenOk(req, url) {
 
 function broadcast(state) {
   const payload = `event: state\ndata: ${JSON.stringify(state)}\n\n`;
+  if (payload === lastStatePayload) return;
+  lastStatePayload = payload;
   for (const client of clients) {
     // Drop a client that cannot keep up; EventSource reconnects automatically.
     if (client.writableLength > 1_000_000) {
@@ -425,6 +430,8 @@ async function route(req, res) {
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
     });
+    // Without this the Nagle/delayed-ACK pair adds tens of ms to every frame.
+    res.socket?.setNoDelay(true);
     res.write(`retry: 2000\n\n`);
     res.write(`event: state\ndata: ${JSON.stringify(session?.publicState() ?? null)}\n\n`);
     clients.add(res);
@@ -859,6 +866,12 @@ function shutdown() {
     if (session && activeLike(session.publicState())) {
       session.stop("Daemon shutting down");
     }
+  } catch {
+    // Ignore.
+  }
+  try {
+    // Buffered event-log lines would otherwise be lost with the process.
+    session?.flushEventLog?.();
   } catch {
     // Ignore.
   }

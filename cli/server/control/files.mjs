@@ -52,14 +52,17 @@ function isProtected(target) {
   });
 }
 
+let rootsCache = null;
 export function defaultRoots() {
+  if (rootsCache) return [...rootsCache];
   const home = os.homedir();
-  return [
+  rootsCache = [
     process.cwd(),
     path.join(home, "Desktop"),
     path.join(home, "Documents"),
     path.join(home, "Downloads"),
   ].filter((root) => fs.existsSync(root));
+  return [...rootsCache];
 }
 
 export class FileEngine {
@@ -230,32 +233,45 @@ export class FileEngine {
   }
 }
 
+const DEFAULT_CONFIG = {
+  fileRoots: null,
+  plannerModel: "qwen3:4b",
+  visionModel: "gemma3:4b",
+  maxSteps: 20,
+  autoApprove: false,
+  vision: false,
+  ocr: true,
+};
+
+// /api/health hits this on every poll. Cache the parsed config until the file
+// actually changes so a 7 s poll never turns into repeated synchronous IO.
+let configCache = null;
+
 export function readControlConfig() {
   const file = path.join(APEX_DIR, "control.json");
-  if (!fs.existsSync(file)) {
-    return {
-      fileRoots: defaultRoots(),
-      plannerModel: "qwen3:4b",
-      visionModel: "gemma3:4b",
-      maxSteps: 20,
-      autoApprove: false,
-      vision: false,
-      ocr: true,
-    };
-  }
+  let stat = null;
   try {
-    return { ...JSON.parse(fs.readFileSync(file, "utf8")), file: file };
+    stat = fs.statSync(file);
   } catch {
-    return {
-      fileRoots: defaultRoots(),
-      plannerModel: "qwen3:4b",
-      visionModel: "gemma3:4b",
-      maxSteps: 20,
-      autoApprove: false,
-      vision: false,
-      ocr: true,
-    };
+    stat = null;
   }
+  if (configCache && stat && configCache.mtime === stat.mtimeMs && configCache.size === stat.size) {
+    return configCache.value;
+  }
+  const fallback = () => ({ ...DEFAULT_CONFIG, fileRoots: defaultRoots() });
+  if (!stat) {
+    const value = fallback();
+    configCache = { mtime: -1, size: -1, value };
+    return value;
+  }
+  let value;
+  try {
+    value = { ...JSON.parse(fs.readFileSync(file, "utf8")), file: file };
+  } catch {
+    value = fallback();
+  }
+  configCache = { mtime: stat.mtimeMs, size: stat.size, value };
+  return value;
 }
 
 export function writeControlConfig(config) {
@@ -264,5 +280,7 @@ export function writeControlConfig(config) {
   const payload = { ...config };
   delete payload.file;
   fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`);
+  // Drop the memo so the next read sees this write immediately.
+  configCache = null;
   return payload;
 }

@@ -150,6 +150,15 @@ export class ControlSession {
     this.abort = new AbortController();
     this.eventsPath = path.join(CONTROL_DIR, this.id, "events.jsonl");
     fs.mkdirSync(path.dirname(this.eventsPath), { recursive: true });
+    // Log lines and state pushes are the two hottest paths in a session. Both
+    // are batched: disk writes are coalesced into one async append and state is
+    // pushed at a fixed cadence instead of once per mutation. Without this the
+    // event loop stalls on appendFileSync while every log line re-serialises
+    // the whole public state for each connected viewer.
+    this.logQueue = [];
+    this.logTimer = 0;
+    this.dirty = false;
+    this.publishTimer = 0;
     this.log("session", "CONTROL ARMED", `goal: ${clip(this.goal, 180)}`, "low");
   }
 
@@ -166,41 +175,73 @@ export class ControlSession {
     };
     this.logs.push(entry);
     if (this.logs.length > 140) this.logs.shift();
-    try {
-      fs.appendFileSync(this.eventsPath, `${JSON.stringify(entry)}\n`);
-    } catch {
-      // Logging must never stop control.
-    }
+    this.queueEventLog(`${JSON.stringify(entry)}\n`);
     this.publish();
   }
 
-  audit(action, args, risk, detail) {
+  queueEventLog(line) {
+    this.logQueue.push(line);
+    // A pathological loop must not grow this without bound.
+    if (this.logQueue.length > 400) this.logQueue.splice(0, this.logQueue.length - 400);
+    if (this.logTimer) return;
+    this.logTimer = setTimeout(() => {
+      this.logTimer = 0;
+      if (!this.logQueue.length) return;
+      const batch = this.logQueue.join("");
+      this.logQueue.length = 0;
+      // Async append: the control loop never waits on disk.
+      fs.appendFile(this.eventsPath, batch, () => {});
+    }, 80);
+  }
+
+  /** Synchronous last-chance write, used only while shutting down. */
+  flushEventLog() {
+    if (this.logTimer) {
+      clearTimeout(this.logTimer);
+      this.logTimer = 0;
+    }
+    if (!this.logQueue.length) return;
+    const batch = this.logQueue.join("");
+    this.logQueue.length = 0;
     try {
-      fs.appendFileSync(
-        ACTION_LOG,
-        `${JSON.stringify({
-          ts: new Date().toISOString(),
-          tier: "machine",
-          tool: `control:${action}`,
-          target: detail,
-          risk,
-          session: this.id,
-          goal: clip(this.goal, 120),
-          approved: true,
-          args: previewArgs(args),
-        })}\n`,
-      );
+      fs.appendFileSync(this.eventsPath, batch);
     } catch {
-      // Audit is best-effort.
+      // Shutting down; nothing left to recover.
     }
   }
 
+  audit(action, args, risk, detail) {
+    const line = `${JSON.stringify({
+      ts: new Date().toISOString(),
+      tier: "machine",
+      tool: `control:${action}`,
+      target: detail,
+      risk,
+      session: this.id,
+      goal: clip(this.goal, 120),
+      approved: true,
+      args: previewArgs(args),
+    })}\n`;
+    // Best-effort and non-blocking: an audit write must not stall the step.
+    fs.appendFile(ACTION_LOG, line, () => {});
+  }
+
   publish() {
-    try {
-      this.onEvent?.(this.publicState());
-    } catch {
-      // A broken listener must not break execution.
-    }
+    if (!this.onEvent) return;
+    this.dirty = true;
+    if (this.publishTimer) return;
+    // One state push per ~120 ms regardless of how many logs and actions land
+    // in between. Coalescing keeps the SSE fan-out flat during fast missions.
+    this.publishTimer = setTimeout(() => {
+      this.publishTimer = 0;
+      if (!this.dirty) return;
+      this.dirty = false;
+      try {
+        this.onEvent?.(this.publicState());
+      } catch {
+        // A broken listener must not break execution.
+      }
+    }, 120);
   }
 
   publicState() {
@@ -1036,6 +1077,8 @@ export class ControlSession {
       this.pendingApproval = null;
     }
     this.log("halt", "CONTROL STOPPED", reason, "high");
+    // Nothing else will flush this session's buffered lines.
+    this.flushEventLog();
     return this.publicState();
   }
 
@@ -1044,6 +1087,7 @@ export class ControlSession {
     this.doneSummary = clip(summary, 2000);
     this.endedAt = Date.now();
     this.log("done", "MISSION COMPLETE", this.doneSummary, "low");
+    this.flushEventLog();
     this.publish();
     return this.publicState();
   }
@@ -1057,6 +1101,7 @@ export class ControlSession {
     killAllPowerShell();
     stopCommands();
     this.log("halt", "CONTROL ERROR", this.error, "high");
+    this.flushEventLog();
   }
 }
 
