@@ -10,16 +10,24 @@ const control = {
   },
 };
 
+const hermes = {
+  "/hermes": {
+    target: "http://127.0.0.1:8642",
+    changeOrigin: false,
+    rewrite: (path: string) => path.replace(/^\/hermes/, ""),
+  },
+};
+
 export default defineConfig({
   plugins: [react()],
   server: {
     host: "127.0.0.1",
     port: 5173,
-    proxy: control,
+    proxy: { ...control, ...hermes },
   },
   preview: {
     host: "127.0.0.1",
     port: 4173,
-    proxy: control,
+    proxy: { ...control, ...hermes },
   },
 });

@@ -45,7 +45,11 @@ export type GarageStage = {
   setDiecast: (unlocks: ReadonlySet<string>) => void;
   setService: (on: boolean) => void;
   callPet: (pet: "dog" | "cat") => void;
+  carePet: (pet: "dog" | "cat" | "turtles", action: "pet" | "treat") => void;
+  setIdleLearning: (active: boolean, whisper: string) => void;
+  playFarewell: () => void;
   fetchTrophy: () => void;
+  recognizeVehicle: (vehicle: "car" | "bike") => void;
   setCyrus: (state: CyrusVisual) => void;
   scanCar: () => void;
   hotspots: GarageHotspot[];
@@ -611,6 +615,15 @@ export function createGarage(): GarageStage {
   }
   const drum = cylinder(0.24, 6.55, steel, 0, 3.68, 8.92);
   drum.rotation.z = Math.PI / 2;
+  const farewellPulses = [0, 1].map((index) => {
+    const material = new THREE.MeshBasicMaterial({ color: index ? 0x6ff9ff : ACID, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
+    const mesh = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.2, 56), material);
+    mesh.position.set(0, 1.65, 9.18 + index * 0.025);
+    mesh.visible = false;
+    root.add(mesh);
+    return { mesh, material, delay: index * 0.16 };
+  });
+  let farewellRemaining = 0;
 
   /* ------------------------------------------------------------------ */
   /* Floodlit circuit overlook beyond the door                          */
@@ -1381,6 +1394,34 @@ export function createGarage(): GarageStage {
   root.add(cat);
   const fur = new THREE.MeshStandardMaterial({ color: 0xf3f1e9, roughness: 0.95 });
   const furLight = new THREE.MeshStandardMaterial({ color: 0xdcd9cd, roughness: 0.95 });
+  const handSkin = new THREE.MeshStandardMaterial({ color: 0xe6b997, roughness: 0.82 });
+  const handCuff = new THREE.MeshStandardMaterial({ color: 0xc8ff16, emissive: 0x617d00, emissiveIntensity: 0.2, metalness: 0.35, roughness: 0.42 });
+  const makePettingHand = (pet: THREE.Group): THREE.Group => {
+    const hand = new THREE.Group();
+    hand.visible = false;
+    pet.add(hand);
+    box(0.105, 0.2, 0.13, furLight, 0, 0.145, -0.045, hand);
+    const cuff = new THREE.Mesh(new THREE.TorusGeometry(0.064, 0.009, 6, 14), handCuff);
+    cuff.rotation.x = Math.PI / 2;
+    cuff.position.set(0, 0.065, -0.045);
+    hand.add(cuff);
+    const palm = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), handSkin);
+    palm.scale.set(1, 0.48, 1.18);
+    palm.position.set(0, 0.025, 0.055);
+    hand.add(palm);
+    for (let finger = 0; finger < 4; finger++) {
+      const digit = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 6), handSkin);
+      digit.scale.set(0.82, 0.86, 2.1);
+      digit.position.set((finger - 1.5) * 0.031, 0.008, 0.132);
+      hand.add(digit);
+    }
+    const thumb = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), handSkin);
+    thumb.scale.set(1.05, 0.85, 1.8);
+    thumb.position.set(0.078, 0.005, 0.08);
+    thumb.rotation.y = -0.55;
+    hand.add(thumb);
+    return hand;
+  };
   const catBody = box(0.24, 0.17, 0.46, fur, 0, 0.2, 0, cat);
   box(0.19, 0.15, 0.16, fur, 0, 0.27, 0.26, cat);
   const catHead = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), fur);
@@ -1419,6 +1460,7 @@ export function createGarage(): GarageStage {
   tailSeg.position.set(0, 0.12, -0.04);
   tailSeg.rotation.x = -0.6;
   catTail.add(tailSeg);
+  const catPettingHand = makePettingHand(cat);
   const catBed = cylinder(0.42, 0.09, red, 6.3, 0.045, 3.5, root, 20);
   catBed.scale.z = 0.8;
   catBed.rotation.y = 0.4;
@@ -1439,6 +1481,14 @@ export function createGarage(): GarageStage {
   }
   const dogNeck = box(0.17, 0.24, 0.17, fur, 0, 0.47, 0.22, dogBody);
   dogNeck.rotation.x = 0.32;
+  const dogCollarMat = new THREE.MeshStandardMaterial({ color: 0x3c463f, emissive: 0x9c83ff, emissiveIntensity: 0.08, metalness: 0.6, roughness: 0.28 });
+  const dogCollar = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.016, 6, 18), dogCollarMat);
+  dogCollar.rotation.x = Math.PI / 2;
+  dogCollar.position.set(0, 0.44, 0.24);
+  dogBody.add(dogCollar);
+  const dogTag = new THREE.Mesh(new THREE.OctahedronGeometry(0.035, 0), new THREE.MeshStandardMaterial({ color: 0xc8ff16, emissive: 0xc8ff16, emissiveIntensity: 0.28, metalness: 0.55, roughness: 0.22 }));
+  dogTag.position.set(0, 0.33, 0.34);
+  dogBody.add(dogTag);
   const dogHead = new THREE.Group();
   dogHead.position.set(0, 0.58, 0.3);
   dog.add(dogHead);
@@ -1483,9 +1533,21 @@ export function createGarage(): GarageStage {
   dogTailSeg.rotation.x = -(Math.PI / 2 + 0.32);
   dogTailSeg.position.set(0, -0.055, -0.17);
   dogTail.add(dogTailSeg);
+  const dogPettingHand = makePettingHand(dog);
   const dogBed = cylinder(0.58, 0.09, red, -4.6, 0.045, 4.8, root, 22);
   dogBed.scale.z = 1.25;
   petNameplate("SCOTCH", -4.6, 5.7, 0.9);
+  const idleWhisperCanvas = document.createElement("canvas");
+  idleWhisperCanvas.width = 512;
+  idleWhisperCanvas.height = 72;
+  const idleWhisperCtx = idleWhisperCanvas.getContext("2d");
+  const idleWhisperTexture = new THREE.CanvasTexture(idleWhisperCanvas);
+  idleWhisperTexture.colorSpace = THREE.SRGBColorSpace;
+  const idleWhisperMat = new THREE.SpriteMaterial({ map: idleWhisperTexture, transparent: true, opacity: 0.26, depthWrite: false });
+  const idleWhisperSprite = new THREE.Sprite(idleWhisperMat);
+  idleWhisperSprite.scale.set(1.55, 0.22, 1);
+  idleWhisperSprite.visible = false;
+  root.add(idleWhisperSprite);
 
   // MR & MRS TURTLE — ambling on their pebble tray in the back corner.
   const shellMat = new THREE.MeshStandardMaterial({
@@ -1563,6 +1625,23 @@ export function createGarage(): GarageStage {
   buildTurtle(6.15, -5.8, 1, 0);
   buildTurtle(6.6, -6.35, 0.8, 2.4);
   petNameplate("MR & MRS TURTLE", 6.35, -5.15, 0.2);
+  const careTreat = new THREE.Group();
+  const treatVisuals = [0xd9a75e, 0x82d8f0, 0x85df74].map((color, index) => {
+    const group = new THREE.Group();
+    const material = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.12, roughness: 0.55 });
+    const morsel = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 9), material);
+    morsel.scale.set(index === 1 ? 1.35 : 1, index === 2 ? 0.38 : 0.7, 0.7);
+    group.add(morsel);
+    if (index === 2) {
+      const leafVein = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.009, 0.012), new THREE.MeshBasicMaterial({ color: 0xc8ff91 }));
+      group.add(leafVein);
+    }
+    group.visible = false;
+    careTreat.add(group);
+    return group;
+  });
+  careTreat.visible = false;
+  root.add(careTreat);
 
   // Wall tachometer: live rpm off the rev rig.
   const tach = tachCanvas();
@@ -1680,6 +1759,42 @@ export function createGarage(): GarageStage {
   trophy(7.5, 2.37, -2.2, 0.5);
   trophy(7.5, 1.75, -3.9, 0.45);
   trophy(7.5, 1.75, -2.9, 0.42);
+
+  // Scotch's little trophy scan appears only while the player is at the wall.
+  const trophyProjection = new THREE.Group();
+  trophyProjection.position.set(7.05, 3.12, -3.1);
+  trophyProjection.visible = false;
+  root.add(trophyProjection);
+  const trophyHoloMat = new THREE.LineBasicMaterial({ color: ACID, transparent: true, opacity: 0.88, depthWrite: false });
+  const trophyOutlinePoints = [
+    new THREE.Vector3(-0.22, 0.36, 0), new THREE.Vector3(-0.17, 0.12, 0),
+    new THREE.Vector3(-0.1, 0.04, 0), new THREE.Vector3(0.1, 0.04, 0),
+    new THREE.Vector3(0.17, 0.12, 0), new THREE.Vector3(0.22, 0.36, 0),
+    new THREE.Vector3(-0.22, 0.36, 0),
+  ];
+  trophyProjection.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(trophyOutlinePoints), trophyHoloMat));
+  for (const side of [-1, 1]) {
+    const handle = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.008, 5, 18, Math.PI), new THREE.MeshBasicMaterial({ color: ACID, transparent: true, opacity: 0.75, depthWrite: false }));
+    handle.position.set(side * 0.24, 0.27, 0);
+    handle.rotation.z = side * Math.PI * 0.5;
+    trophyProjection.add(handle);
+  }
+  const trophyStem = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.05, 0), new THREE.Vector3(0, -0.06, 0), new THREE.Vector3(-0.13, -0.12, 0), new THREE.Vector3(0.13, -0.12, 0), new THREE.Vector3(0, -0.06, 0), new THREE.Vector3(0, -0.2, 0), new THREE.Vector3(-0.17, -0.2, 0), new THREE.Vector3(0.17, -0.2, 0)]);
+  trophyProjection.add(new THREE.Line(trophyStem, trophyHoloMat));
+  const trophyCountCanvas = document.createElement("canvas");
+  trophyCountCanvas.width = 512;
+  trophyCountCanvas.height = 80;
+  const trophyCountCtx = trophyCountCanvas.getContext("2d");
+  const trophyCountTexture = new THREE.CanvasTexture(trophyCountCanvas);
+  trophyCountTexture.colorSpace = THREE.SRGBColorSpace;
+  const trophyCountMat = new THREE.SpriteMaterial({ map: trophyCountTexture, transparent: true, depthWrite: false });
+  const trophyCountSprite = new THREE.Sprite(trophyCountMat);
+  trophyCountSprite.position.set(0, -0.39, 0);
+  trophyCountSprite.scale.set(1.15, 0.18, 1);
+  trophyProjection.add(trophyCountSprite);
+  let trophyCountTarget = 0;
+  let trophyCountShown = 0;
+  let trophyCountDrawn = -1;
 
   /* ------------------------------------------------------------------ */
   /* Tyre stack, shelves, bike mat, fridge                              */
@@ -2298,11 +2413,116 @@ export function createGarage(): GarageStage {
   let dogFetch = false;
   let dogFetchReturning = false;
   let dogFetchPause = 0;
+  let dogRecognizeUntil = 0;
+  let dogRecognizeBike = false;
   let catCall = 0;
+  let idleLearning = false;
+  let idleWhisper = "";
   const lastPlayer = { x: 0, z: 6.3 };
+  const echoCanvas = document.createElement("canvas");
+  echoCanvas.width = 640;
+  echoCanvas.height = 128;
+  const echoCtx = echoCanvas.getContext("2d");
+  const echoTexture = new THREE.CanvasTexture(echoCanvas);
+  echoTexture.colorSpace = THREE.SRGBColorSpace;
+  const echoMat = new THREE.SpriteMaterial({ map: echoTexture, transparent: true, depthWrite: false, opacity: 0 });
+  const scotchEcho = new THREE.Sprite(echoMat);
+  scotchEcho.scale.set(2.5, 0.5, 1);
+  scotchEcho.visible = false;
+  root.add(scotchEcho);
+  const echoRingMat = new THREE.MeshBasicMaterial({ color: ACID, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
+  const echoRing = new THREE.Mesh(new THREE.RingGeometry(0.24, 0.34, 48), echoRingMat);
+  echoRing.rotation.x = -Math.PI / 2;
+  echoRing.visible = false;
+  root.add(echoRing);
+  let echoRemaining = 0;
+  let echoAge = 0;
+  let lastEchoLine = "";
+  const echoAnchor = { x: 0, z: 6.3 };
+  const careTarget = new THREE.Vector3();
+  const careStart = new THREE.Vector3();
+  let petCareUntil = 0;
+  let petCareKind: "dog" | "cat" | "turtles" = "dog";
+  let treatFlight = -1;
+  const showScotchEcho = (line: string): void => {
+    if (!echoCtx) return;
+    const shortLine = line.replace(/\s+/g, " ").trim().slice(0, 62);
+    echoCtx.clearRect(0, 0, echoCanvas.width, echoCanvas.height);
+    echoCtx.fillStyle = "rgba(7, 14, 11, 0.84)";
+    echoCtx.beginPath();
+    echoCtx.roundRect(6, 6, 628, 116, 18);
+    echoCtx.fill();
+    echoCtx.strokeStyle = "rgba(200,255,22,0.78)";
+    echoCtx.lineWidth = 3;
+    echoCtx.stroke();
+    echoCtx.fillStyle = "#c8ff16";
+    echoCtx.font = "700 20px monospace";
+    echoCtx.fillText("SCOTCH / BAY ECHO", 28, 39);
+    echoCtx.fillStyle = "#f2f7eb";
+    echoCtx.font = "500 27px monospace";
+    echoCtx.fillText(shortLine, 28, 83);
+    echoTexture.needsUpdate = true;
+    echoAnchor.x = lastPlayer.x;
+    echoAnchor.z = lastPlayer.z;
+    scotchEcho.position.set(echoAnchor.x, 2.15, echoAnchor.z);
+    echoRing.position.set(echoAnchor.x, 0.035, echoAnchor.z);
+    scotchEcho.visible = true;
+    echoRing.visible = true;
+    echoRemaining = 2.4;
+    echoAge = 0;
+  };
   const callPet = (pet: "dog" | "cat"): void => {
     if (pet === "dog") dogCall = 20;
     else catCall = 40;
+  };
+  const carePet = (pet: "dog" | "cat" | "turtles", action: "pet" | "treat"): void => {
+    petCareKind = pet;
+    petCareUntil = performance.now() + 1900;
+    if (pet === "dog") dogCall = 0;
+    if (pet === "cat") catCall = 0;
+    if (action !== "treat") return;
+    const target = pet === "dog" ? dog.position : pet === "cat" ? cat.position : new THREE.Vector3(
+      (turtles[0].group.position.x + turtles[1].group.position.x) / 2,
+      0,
+      (turtles[0].group.position.z + turtles[1].group.position.z) / 2,
+    );
+    careTarget.set(target.x, pet === "turtles" ? 0.32 : 0.72, target.z + 0.12);
+    careTreat.position.set(lastPlayer.x, 1.15, lastPlayer.z);
+    careStart.copy(careTreat.position);
+    treatVisuals.forEach((visual, index) => { visual.visible = index === (pet === "dog" ? 0 : pet === "cat" ? 1 : 2); });
+    careTreat.visible = true;
+    treatFlight = 0;
+  };
+  const animatePettingHand = (hand: THREE.Group, active: boolean, time: number, y: number, z: number): void => {
+    hand.visible = active;
+    if (!active) return;
+    const stroke = Math.sin(time * 9.5);
+    hand.position.set(Math.sin(time * 3.2) * 0.018, y + Math.max(0, stroke) * 0.025, z + stroke * 0.065);
+    hand.rotation.set(-0.25 + stroke * 0.1, 0, Math.sin(time * 3.2) * 0.07);
+  };
+  const setIdleLearning = (active: boolean, whisper: string): void => {
+    idleLearning = active;
+    if (whisper !== idleWhisper && idleWhisperCtx) {
+      idleWhisper = whisper.replace(/\s+/g, " ").trim().slice(0, 58);
+      idleWhisperCtx.clearRect(0, 0, idleWhisperCanvas.width, idleWhisperCanvas.height);
+      idleWhisperCtx.fillStyle = "rgba(8,13,10,.55)";
+      idleWhisperCtx.fillRect(4, 4, 504, 64);
+      idleWhisperCtx.fillStyle = "rgba(200,255,22,.8)";
+      idleWhisperCtx.font = "600 15px monospace";
+      idleWhisperCtx.fillText("IDLE MEMORY /", 18, 27);
+      idleWhisperCtx.fillStyle = "rgba(230,238,220,.78)";
+      idleWhisperCtx.font = "13px monospace";
+      idleWhisperCtx.fillText(idleWhisper, 18, 51);
+      idleWhisperTexture.needsUpdate = true;
+    }
+    idleWhisperSprite.visible = active;
+  };
+  const playFarewell = (): void => {
+    farewellRemaining = 0.92;
+    dogGreetUntil = performance.now() + 1400;
+    dogGreetOpen = true;
+    showScotchEcho("GOOD RUN. SEE YOU NEXT TIME.");
+    farewellPulses.forEach(({ mesh }) => { mesh.visible = true; mesh.scale.setScalar(0.25); });
   };
   const fetchTrophy = (): void => {
     dogFetch = true;
@@ -2310,10 +2530,18 @@ export function createGarage(): GarageStage {
     dogFetchPause = 0;
     dogCall = 0;
   };
+  const recognizeVehicle = (vehicle: "car" | "bike"): void => {
+    dogRecognizeUntil = performance.now() + 2800;
+    dogRecognizeBike = vehicle === "bike";
+  };
   const scanCar = (): void => {
     scanT = 0;
   };
   const setCyrus = (state: CyrusVisual): void => {
+    if (state.phase === "speaking" && state.reply !== lastEchoLine && /\bscotch\b/i.test(state.reply)) {
+      lastEchoLine = state.reply;
+      showScotchEcho(state.reply);
+    }
     Object.assign(cyrusState, state);
   };
   const slideAround = (
@@ -2512,7 +2740,10 @@ export function createGarage(): GarageStage {
   let serviceTarget = 0;
   let serviceT = 0;
   let catAlert = 0;
+  let dogGreetUntil = 0;
+  let dogGreetOpen = true;
   let terminalClock = 0;
+  let nightMode = false;
 
   const setRev = (rpm: number, kick: number): void => {
     revRpm = Math.max(0, Math.min(1.12, rpm));
@@ -2539,6 +2770,7 @@ export function createGarage(): GarageStage {
 
   const setTrophies = (count: number): void => {
     const shown = Math.max(0, Math.min(trophyGroups.length, Math.round(count)));
+    trophyCountTarget = shown;
     trophyGroups.forEach((group, index) => {
       group.visible = index < shown;
     });
@@ -2547,10 +2779,19 @@ export function createGarage(): GarageStage {
   const setActiveHotspot = (id: string | null): void => {
     for (const [key, ring] of rings) ring.visible = key === id;
     activeRing = id ? rings.get(id) ?? null : null;
+    trophyProjection.visible = id === "trophies";
   };
 
   const setDoor = (open: number): void => {
+    const previous = doorOpen;
     doorOpen = Math.max(0, Math.min(1, open));
+    if (previous < 0.8 && doorOpen >= 0.8) {
+      dogGreetUntil = performance.now() + 1900;
+      dogGreetOpen = true;
+    } else if (previous > 0.2 && doorOpen <= 0.2) {
+      dogGreetUntil = performance.now() + 1500;
+      dogGreetOpen = false;
+    }
     roll.scale.y = Math.max(0.035, 1 - doorOpen * 0.965);
     spillMat.opacity = doorOpen * 0.3;
     shaftMat.opacity = doorOpen * 0.055;
@@ -2562,7 +2803,7 @@ export function createGarage(): GarageStage {
     lightLevel = Math.max(0, Math.min(1, level));
     for (const { light, base } of garageLights) {
       if (light === doorLight) continue;
-      light.intensity = base * (0.06 + lightLevel * 0.94);
+      light.intensity = base * (0.06 + lightLevel * 0.94) * (nightMode ? 0.72 : 1);
     }
     stripMat.opacity = 0.05 + lightLevel * 0.95;
     bulbMat.opacity = 0.1 + lightLevel * 0.9;
@@ -2570,11 +2811,16 @@ export function createGarage(): GarageStage {
   };
 
   const setWeather = (wet: boolean, night: boolean): void => {
+    nightMode = night;
     rain.visible = wet;
     roadMat.color.setHex(wet ? 0x93a49a : 0xdfe7da);
     towerMat.color.setHex(night ? 0x070c09 : 0x111a14);
     laneMat.opacity = night ? 0.55 : 0.4;
     pylonMat.opacity = wet ? 0.7 : 0.95;
+    dogCollarMat.emissive.setHex(night ? 0x806cff : 0x9c83ff);
+    dogCollarMat.emissiveIntensity = night ? 0.035 : 0.08;
+    dogTag.material.emissiveIntensity = night ? 0.12 : 0.28;
+    setLights(lightLevel);
   };
 
   const update = (
@@ -2664,13 +2910,15 @@ export function createGarage(): GarageStage {
       group.rotation.y += turn * Math.min(1, rate * dt);
     };
 
-    const alertTarget = Math.min(1, revRpm * 1.25 + revKick * 0.6);
+    const catCareActive = petCareKind === "cat" && performance.now() < petCareUntil;
+    animatePettingHand(catPettingHand, catCareActive, time, 0.52, 0.39);
+    const alertTarget = Math.max(Math.min(1, revRpm * 1.25 + revKick * 0.6), catCareActive ? 0.86 : 0);
     catAlert += (alertTarget - catAlert) * (1 - Math.exp(-dt * 6));
 
     // MARIO — prowls the tyre corner, but the V12 flattens him mid-step.
     const catPlayerAttn = attention(cat.position.x, cat.position.z, 4.2);
-    const catAttn = Math.max(catAlert, catPlayerAttn);
-    let catFrozen = catAttn > 0.5 || catAlert > 0.35;
+    const catAttn = Math.max(catAlert, catPlayerAttn, catCareActive ? 1 : 0);
+    let catFrozen = catAttn > 0.5 || catAlert > 0.35 || catCareActive;
     let catStep: number;
     if (catCall > 0 && player) {
       catCall -= dt;
@@ -2703,6 +2951,7 @@ export function createGarage(): GarageStage {
       catAlert * 0.05 +
       Math.abs(Math.sin(catRoam.stride)) * 0.016 * catMove +
       Math.sin(time * 1.7) * 0.006 * (1 - catMove);
+    if (catCareActive) catBody.position.y += 0.008 + Math.max(0, Math.sin(time * 5.2)) * 0.012;
     for (let i = 0; i < catLegs.length; i++) {
       const phase = i === 0 || i === 3 ? 0 : Math.PI;
       catLegs[i].rotation.x = Math.sin(catRoam.stride + phase) * 0.5 * catMove;
@@ -2716,20 +2965,28 @@ export function createGarage(): GarageStage {
       catTargetYaw,
       catAttn,
     );
-    catHead.rotation.x = Math.min(0.14, catAttn * 0.1);
-    catTail.rotation.z = Math.sin(time * 2.6 + catRoam.stride) * 0.42;
+    catHead.rotation.x = Math.min(0.14, catAttn * (catCareActive ? 0.18 : 0.1));
+    catTail.rotation.z = Math.sin(time * (catCareActive ? 5.2 : 2.6) + catRoam.stride) * (catCareActive ? 0.65 : 0.42);
     catTail.rotation.x = THREE.MathUtils.lerp(
       Math.sin(time * 1.3) * 0.18,
       -0.95,
       catAlert,
     );
     for (const ear of catEars) {
-      ear.rotation.x = -(catAlert * 0.45 + catPlayerAttn * 0.22);
+      ear.rotation.x = catCareActive ? -0.08 + Math.sin(time * 2.8) * 0.035 : -(catAlert * 0.45 + catPlayerAttn * 0.22);
     }
 
     // SCOTCH — trots his patch by the launch pad, ears swinging.
+    const greeting = performance.now() < dogGreetUntil;
+    const dogCareActive = petCareKind === "dog" && performance.now() < petCareUntil;
+    animatePettingHand(dogPettingHand, dogCareActive, time, 0.79, 0.4);
+    const resting = idleLearning && dogCall <= 0 && !dogFetch && !greeting;
     let dogAttn = attention(dog.position.x, dog.position.z, 5.2);
-    let dogFrozen = dogAttn > 0.45;
+    if (dogCareActive) dogAttn = 1;
+    const recognizing = performance.now() < dogRecognizeUntil;
+    if (greeting) dogAttn = 1;
+    if (recognizing) dogAttn = Math.max(dogAttn, 0.94);
+    let dogFrozen = dogAttn > 0.45 || resting;
     let dogStep: number;
     if (dogFetch) {
       const returning = dogFetchReturning;
@@ -2792,33 +3049,35 @@ export function createGarage(): GarageStage {
     if (dogFrozen) {
       turnToward(dog, Math.atan2(px - dog.position.x, pz - dog.position.z), 5);
     }
-    dogBody.scale.y = 1 + Math.sin(time * 1.5) * 0.02 * (1 - dogMove);
-    dogBody.position.y = Math.abs(Math.sin(dogRoam.stride)) * 0.02 * dogMove;
+    dogBody.scale.y = 1 + Math.sin(time * (resting || dogCareActive ? 0.72 : 1.5)) * (resting || dogCareActive ? 0.034 : 0.02) * (1 - dogMove);
+    dogBody.position.y = Math.abs(Math.sin(dogRoam.stride)) * 0.02 * dogMove + (greeting ? Math.max(0, Math.sin(time * 10)) * 0.025 : 0);
     for (let i = 0; i < dogLegs.length; i++) {
       const phase = i === 0 || i === 3 ? 0 : Math.PI;
       dogLegs[i].rotation.x = Math.sin(dogRoam.stride + phase) * 0.5 * dogMove;
     }
     dogHead.rotation.y = THREE.MathUtils.lerp(
       Math.sin(time * 0.4) * 0.45 * (1 - dogMove),
-      aimYaw(dog.rotation.y, dog.position.x, dog.position.z),
+      greeting ? Math.atan2(-dog.position.x, (dogGreetOpen ? 12 : 4.8) - dog.position.z) - dog.rotation.y : recognizing ? Math.atan2((dogRecognizeBike ? 5.5 : 0) - dog.position.x, (dogRecognizeBike ? 3.4 : 0.2) - dog.position.z) - dog.rotation.y : aimYaw(dog.rotation.y, dog.position.x, dog.position.z),
       dogAttn,
     );
     dogHead.rotation.x = THREE.MathUtils.lerp(
-      0.03 + Math.sin(time * 0.9) * 0.03,
-      -0.04,
+      nightMode ? 0.11 + Math.sin(time * 0.22) * 0.025 : 0.03 + Math.sin(time * 0.9) * 0.03,
+      dogCareActive ? -0.22 + Math.sin(time * 6) * 0.035 : nightMode ? 0.12 : -0.04,
       dogAttn,
     );
     dogTail.rotation.y =
-      Math.sin(time * (2.2 + dogAttn * 9)) * (0.12 + dogAttn * 0.55) +
+      Math.sin(time * (2.2 + dogAttn * 9 + (greeting ? 5 : 0) + (dogCareActive ? 7 : 0))) * (0.12 + dogAttn * (greeting || dogCareActive ? 0.68 : 0.55)) +
       Math.sin(dogRoam.stride * 0.5) * 0.08 * dogMove;
     dogTail.rotation.x = -dogAttn * 0.25;
+    idleWhisperSprite.visible = idleLearning;
+    if (idleLearning) idleWhisperSprite.position.set(dog.position.x, dog.position.y + 1.22, dog.position.z);
     for (let i = 0; i < dogEars.length; i++) {
       const ear = dogEars[i];
       const side = Math.sign(ear.position.x) || 1;
       ear.rotation.z =
         side * 0.12 +
         Math.sin(dogRoam.stride + i * Math.PI) * 0.07 * dogMove -
-        dogAttn * 0.04;
+        dogAttn * (dogCareActive ? 0.12 : 0.04);
     }
 
     // MR & MRS TURTLE — slow laps of the pebble tray.
@@ -2827,7 +3086,8 @@ export function createGarage(): GarageStage {
     for (let i = 0; i < turtles.length; i++) {
       const t = turtles[i];
       const roam = turtleRoams[i];
-      const attn = attention(t.group.position.x, t.group.position.z, 3.6);
+      const turtleCareActive = petCareKind === "turtles" && performance.now() < petCareUntil;
+      const attn = Math.max(attention(t.group.position.x, t.group.position.z, 3.6), turtleCareActive ? 1 : 0);
       const frozen = attn > 0.55;
       const step = stepRoam(roam, t.group, dt, frozen);
       turtleMoves[i] += (step - turtleMoves[i]) * (1 - Math.exp(-dt * 4));
@@ -2841,7 +3101,7 @@ export function createGarage(): GarageStage {
         attn,
       );
       t.head.position.y = 0.05 + Math.sin(time * 1.1 + t.phase) * 0.004;
-      t.head.position.z = 0.115 + turtleMoves[i] * 0.014;
+      t.head.position.z = 0.115 + turtleMoves[i] * 0.014 + (turtleCareActive ? 0.045 + Math.max(0, Math.sin(time * 5 + t.phase)) * 0.018 : 0);
       turtleMidX += t.group.position.x / turtles.length;
       turtleMidZ += t.group.position.z / turtles.length;
     }
@@ -2857,12 +3117,72 @@ export function createGarage(): GarageStage {
     const turtleRing = rings.get("turtles");
     if (turtleRing) turtleRing.position.set(turtleMidX, 0.028, turtleMidZ);
 
+    if (treatFlight >= 0) {
+      treatFlight = Math.min(1, treatFlight + dt / 0.72);
+      const eased = treatFlight * treatFlight * (3 - 2 * treatFlight);
+      careTreat.position.copy(careStart).lerp(careTarget, eased);
+      careTreat.position.y += Math.sin(Math.PI * treatFlight) * 0.72;
+      careTreat.rotation.y += dt * 5;
+      if (treatFlight >= 1) {
+        careTreat.visible = false;
+        treatFlight = -1;
+      }
+    }
+
+    if (trophyProjection.visible) {
+      trophyCountShown += (trophyCountTarget - trophyCountShown) * (1 - Math.exp(-dt * 5));
+      const count = Math.round(trophyCountShown);
+      if (count !== trophyCountDrawn && trophyCountCtx) {
+        trophyCountCtx.clearRect(0, 0, trophyCountCanvas.width, trophyCountCanvas.height);
+        trophyCountCtx.fillStyle = "rgba(8,14,10,.8)";
+        trophyCountCtx.fillRect(8, 8, 496, 64);
+        trophyCountCtx.strokeStyle = "rgba(200,255,22,.58)";
+        trophyCountCtx.lineWidth = 2;
+        trophyCountCtx.strokeRect(8, 8, 496, 64);
+        trophyCountCtx.fillStyle = "#c8ff16";
+        trophyCountCtx.font = "700 25px monospace";
+        trophyCountCtx.textAlign = "center";
+        trophyCountCtx.fillText(`SCOTCH / TROPHY SCAN · ${count}/${trophyGroups.length}`, 256, 49);
+        trophyCountTexture.needsUpdate = true;
+        trophyCountDrawn = count;
+      }
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      trophyProjection.position.y = 3.12 + (reducedMotion ? 0 : Math.sin(time * 1.8) * 0.045);
+      trophyProjection.rotation.y = reducedMotion ? 0 : Math.sin(time * 0.55) * 0.12;
+      trophyHoloMat.opacity = 0.68 + (reducedMotion ? 0 : Math.sin(time * 3) * 0.14);
+    }
+    if (farewellRemaining > 0) {
+      farewellRemaining = Math.max(0, farewellRemaining - dt);
+      const elapsed = 0.92 - farewellRemaining;
+      for (const { mesh, material, delay } of farewellPulses) {
+        const progress = THREE.MathUtils.clamp((elapsed - delay) / (0.92 - delay), 0, 1);
+        mesh.scale.setScalar(0.25 + progress * 7.2);
+        material.opacity = (1 - progress) * 0.72;
+        mesh.visible = progress < 1;
+      }
+    }
+
     if (activeRing) activeRing.rotation.z += dt * 0.5;
     ringMat.opacity = 0.26 + 0.16 * Math.sin(time * 3.6);
 
     if (player) {
       lastPlayer.x = player.x;
       lastPlayer.z = player.z;
+    }
+    if (echoRemaining > 0) {
+      echoRemaining = Math.max(0, echoRemaining - dt);
+      echoAge += dt;
+      const fade = Math.min(1, echoRemaining / 0.72);
+      scotchEcho.position.set(echoAnchor.x, 2.15 + echoAge * 0.12, echoAnchor.z);
+      echoMat.opacity = fade * 0.88;
+      echoRing.position.set(echoAnchor.x, 0.035, echoAnchor.z);
+      echoRing.scale.setScalar(1 + echoAge * 0.48);
+      echoRingMat.opacity = fade * 0.46;
+    } else {
+      scotchEcho.visible = false;
+      echoRing.visible = false;
+      echoMat.opacity = 0;
+      echoRingMat.opacity = 0;
     }
     const caller = dogCall > 0 ? dog : catCall > 0 ? cat : null;
     if (caller) {
@@ -2894,7 +3214,11 @@ export function createGarage(): GarageStage {
     setDiecast,
     setService,
     callPet,
+    carePet,
+    setIdleLearning,
+    playFarewell,
     fetchTrophy,
+    recognizeVehicle,
     setCyrus,
     scanCar,
     hotspots,
@@ -2926,6 +3250,9 @@ export function createGarage(): GarageStage {
       orbitGeo.dispose();
       orbitMat.dispose();
       voicePanel.map.dispose();
+      trophyCountTexture.dispose();
+      idleWhisperTexture.dispose();
+      echoTexture.dispose();
       sysPanel.map.dispose();
       linkPanel.map.dispose();
     },

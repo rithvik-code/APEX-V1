@@ -151,10 +151,12 @@
 
 .mesh-card {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 5px;
   padding: 13px 14px 12px;
   background: var(--bg);
   border: 0;
@@ -171,11 +173,23 @@
 }
 
 .mesh-card__code {
+  display:block;
   font-family: var(--mono);
   font-size: 9px;
   letter-spacing: 0.18em;
   color: var(--dim);
 }
+.mesh-card__avatar { position:relative; grid-column:1; grid-row:1; display:grid; place-items:center; width:32px; height:32px; border:1px solid rgba(200,255,22,.32); border-radius:50%; background:radial-gradient(circle,rgba(200,255,22,.14),rgba(7,10,9,.92) 72%); color:var(--acid); transition:transform .28s cubic-bezier(.2,.8,.2,1),box-shadow .28s,border-color .28s; }
+.mesh-card__avatar i { font:600 9px var(--mono); font-style:normal; letter-spacing:.04em; }
+.mesh-card__avatar b { position:absolute; inset:-4px; border:1px solid rgba(200,255,22,.2); border-radius:50%; transform:rotateX(68deg); }
+.mesh-card__avatar em { position:absolute; top:1px; right:3px; width:5px; height:5px; border-radius:50%; background:#c8ff16; box-shadow:0 0 7px #c8ff16; }
+.mesh-card__identity { grid-column:2; grid-row:1; min-width:0; }
+.mesh-card__status { grid-column:1 / -1; display:flex; align-items:center; gap:6px; min-height:16px; color:#73827c; font:7px var(--mono); letter-spacing:.11em; opacity:.78; transition:color .2s,opacity .2s; }
+.mesh-card__status::before { content:""; width:4px; height:4px; border:1px solid currentColor; border-radius:50%; }
+.mesh-card--live .mesh-card__status::before { background:var(--acid); box-shadow:0 0 7px var(--acid); }
+.mesh-card--link .mesh-card__status::before { background:#ff5a1f; box-shadow:0 0 7px #ff5a1f; }
+.mesh-card:hover .mesh-card__avatar,.mesh-card:focus-visible .mesh-card__avatar { transform:translateY(-3px) scale(1.08); border-color:rgba(111,249,255,.72); box-shadow:0 0 18px rgba(111,249,255,.24); }
+.mesh-card:hover .mesh-card__status,.mesh-card:focus-visible .mesh-card__status { color:#a5dce0; opacity:1; }
 
 .mesh-card__name {
   font-family: var(--mono);
@@ -189,6 +203,7 @@
 .mesh-card__name--consent { color: rgba(233, 237, 232, 0.66); }
 
 .mesh-card__tag {
+  display:block;
   font-family: var(--mono);
   font-size: 9.5px;
   letter-spacing: 0.04em;
@@ -197,6 +212,7 @@
 }
 
 .mesh-card__tier {
+  grid-column:1 / -1;
   margin-top: 4px;
   font-family: var(--mono);
   font-size: 9px;

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Scotch Page Companion</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="identity">
+          <div class="avatar" aria-hidden="true"><span>◈</span><i></i></div>
+          <div><p class="eyebrow">APEX // BROWSER INTELLIGENCE</p><h1>Scotch <span>PAGE COMPANION</span></h1></div>
+        </div>
+        <button id="refresh" class="icon-button" title="Read this page again" aria-label="Read this page again">↻</button>
+      </header>
+
+      <section class="page-card" aria-live="polite">
+        <div class="page-meta"><span class="live-dot"></span><span id="state">CONNECTING TO CURRENT TAB</span><span id="length" class="length"></span></div>
+        <h2 id="page-title">Opening the current page…</h2>
+        <p id="page-url" class="url"></p>
+      </section>
+
+      <div class="toolbar">
+        <button id="summarize" class="summary-button" disabled><span>✧</span> SUMMARIZE PAGE</button>
+        <span id="model-label">LOCAL AI · OLLAMA</span>
+      </div>
+
+      <section id="messages" class="messages" aria-live="polite" aria-label="Conversation">
+        <article class="welcome">
+          <span class="welcome-mark">✦</span>
+          <h2>Your page, understood.</h2>
+          <p>Ask Scotch about anything on this page. Answers use page content only and show the passages they came from.</p>
+          <div class="suggestions"><button data-prompt="Give me the key points from this page.">Key points</button><button data-prompt="What are the most important details and caveats?">Important details</button></div>
+        </article>
+      </section>
+
+      <form id="composer" class="composer">
+        <label class="sr-only" for="question">Ask about this webpage</label>
+        <textarea id="question" rows="1" placeholder="Ask Scotch about this page…" maxlength="4000" required></textarea>
+        <button id="send" type="submit" aria-label="Send question" title="Send question">↑</button>
+        <div class="composer-foot"><span><span class="lock">⌑</span> PAGE CONTEXT STAYS ON THIS DEVICE</span><kbd>ENTER ↵</kbd></div>
+      </form>
+      <footer>MADE BY RITHVIK <span>·</span> SCOTCH LOCAL PAGE MODE</footer>
+    </main>
+    <script src="sidepanel.js"></script>
+  </body>
+</html>

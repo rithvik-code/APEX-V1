@@ -29,6 +29,8 @@
 
 Four surfaces live in this repo, and they share one brain:
 
+**Chrome page companion:** Load [`chrome-scotch/`](chrome-scotch/) as an unpacked Chrome extension to open Scotch in a browser side panel. It reads the active page and uses the local APEX/Ollama service for page-grounded questions and full-page summaries. See its [setup guide](chrome-scotch/README.md).
+
 ```
                     ┌────────────────────────────────────────────┐
    BROWSER  ───────▶│  THE SITE    3D · HUD · MESH · GARAGE · ARC │

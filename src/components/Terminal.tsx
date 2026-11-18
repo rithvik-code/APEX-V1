@@ -36,7 +36,7 @@ import {
   voxSupported,
   type Recognizer,
 } from "../lib/radio";
-import type { SceneConfig } from "../lib/scene";
+import { rpmValue, type SceneConfig } from "../lib/scene";
 import { currentLicence, type CareerEvent, type CareerState } from "../lib/career";
 import { sound } from "../lib/sound";
 import { publishPitMemo } from "../lib/pitMemos";
@@ -62,10 +62,13 @@ type Entry = {
   controlGoal?: string;
   engineer?: boolean;
   arcade?: ArcadePayload;
+  doodle?: { kind: "aero" | "paint" | "grip"; label: string };
+  tuneCard?: { label: string; before: string; after: string; beforePct: number; afterPct: number; beforeColor?: string; afterColor?: string; sentence: string };
 };
 
 type LinkState = "checking" | "online" | "offline";
 type PitPlan = { laps: number; request: string };
+type QueuedTurn = { id: string; text: string };
 
 type TerminalProps = {
   onTakeControl?: (goal: string) => void;
@@ -86,6 +89,28 @@ const CONTROL_INTENT =
 
 function controlIntentGoal(text: string): string | undefined {
   return CONTROL_INTENT.test(text) ? text : undefined;
+}
+
+function tuneRecommendation(patch: Partial<SceneConfig>, current: SceneConfig, reply: string): NonNullable<Entry["tuneCard"]> {
+  const sentence = (reply.split(/[.!?](?:\s|$)/)[0] || reply).trim().slice(0, 150);
+  if (patch.paint) {
+    return { label: "LIVERY / FINISH", before: current.paint.base.toUpperCase(), after: patch.paint.base.toUpperCase(), beforePct: 35, afterPct: 82, beforeColor: current.paint.base, afterColor: patch.paint.base, sentence };
+  }
+  if (patch.rainAmount !== undefined) {
+    return { label: "WET TRACK / INTENSITY", before: `${current.weather === "rain" ? Math.round(current.rainAmount * 100) : 0}%`, after: `${patch.weather === "clear" ? 0 : Math.round(patch.rainAmount * 100)}%`, beforePct: current.weather === "rain" ? current.rainAmount * 100 : 0, afterPct: patch.weather === "clear" ? 0 : patch.rainAmount * 100, sentence };
+  }
+  if (patch.windSpeed !== undefined) {
+    return { label: "AERO / FLOW SPEED", before: `${current.windSpeed} KM/H`, after: `${patch.windSpeed} KM/H`, beforePct: ((current.windSpeed - 40) / 360) * 100, afterPct: ((patch.windSpeed - 40) / 360) * 100, sentence };
+  }
+  if (patch.turbulence !== undefined) {
+    return { label: "AIR WAKE / TURBULENCE", before: `${Math.round(current.turbulence * 100)}%`, after: `${Math.round(patch.turbulence * 100)}%`, beforePct: current.turbulence * 100, afterPct: patch.turbulence * 100, sentence };
+  }
+  if (patch.rpm !== undefined) {
+    return { label: "DYNO / TARGET RPM", before: `${rpmValue(current.rpm).toLocaleString()} RPM`, after: `${rpmValue(patch.rpm).toLocaleString()} RPM`, beforePct: current.rpm * 100, afterPct: patch.rpm * 100, sentence };
+  }
+  const before = current.lighting.toUpperCase();
+  const after = (patch.lighting ?? patch.weather ?? patch.livery ?? "SETUP").toString().toUpperCase();
+  return { label: "ENGINEER / CONFIGURATION", before, after, beforePct: 42, afterPct: 78, sentence };
 }
 
 // The model ends actionable replies with `TAKE_CONTROL: <goal>`; lift that out
@@ -346,6 +371,7 @@ export function Terminal({
   const [pitPlan, setPitPlan] = useState<PitPlan | null>(null);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [crewQueue, setCrewQueue] = useState<QueuedTurn[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [link, setLink] = useState<LinkState>("checking");
   const [models, setModels] = useState<string[]>([]);
@@ -369,6 +395,7 @@ export function Terminal({
   const searchRef = useRef<AbortController | null>(null);
   const mounted = useRef(true);
   const voxRef = useRef(false);
+  const crewQueueRef = useRef<QueuedTurn[]>([]);
   const recognizerRef = useRef<Recognizer | null>(null);
   const sendRef = useRef<(value: string) => void>(() => {});
   const chips = useMemo(() => buildChips(entries), [entries]);
@@ -395,6 +422,39 @@ export function Terminal({
     setEntries((prev) => [...prev, { id: uid(), role, content }]);
   }, []);
 
+  const enqueueTurn = (text: string) => {
+    if (crewQueueRef.current.length >= 6) {
+      addEntry("meta", "CREW QUEUE FULL · finish or remove a queued request first.");
+      return;
+    }
+    const next = [...crewQueueRef.current, { id: uid(), text }];
+    crewQueueRef.current = next;
+    setCrewQueue(next);
+  };
+
+  const prioritizeTurn = (id: string) => {
+    const next = [...crewQueueRef.current];
+    const index = next.findIndex((item) => item.id === id);
+    if (index > 0) next.unshift(...next.splice(index, 1));
+    crewQueueRef.current = next;
+    setCrewQueue(next);
+  };
+
+  const removeQueuedTurn = (id: string) => {
+    const next = crewQueueRef.current.filter((item) => item.id !== id);
+    crewQueueRef.current = next;
+    setCrewQueue(next);
+  };
+
+  const drainCrewQueue = () => {
+    if (!mounted.current) return;
+    const [next, ...rest] = crewQueueRef.current;
+    if (!next) return;
+    crewQueueRef.current = rest;
+    setCrewQueue(rest);
+    window.setTimeout(() => sendRef.current(next.text), 120);
+  };
+
   const detect = useCallback(
     async (endpoint: string, silent = false): Promise<string[]> => {
       setLink("checking");
@@ -412,7 +472,7 @@ export function Terminal({
         setLink(found.length ? "online" : "offline");
         if (found.length && !silent) {
           setSettings((prev) => {
-            if (prev.provider === "openai") return prev;
+            if (prev.provider === "openai" || prev.provider === "hermes") return prev;
             const next: AiSettings = {
               ...prev,
               provider: "ollama",
@@ -437,6 +497,22 @@ export function Terminal({
   useEffect(() => {
     mounted.current = true;
     const stored = loadSettings();
+    if (stored.provider === "hermes") {
+      const controller = new AbortController();
+      const endpoint = stored.endpoint.replace(/\/+$/, "");
+      void fetch(`${endpoint}/models`, {
+        headers: stored.apiKey ? { Authorization: `Bearer ${stored.apiKey}` } : {},
+        signal: controller.signal,
+      }).then((response) => {
+        if (mounted.current) setLink(response.ok ? "online" : "offline");
+      }).catch(() => {
+        if (mounted.current) setLink("offline");
+      });
+      return () => {
+        mounted.current = false;
+        controller.abort();
+      };
+    }
     if (stored.provider === "openai") {
       setLink("offline");
       return () => {
@@ -450,7 +526,7 @@ export function Terminal({
         const preferred = resolveModel(found, stored.model);
         void warmModel({ ...stored, provider: "ollama", model: preferred });
         setSettings((prev) => {
-          if (prev.provider === "openai") return prev;
+          if (prev.provider === "openai" || prev.provider === "hermes") return prev;
           const next: AiSettings = {
             ...prev,
             provider: "ollama",
@@ -659,11 +735,12 @@ export function Terminal({
         addEntry("user", arg);
         onTune(action.patch);
         sound.whoosh();
+        const tuneCard = tuneRecommendation(action.patch, scene, action.reply);
         setEntries((prev) => [
           ...prev,
-          { id: uid(), role: "assistant", content: action.reply, engineer: true },
+          { id: uid(), role: "assistant", content: action.reply, engineer: true, tuneCard },
         ]);
-        if (voxRef.current) speakRadio(action.reply);
+        if (voxRef.current) speakRadio(tuneCard.sentence);
         break;
       }
       case "/vox":
@@ -866,6 +943,10 @@ export function Terminal({
         setInput("");
         abortRef.current?.abort();
         addEntry("meta", "STREAM ABORTED.");
+      } else {
+        enqueueTurn(text);
+        setInput("");
+        sound.tick("click");
       }
       return;
     }
@@ -908,6 +989,7 @@ export function Terminal({
 
     const engineerAction = onTune ? tuneFromText(text, scene) : null;
     if (engineerAction && onTune) {
+      const tuneCard = tuneRecommendation(engineerAction.patch, scene, engineerAction.reply);
       setEntries((prev) => [...prev, { id: uid(), role: "user", content: text }]);
       onTune(engineerAction.patch);
       sound.whoosh();
@@ -918,9 +1000,14 @@ export function Terminal({
           role: "assistant",
           content: engineerAction.reply,
           engineer: true,
+          tuneCard,
+          doodle: {
+            kind: /paint|livery|colou?r|stripe/i.test(text) ? "paint" : /wet|rain|wind|pressure|downforce|wing|drag/i.test(text) ? "aero" : "grip",
+            label: /paint|livery|colou?r|stripe/i.test(text) ? "LIVERY PROFILE" : /wet|rain/i.test(text) ? "WET GRIP PROFILE" : /wind|pressure|downforce|wing|drag/i.test(text) ? "AIRLOAD PROFILE" : "CORNERING SETUP",
+          },
         },
       ]);
-      if (voxRef.current) speakRadio(engineerAction.reply);
+      if (voxRef.current) speakRadio(tuneCard.sentence);
       return;
     }
 
@@ -1027,6 +1114,7 @@ export function Terminal({
       setStreaming(false);
       abortRef.current = null;
       if (voxRef.current) speakRadio(quickGrounding.quick);
+      drainCrewQueue();
       return;
     }
 
@@ -1131,6 +1219,7 @@ export function Terminal({
       abortRef.current = null;
       if (settled) publishPitMemo(display);
       if (voxRef.current && settled) speakRadio(display);
+      drainCrewQueue();
     }
   };
 
@@ -1166,10 +1255,10 @@ export function Terminal({
       ? "DEMO"
       : settings.provider === "ollama"
         ? "LOCAL"
-        : "CLOUD";
+        : settings.provider === "hermes" ? "HERMES AGENT" : "CLOUD";
 
   const linkLabel =
-    link === "checking" ? "SCANNING" : link === "online" ? "LIVE" : "DEMO";
+    link === "checking" ? "SCANNING" : link === "online" ? "LIVE" : settings.provider === "hermes" ? "OFFLINE" : "DEMO";
 
   const applySettings = () => {
     persist(draft);
@@ -1195,19 +1284,40 @@ export function Terminal({
           addEntry("meta", `LINK READY → ${model} · WARMING`);
         }
       });
+    } else if (draft.provider === "hermes") {
+      const endpoint = draft.endpoint.replace(/\/+$/, "");
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 5000);
+      void fetch(`${endpoint}/models`, {
+        headers: draft.apiKey ? { Authorization: `Bearer ${draft.apiKey}` } : {},
+        signal: controller.signal,
+      }).then((response) => {
+        setLink(response.ok ? "online" : "offline");
+        addEntry("meta", response.ok
+          ? "HERMES AGENT LINK READY · CHAT, TOOLS AND MEMORY ROUTED THROUGH HERMES"
+          : `HERMES IS NOT READY (${response.status}). START ITS LOCAL API SERVER AND CHECK THE API KEY.`);
+      }).catch(() => {
+        setLink("offline");
+        addEntry("meta", "HERMES IS NOT REACHABLE. INSTALL HERMES AGENT, ENABLE ITS API SERVER, THEN RECONNECT.");
+      }).finally(() => window.clearTimeout(timeout));
     } else {
       addEntry("meta", `${draft.provider.toUpperCase()} LINK CONFIGURED.`);
     }
   };
 
   const setProvider = (provider: Provider) => {
-    const endpoint =
-      provider === "openai" && draft.endpoint.includes("11434")
-        ? "https://api.openai.com/v1"
-        : provider === "ollama" && draft.endpoint.includes("openai")
-          ? DEFAULT_SETTINGS.endpoint
-          : draft.endpoint;
-    setDraft({ ...draft, provider, endpoint });
+    let endpoint = draft.endpoint;
+    let model = draft.model;
+    if (provider === "hermes") {
+      endpoint = "/hermes/v1";
+      model = "hermes-agent";
+    } else if (provider === "openai" && (endpoint.includes("11434") || endpoint.includes("/hermes/"))) {
+      endpoint = "https://api.openai.com/v1";
+    } else if (provider === "ollama" && (endpoint.includes("openai") || endpoint.includes("/hermes/"))) {
+      endpoint = DEFAULT_SETTINGS.endpoint;
+      model = DEFAULT_SETTINGS.model;
+    }
+    setDraft({ ...draft, provider, endpoint, model });
   };
 
   const copySession = async () => {
@@ -1313,6 +1423,20 @@ export function Terminal({
         </button>
       </div>
 
+      {crewQueue.length > 0 && (
+        <aside className="term__crew-queue" aria-label="Pending Cyrus questions" aria-live="polite">
+          <header><b>CREW QUEUE</b><span>{streaming ? "CYRUS IS ANSWERING" : "NEXT REQUEST READY"} · {crewQueue.length}/6</span></header>
+          <div>{crewQueue.map((turn, index) => (
+            <article key={turn.id} className={index === 0 ? "is-next" : ""}>
+              <button type="button" onClick={() => prioritizeTurn(turn.id)} aria-label={`${index === 0 ? "Next up" : "Answer this first"}: ${turn.text}`} title={index === 0 ? "This is next" : "Move this request to the front of the queue"}>
+                <i>{String(index + 1).padStart(2, "0")}</i><span>{turn.text}</span><em>{index === 0 ? "NEXT" : "ANSWER FIRST"}</em>
+              </button>
+              <button type="button" className="term__queue-remove" onClick={() => removeQueuedTurn(turn.id)} aria-label={`Remove queued request: ${turn.text}`}>×</button>
+            </article>
+          ))}</div>
+        </aside>
+      )}
+
       <div
         className="term__body"
         ref={bodyRef}
@@ -1380,6 +1504,23 @@ export function Terminal({
                       )}
                     </p>
                   )}
+                  {entry.doodle && !isStreamingEntry && (
+                    <div className={`term__doodle term__doodle--${entry.doodle.kind}`} role="img" aria-label={`${entry.doodle.label} setup schematic. ${shownText}`}>
+                      <span>CYRUS / PIT-WALL SKETCH</span>
+                      <svg viewBox="0 0 150 42" aria-hidden="true"><path className="term__doodle-car" d="M13 27h17l10-13h42l14 12h32l9 5H13z"/><path className="term__doodle-detail" d={entry.doodle.kind === "aero" ? "M38 12 C55 5 81 6 102 13 M49 8l-7 4 8 3 M91 9l8 4-8 3" : entry.doodle.kind === "paint" ? "M39 19h49 M43 22h38 M46 25h29" : "M36 32v-8m9 8v-8m44 8v-8m9 8v-8 M34 35h66"}/><circle cx="42" cy="31" r="5"/><circle cx="96" cy="31" r="5"/></svg>
+                      <b>{entry.doodle.label}</b><small>{entry.doodle.kind === "aero" ? "LOAD / FLOW / DRAG" : entry.doodle.kind === "paint" ? "BASE / ACCENT / STRIPE" : "FRONT / REAR / GRIP"}</small>
+                    </div>
+                  )}
+                  {entry.tuneCard && !isStreamingEntry && (
+                    <div className="term__tune-card" aria-label={`${entry.tuneCard.label}. Before ${entry.tuneCard.before}; after ${entry.tuneCard.after}. ${entry.tuneCard.sentence}`}>
+                      <div className="term__tune-head"><span>ENGINEER / SETUP DELTA</span><b>{entry.tuneCard.label}</b></div>
+                      <div className="term__tune-compare">
+                        <div><span>BEFORE <i>{entry.tuneCard.before}</i></span><div className="term__tune-track"><i style={{ width: `${Math.max(2, Math.min(100, entry.tuneCard.beforePct))}%`, backgroundColor: entry.tuneCard.beforeColor }} /></div></div>
+                        <div><span>AFTER <i>{entry.tuneCard.after}</i></span><div className="term__tune-track is-after"><i style={{ width: `${Math.max(2, Math.min(100, entry.tuneCard.afterPct))}%`, backgroundColor: entry.tuneCard.afterColor }} /></div></div>
+                      </div>
+                      <small>RADIO / {entry.tuneCard.sentence}</small>
+                    </div>
+                  )}
                   {handoff &&
                     onTakeControl &&
                     !isStreamingEntry &&
@@ -1424,7 +1565,7 @@ export function Terminal({
             <div className="term__entry term__entry--assistant">
               <span className="term__tag">APEX</span>
               <p>
-                <span className="term__thinking">THINKING</span>
+                <span className="term__thinking">ANSWERING</span>
                 <span className="term__caret" aria-hidden="true" />
               </p>
             </div>
@@ -1458,6 +1599,7 @@ export function Terminal({
                 <option value="demo">DEMO — canned</option>
                 <option value="ollama">OLLAMA — local / free</option>
                 <option value="openai">OPENAI-COMPATIBLE — cloud</option>
+                <option value="hermes">HERMES AGENT — local tools + memory</option>
               </select>
             </label>
             <label>
@@ -1487,7 +1629,7 @@ export function Terminal({
               </datalist>
             </label>
             <label>
-              <span>API KEY — CLOUD ONLY</span>
+              <span>API KEY — CLOUD / HERMES LOCAL</span>
               <input
                 type="password"
                 value={draft.apiKey}
@@ -1497,6 +1639,7 @@ export function Terminal({
                 }
               />
             </label>
+            {draft.provider === "hermes" && <p className="term__field--full">Install Hermes Agent and start its local API server. Then enter its API key here. <a href="https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server/" target="_blank" rel="noreferrer">Hermes setup guide ↗</a></p>}
             <label className="term__field--full">
               <span>SYSTEM PROMPT</span>
               <textarea

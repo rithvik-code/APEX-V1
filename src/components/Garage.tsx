@@ -18,8 +18,29 @@ import { speakRadio } from "../lib/radio";
 import { DIE_CAST_CATALOG, diecastUnlocked } from "../lib/diecast";
 import { subscribePitMemos, type PitMemo } from "../lib/pitMemos";
 import { formatLap, loadBoard, type DriveEntry } from "../lib/driveStore";
+import type { CareerState } from "../lib/career";
 
 type GarageAction = { id: string; seq: number };
+type CarePet = "dog" | "cat" | "turtles";
+type PetCareStats = Record<CarePet, { affection: number; treats: number }>;
+const PET_CARE_KEY = "apex-pet-care-v1";
+const petCareDay = () => { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; };
+function loadPetCare(): PetCareStats {
+  const defaults: PetCareStats = { dog: { affection: 18, treats: 3 }, cat: { affection: 18, treats: 3 }, turtles: { affection: 18, treats: 3 } };
+  try {
+    const raw = JSON.parse(localStorage.getItem(PET_CARE_KEY) || "null") as { day?: unknown; pets?: Partial<PetCareStats> } | null;
+    if (!raw || typeof raw !== "object") return defaults;
+    const pets = { ...defaults };
+    for (const id of ["dog", "cat", "turtles"] as const) {
+      const value = raw.pets?.[id];
+      if (value) pets[id] = {
+        affection: Math.max(0, Math.min(100, Math.round(Number(value.affection) || 0))),
+        treats: raw.day === petCareDay() ? Math.max(0, Math.min(3, Math.round(Number(value.treats) || 0))) : 3,
+      };
+    }
+    return pets;
+  } catch { return defaults; }
+}
 
 type GarageProps = {
   licence: string;
@@ -43,16 +64,21 @@ type GarageProps = {
   weather: Weather;
   rainAmount: number;
   night: boolean;
+  onNightMode: () => void;
   windSpeed: number;
   onPaint: (patch: Partial<CustomPaint>) => void;
   onDriveOut: (vehicle: "car" | "bike") => void;
   onSummon: (vehicle: "car" | "bike") => void;
   onCapture: () => void;
   onReward: () => void;
+  onForecast: () => void;
+  onIdleLearning: (active: boolean, whisper: string) => void;
+  onPetCare: (pet: CarePet, action: "pet" | "treat") => void;
   trophies: number;
+  season: CareerState;
 };
 
-type Panel = null | "shelf" | "computer" | "trophies" | "radio" | "launch";
+type Panel = null | "shelf" | "computer" | "trophies" | "radio" | "launch" | "season" | "pets";
 type MemoryPreview = { kind: "lap"; entry: DriveEntry } | { kind: "build"; entry: GarageEntry };
 
 const STATIONS = [
@@ -257,13 +283,18 @@ export function Garage({
   weather,
   rainAmount,
   night,
+  onNightMode,
   windSpeed,
   onPaint,
   onDriveOut,
   onSummon,
   onCapture,
   onReward,
+  onForecast,
+  onIdleLearning,
+  onPetCare,
   trophies,
+  season,
 }: GarageProps) {
   const [now, setNow] = useState(() => new Date());
   const [panel, setPanel] = useState<Panel>(null);
@@ -278,6 +309,38 @@ export function Garage({
   const [bestLapPlaques] = useState(() => [...loadBoard("car"), ...loadBoard("bike")].sort((a, b) => a.time - b.time).slice(0, 4));
   const [savedPlaybooks] = useState(() => loadGarage().slice(0, 4));
   const [memoryPreview, setMemoryPreview] = useState<MemoryPreview | null>(null);
+  const [selectedSeasonDay, setSelectedSeasonDay] = useState<string | null>(null);
+  const [idleLearningEnabled, setIdleLearningEnabled] = useState(() => {
+    try { return localStorage.getItem("apex-scotch-idle-learning") !== "off"; } catch { return true; }
+  });
+  const [garageIdle, setGarageIdle] = useState(false);
+  const [petCareStats, setPetCareStats] = useState<PetCareStats>(() => loadPetCare());
+  const [selectedPet, setSelectedPet] = useState<CarePet>("dog");
+  const [careAction, setCareAction] = useState<"pet" | "treat" | null>(null);
+  const [careMessage, setCareMessage] = useState("Choose a friend, then give them some attention.");
+  const offerPetCare = useCallback((kind: "pet" | "treat", pet: CarePet = selectedPet) => {
+    const petInfo = petCareStats[pet];
+    const petName = pet === "dog" ? "SCOTCH" : pet === "cat" ? "MARIO" : "MR & MRS TURTLE";
+    if (kind === "treat" && petInfo.treats <= 0) {
+      setCareMessage(`${petName} is all out of treats for today. Come back tomorrow.`);
+      sound.tick("click");
+      return;
+    }
+    const next = { ...petCareStats, [pet]: {
+      affection: Math.min(100, petInfo.affection + (kind === "pet" ? 5 : 18)),
+      treats: petInfo.treats - (kind === "treat" ? 1 : 0),
+    } };
+    setPetCareStats(next);
+    try { localStorage.setItem(PET_CARE_KEY, JSON.stringify({ day: petCareDay(), pets: next })); } catch { /* care still works for this visit */ }
+    setSelectedPet(pet);
+    setCareAction(kind);
+    setCareMessage(kind === "pet" ? `${petName} leans into your hand. Bond ${next[pet].affection}%.` : `${petName} got a treat. Bond ${next[pet].affection}%.`);
+    onPetCare(pet, kind);
+    sound.tick(kind === "treat" ? "start" : "click");
+    window.clearTimeout(careAnimationTimer.current);
+    careAnimationTimer.current = window.setTimeout(() => setCareAction(null), 1900);
+  }, [onPetCare, petCareStats, selectedPet]);
+  const careAnimationTimer = useRef(0);
   const memoTimers = useRef(new Map<number, number>());
   // Seed from the incoming action so a stale action held by App while the
   // garage was closed does not replay on the next entry.
@@ -287,6 +350,34 @@ export function Garage({
     const id = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(id);
   }, []);
+  useEffect(() => () => window.clearTimeout(careAnimationTimer.current), []);
+
+  useEffect(() => {
+    let timer = 0;
+    const whisper = memos[memos.length - 1]?.text ?? "Clean entry. Patient throttle. Tidy exit.";
+    const resetIdle = () => {
+      window.clearTimeout(timer);
+      setGarageIdle(false);
+      onIdleLearning(false, whisper);
+      if (idleLearningEnabled) timer = window.setTimeout(() => {
+        setGarageIdle(true);
+        onIdleLearning(true, whisper);
+      }, 45_000);
+    };
+    if (idleLearningEnabled) timer = window.setTimeout(() => {
+      setGarageIdle(true);
+      onIdleLearning(true, whisper);
+    }, 45_000);
+    else onIdleLearning(false, whisper);
+    window.addEventListener("pointerdown", resetIdle, { passive: true });
+    window.addEventListener("keydown", resetIdle);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("pointerdown", resetIdle);
+      window.removeEventListener("keydown", resetIdle);
+      onIdleLearning(false, whisper);
+    };
+  }, [idleLearningEnabled, memos, onIdleLearning]);
 
   useEffect(() => {
     const unsubscribe = subscribePitMemos((memo) => {
@@ -352,6 +443,8 @@ export function Garage({
       case "trophies":
       case "radio":
       case "launch":
+      case "season":
+      case "pets":
         setPanel(action.id);
         break;
       case "photo":
@@ -359,20 +452,23 @@ export function Garage({
         setPhoto(true);
         break;
       case "cat":
-        setToast("MARIO — WHITE PERSIAN · BLINKS SLOWLY, STILL JUDGING YOU");
-        break;
       case "dog":
-        setToast("SCOTCH — WHITE LABRADOR · TAIL GOING, EARS UP, GOOD BOY");
-        break;
       case "turtles":
-        setToast("MR & MRS TURTLE — IN NO HURRY WHATSOEVER");
+        setPanel("pets");
+        offerPetCare("pet", action.id);
+        break;
+      case "summon-car":
+        setToast("SCOTCH RECOGNIZES THE CAR — EARS UP, TAIL WAGGING");
+        break;
+      case "summon-bike":
+        setToast("SCOTCH RECOGNIZES THE BIKE — CURIOUS HEAD TILT, TAIL WAGGING");
         break;
       case "stool":
         setPanel(null);
         setToast("SEATED — VIEW UNLOCKS FROM THE STOOL");
         break;
       case "door":
-        setToast(doorOpen ? "DOOR OPENING — DRIVE LIGHT SPILLS IN" : "DOOR CLOSING — MOTOR WINDING DOWN");
+        setToast(doorOpen ? "SCOTCH / DOOR'S OPEN — READY WHEN YOU ARE" : "SCOTCH / HEARD THE DOOR — SETTLING BACK INTO THE BAY");
         break;
       case "lift":
         setToast(liftUp ? "LIFT RAISING — PUMPS ENGAGED" : "LIFT LOWERING — HYDRAULIC BLEED");
@@ -383,7 +479,7 @@ export function Garage({
       default:
         break;
     }
-  }, [action, doorOpen, liftUp, service]);
+  }, [action, doorOpen, liftUp, offerPetCare, service]);
 
   const time = now.toLocaleTimeString("en-GB", { hour12: false });
 
@@ -448,6 +544,19 @@ export function Garage({
   const lastSync = knowledge.lastSync
     ? new Date(knowledge.lastSync).toLocaleTimeString("en-GB", { hour12: false })
     : "NOT YET";
+  const selectedPetName = selectedPet === "dog" ? "SCOTCH" : selectedPet === "cat" ? "MARIO" : "MR & MRS TURTLE";
+  const selectedPetInfo = petCareStats[selectedPet];
+  const seasonDays = season.activeDays.slice(-12);
+  const selectedDay = selectedSeasonDay && seasonDays.includes(selectedSeasonDay)
+    ? selectedSeasonDay
+    : seasonDays[seasonDays.length - 1] ?? null;
+  const selectedDayIds = selectedDay ? season.eventIds.filter((id) => id.includes(selectedDay)) : [];
+  const dayLaps = selectedDayIds.filter((id) => id.startsWith(`lap-${selectedDay}`)).length;
+  const dayMissions = selectedDayIds.filter((id) => id.startsWith(`mission-${selectedDay}`)).length;
+  const firstSeasonDay = season.activeDays[0];
+  const seasonSpan = firstSeasonDay
+    ? Math.max(1, Math.floor((new Date(`${season.activeDays[season.activeDays.length - 1]}T12:00:00`).getTime() - new Date(`${firstSeasonDay}T12:00:00`).getTime()) / 86_400_000) + 1)
+    : 0;
 
   return (
     <div
@@ -466,6 +575,7 @@ export function Garage({
             <path className="weather-stroke weather-stroke--two" d="M8 69 C40 40 59 84 94 54 S137 37 171 62" />
             <path className="weather-stroke weather-stroke--three" d="M18 34 C42 12 58 40 82 23 S128 7 160 28" />
             {weather === "rain" && [0,1,2,3,4,5,6].map((drop) => <path key={drop} className="weather-drop" d={`M${20 + drop * 23} ${18 + (drop % 3) * 14} l-5 12`} style={{ animationDelay: `${drop * -0.21}s` }} />)}
+            {weather === "rain" && <g className="weather-constellation" aria-hidden="true"><path d="M24 17 48 11 65 24 91 14 111 28 139 17 160 30"/><path d="M48 11 52 34 91 14 88 39 111 28 120 48 160 30"/>{[[24,17],[48,11],[65,24],[91,14],[111,28],[139,17],[160,30],[52,34],[88,39],[120,48]].map(([cx,cy], index) => <circle key={index} cx={cx} cy={cy} r={index % 3 === 0 ? 1.8 : 1.2} style={{ animationDelay: `${index * -.27}s` }} />)}</g>}
           </svg>
           <div><b>{night ? "NOCTURNE" : "DAYLIGHT"} / {weather === "rain" ? "RAIN STUDY" : "CLEAR AIR"}</b><span>WIND {Math.round(windSpeed)} KM/H · {weather === "rain" ? `PRECIP ${Math.round(rainAmount * 100)}%` : "DRY LINE"}</span></div>
         </aside>
@@ -524,8 +634,19 @@ export function Garage({
               <b>HOLD</b>
             </button>
           </div>
+          <button type="button" className={`garage__goodnight${night ? " is-on" : ""}`} onClick={onNightMode} aria-pressed={night}>
+            <span>{night ? "GOOD NIGHT MODE" : "DIM THE BAY / GOOD NIGHT"}</span><b>{night ? "☾" : "✧"}</b>
+          </button>
           <button type="button" className="garage__fetch-quest" onClick={() => onInteract("fetch-trophy")}>
             <span>SCOTCH / FETCH THE TROPHY</span><kbd>F</kbd>
+          </button>
+          <button type="button" className={`garage__idle-learning${idleLearningEnabled ? " is-on" : ""}`} aria-pressed={idleLearningEnabled} onClick={() => {
+            const enabled = !idleLearningEnabled;
+            setIdleLearningEnabled(enabled);
+            try { localStorage.setItem("apex-scotch-idle-learning", enabled ? "on" : "off"); } catch { /* session toggle still works */ }
+            if (!enabled) { setGarageIdle(false); onIdleLearning(false, ""); }
+          }}>
+            <span>SCOTCH / IDLE MEMORY</span><b>{idleLearningEnabled ? garageIdle ? "RESTING" : "ARMED" : "OFF"}</b>
           </button>
 
           <div className="garage__toggle-row">
@@ -558,6 +679,9 @@ export function Garage({
             <button type="button" onClick={() => setPanel("trophies")}>TROPHIES</button>
             <button type="button" onClick={() => setPanel("radio")}>RADIO</button>
             <button type="button" onClick={() => setPanel("launch")}>LAUNCH</button>
+            <button type="button" onClick={() => setPanel("season")}>SEASON</button>
+            <button type="button" onClick={onForecast}>NEXT RUN</button>
+            <button type="button" onClick={() => setPanel("pets")}>PET CARE</button>
             <button type="button" onClick={() => setPhoto(true)}>PHOTO</button>
           </div>
 
@@ -594,6 +718,13 @@ export function Garage({
         </button>
       )}
 
+      {!photo && !panel && focus?.id === "trophies" && (
+        <aside className="garage__trophy-projection-note" role="status" aria-live="polite">
+          <b>SCOTCH / TROPHY SCAN</b>
+          <span>{trophies} of {TROPHY_TIERS.length} trophies earned. {trophies >= TROPHY_TIERS.length ? "The shelf is complete." : `${TROPHY_TIERS.length - trophies} ${TROPHY_TIERS.length - trophies === 1 ? "milestone remains" : "milestones remain"}.`}</span>
+        </aside>
+      )}
+
       {!photo && panel && (
         <section className="garage__sheet" role="dialog" aria-label={`${panel} panel`}>
           <header>
@@ -603,6 +734,8 @@ export function Garage({
               {panel === "trophies" && "CAREER TROPHY WALL"}
               {panel === "radio" && "RADIO TUNER"}
               {panel === "launch" && "LAUNCH CONTROL"}
+              {panel === "season" && "HOLOGRAPHIC SEASON CALENDAR"}
+              {panel === "pets" && "PET CARE / LITTLE GARAGE GAME"}
             </span>
             <button type="button" onClick={() => setPanel(null)} aria-label="Close panel">
               CLOSE ✕
@@ -760,6 +893,52 @@ export function Garage({
                   </span>
                 ))}
               </div>
+            </div>
+          )}
+
+          {panel === "season" && (
+            <div className="garage__season">
+              <p>Career time is counted from your saved garage days. Tap a glowing mark to revisit what you logged that day.</p>
+              <div className="garage__season-summary">
+                <span><b>{seasonSpan}</b> DAYS IN SEASON</span>
+                <span><b>{season.activeDays.length}</b> ACTIVE DAYS</span>
+                <span><b>{Math.floor(season.distanceM / 1000)}</b> KM DRIVEN</span>
+              </div>
+              <div className="garage__season-ring" role="group" aria-label="Career activity calendar">
+                <svg viewBox="0 0 220 220" aria-hidden="true"><circle cx="110" cy="110" r="78"/><circle cx="110" cy="110" r="57"/><path d="M110 12v22M208 110h-22M110 208v-22M12 110h22"/></svg>
+                <div className="garage__season-core"><b>SEASON</b><span>{season.activeDays.length ? `${season.activeDays.length} LOGGED` : "AWAITING FIRST RUN"}</span></div>
+                {seasonDays.map((day, index) => {
+                  const angle = (index / Math.max(1, seasonDays.length)) * Math.PI * 2 - Math.PI / 2;
+                  const left = 50 + Math.cos(angle) * 43;
+                  const top = 50 + Math.sin(angle) * 43;
+                  return <button key={day} type="button" className={day === selectedDay ? "is-selected" : ""} style={{ left: `${left}%`, top: `${top}%` }} onClick={() => setSelectedSeasonDay(day)} aria-label={`Show career notes for ${day}`} title={day}>{String(index + 1).padStart(2, "0")}</button>;
+                })}
+              </div>
+              <div className="garage__season-note" aria-live="polite">
+                <b>{selectedDay ? new Date(`${selectedDay}T12:00:00`).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" }) : "YOUR FIRST DAY IS WAITING"}</b>
+                <span>{selectedDay ? dayLaps || dayMissions ? `You logged ${dayLaps} ${dayLaps === 1 ? "lap" : "laps"}${dayMissions ? ` and completed ${dayMissions} ${dayMissions === 1 ? "mission" : "missions"}` : ""}. A marker in your APEX season.` : "You spent time in the garage and saved this day to your APEX season." : "Drive a lap or complete a mission to place your first mark on the calendar."}</span>
+              </div>
+            </div>
+          )}
+
+          {panel === "pets" && (
+            <div className="garage__pet-care">
+              <p>Spend a moment with the three garage pets. Petting builds your bond; treats are limited to three per friend each day.</p>
+              <div className="garage__pet-select" role="group" aria-label="Choose a pet">
+                {(["dog", "cat", "turtles"] as const).map((pet) => <button key={pet} type="button" className={selectedPet === pet ? "is-selected" : ""} onClick={() => { setSelectedPet(pet); setCareAction(null); setCareMessage("Ready for a little attention."); }}>
+                  <span aria-hidden="true">{pet === "dog" ? "🐕" : pet === "cat" ? "🐈" : "🐢"}</span><b>{pet === "dog" ? "SCOTCH" : pet === "cat" ? "MARIO" : "TURTLES"}</b>
+                </button>)}
+              </div>
+              <div className="garage__pet-game" data-action={careAction ?? "idle"}>
+                <div className="garage__pet-avatar" aria-hidden="true"><span>{selectedPet === "dog" ? "🐕" : selectedPet === "cat" ? "🐈" : "🐢"}</span><i>✦</i><b>{careAction === "treat" ? selectedPet === "dog" ? "🍪" : selectedPet === "cat" ? "🐟" : "🥬" : "✋"}</b></div>
+                <div className="garage__pet-stats"><strong>{selectedPetName}</strong><span>{selectedPet === "dog" ? "WHITE LABRADOR" : selectedPet === "cat" ? "WHITE PERSIAN" : "MR & MRS TURTLE"}</span><div className="garage__pet-hearts" aria-label={"Bond " + selectedPetInfo.affection + " out of 100"}>{Array.from({ length: 5 }, (_, index) => <i key={index} className={selectedPetInfo.affection >= (index + 1) * 20 ? "is-filled" : ""}>♥</i>)}</div><div className="garage__pet-bond"><i style={{ width: selectedPetInfo.affection + "%" }} /></div><small>BOND {selectedPetInfo.affection}% · TREATS {selectedPetInfo.treats}/3</small></div>
+              </div>
+              <div className="garage__pet-actions">
+                <button type="button" onClick={() => offerPetCare("pet")}>PET {selectedPetName}</button>
+                <button type="button" className="is-treat" onClick={() => offerPetCare("treat")} disabled={selectedPetInfo.treats <= 0}>GIVE {selectedPet === "dog" ? "BISCUIT" : selectedPet === "cat" ? "FISH TREAT" : "LEAF"}</button>
+              </div>
+              <div className="garage__pet-message" role="status" aria-live="polite">{careMessage}</div>
+              <small className="garage__pet-footnote">Treats refill daily. Bond and treat counts are saved on this device.</small>
             </div>
           )}
 

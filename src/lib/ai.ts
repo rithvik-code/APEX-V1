@@ -7,7 +7,7 @@ export type ChatMessage = {
   content: string;
 };
 
-export type Provider = "demo" | "ollama" | "openai";
+export type Provider = "demo" | "ollama" | "openai" | "hermes";
 
 export type AiSettings = {
   provider: Provider;
@@ -33,9 +33,11 @@ When the user asks you to DO something on their computer, browser, a website, an
 TAKE_CONTROL: <one clear sentence stating the goal for the agent>
 The interface turns that line into a one-click handoff that performs the task. Add the TAKE_CONTROL line only for actionable computer tasks, never for plain questions or explanations.`;
 
+const FINAL_ONLY_RULE = `FINAL ANSWER ONLY: Do not reveal or print private reasoning, chain-of-thought, analysis, or draft text. Respond with the direct answer only. Keep it concise unless the user asks for detail.`;
+
 // Appended to every turn so the delivery stays fast and dry even when the
 // user's saved system prompt predates this rule.
-const STYLE_RULE = `STYLE: a race engineer who has seen everything — understated, precise, occasionally wry. At most one short witty line per answer, and only when it fits; facts come first, always. No jokes about errors, bugs or anything the user is struggling with. No emoji. Answer simple questions in under 60 words; use a code block when code is the answer. Never pad to look thorough.`;
+const STYLE_RULE = `STYLE: a race engineer who has seen everything — understated, precise, occasionally wry. Give only the user-facing answer: never reveal, narrate, or print private reasoning, chain-of-thought, analysis, or draft thoughts. Lead with the answer, keep it concise, and include steps or detail only when the user asks for them. At most one short witty line per answer, and only when it fits; facts come first, always. No jokes about errors, bugs or anything the user is struggling with. No emoji. Answer simple questions in under 60 words; use a code block when code is the answer. Never pad to look thorough.`;
 
 const CREATOR_RULE = `PROJECT IDENTITY: APEX and CYRUS were made by K Rithvik. If asked who made, built, or created this app or assistant, answer: "K Rithvik made it."`;
 
@@ -49,7 +51,7 @@ export const DEFAULT_SETTINGS: AiSettings = {
 
 const STORAGE_KEY = "apex.settings.v1";
 
-const PROVIDERS: ReadonlySet<Provider> = new Set<Provider>(["demo", "ollama", "openai"]);
+const PROVIDERS: ReadonlySet<Provider> = new Set<Provider>(["demo", "ollama", "openai", "hermes"]);
 
 export function loadSettings(): AiSettings {
   try {
@@ -260,12 +262,50 @@ function composeSystem(settings: AiSettings, options: StreamOptions): string {
   const today = new Date().toISOString().slice(0, 10);
   const parts = [
     options.systemPrompt?.trim() ?? [settings.systemPrompt.trim(), CREATOR_RULE, STYLE_RULE, CONTROL_RULE].join("\n\n"),
+    FINAL_ONLY_RULE,
     `SESSION DATE: ${today}. Your training data may be older than this date. For anything that could have changed — champions, standings, releases, prices, news — trust live context when it is provided. When no context covers it and you are unsure, say so instead of guessing.`,
   ];
   if (options.grounding) parts.push(formatGroundingContext(options.grounding));
   if (options.knowledge) parts.push(options.knowledge);
   if (options.extraSystem) parts.push(options.extraSystem);
   return parts.join("\n\n");
+}
+
+/** Suppress model-emitted reasoning blocks even if the selected model ignores its thinking switch. */
+function createFinalAnswerFilter(onToken: (token: string) => void) {
+  let pending = "";
+  let hidden = false;
+  const openTag = "<think>";
+  const closeTag = "</think>";
+  const drain = (final = false) => {
+    let visible = "";
+    while (pending) {
+      const marker = hidden ? closeTag : openTag;
+      const index = pending.toLowerCase().indexOf(marker);
+      if (index >= 0) {
+        if (!hidden) visible += pending.slice(0, index);
+        pending = pending.slice(index + marker.length);
+        hidden = !hidden;
+        continue;
+      }
+      if (final) {
+        if (!hidden) visible += pending;
+        pending = "";
+        break;
+      }
+      let hold = 0;
+      const lower = pending.toLowerCase();
+      for (let size = Math.min(marker.length - 1, pending.length); size > 0; size--) {
+        if (lower.endsWith(marker.slice(0, size))) { hold = size; break; }
+      }
+      const safeLength = pending.length - hold;
+      if (!hidden) visible += pending.slice(0, safeLength);
+      pending = pending.slice(safeLength);
+      break;
+    }
+    if (visible) onToken(visible);
+  };
+  return { push(token: string) { pending += token; drain(); }, finish() { drain(true); } };
 }
 
 
@@ -287,9 +327,9 @@ async function streamOllama(options: StreamOptions): Promise<void> {
       num_predict: numPredict ?? (grounding ? 200 : 360),
     },
   };
-  // Qwen3 supports a thinking switch; skipping it removes a long cold-start delay
-  // on the smaller quantisations without hurting factual accuracy.
-  if (/^qwen3/i.test(settings.model)) body.think = false;
+  // Ask supported Ollama models to disable reasoning mode; the output filter
+  // below also protects the transcript when a model ignores this option.
+  body.think = false;
 
   const res = await fetch(`${trimEndpoint(settings.endpoint)}/api/chat`, {
     method: "POST",
@@ -308,6 +348,7 @@ async function streamOllama(options: StreamOptions): Promise<void> {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  const answerFilter = createFinalAnswerFilter(onToken);
 
   while (true) {
     const { done, value } = await reader.read();
@@ -323,7 +364,7 @@ async function streamOllama(options: StreamOptions): Promise<void> {
           error?: string;
         };
         if (json.error) throw new Error(json.error);
-        if (json.message?.content) onToken(json.message.content);
+        if (json.message?.content) answerFilter.push(json.message.content);
       } catch (err) {
         if (err instanceof Error && err.message !== "Unexpected end of JSON input") {
           throw err;
@@ -331,6 +372,7 @@ async function streamOllama(options: StreamOptions): Promise<void> {
       }
     }
   }
+  answerFilter.finish();
 }
 
 async function streamOpenAI(options: StreamOptions): Promise<void> {
@@ -368,6 +410,7 @@ async function streamOpenAI(options: StreamOptions): Promise<void> {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  const answerFilter = createFinalAnswerFilter(onToken);
 
   while (true) {
     const { done, value } = await reader.read();
@@ -379,25 +422,26 @@ async function streamOpenAI(options: StreamOptions): Promise<void> {
       const clean = line.trim();
       if (!clean.startsWith("data:")) continue;
       const payload = clean.slice(5).trim();
-      if (payload === "[DONE]") return;
+      if (payload === "[DONE]") { answerFilter.finish(); return; }
       try {
         const json = JSON.parse(payload) as {
           choices?: Array<{ delta?: { content?: string } }>;
         };
         const token = json.choices?.[0]?.delta?.content;
-        if (token) onToken(token);
+        if (token) answerFilter.push(token);
       } catch {
         // A partial frame; the next chunk completes it.
       }
     }
   }
+  answerFilter.finish();
 }
 
 export async function streamChat(options: StreamOptions): Promise<void> {
   if (options.settings.provider === "ollama") {
     return streamOllama(options);
   }
-  if (options.settings.provider === "openai") {
+  if (options.settings.provider === "openai" || options.settings.provider === "hermes") {
     return streamOpenAI(options);
   }
   return streamDemo(options);

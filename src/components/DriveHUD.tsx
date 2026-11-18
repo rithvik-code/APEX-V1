@@ -9,6 +9,7 @@ export type TrackOutline = {
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
   start: { x: number; z: number; heading: number };
   features: Array<{ kind: "ramp" | "hop" | "boost"; x: number; z: number }>;
+  brakingPoints: Array<{ id: number; label: string; x: number; z: number; targetKmh: number }>;
 };
 
 type DriveHUDProps = {
@@ -25,12 +26,19 @@ type DriveHUDProps = {
   onSetup: (patch: Partial<DriveSetup>) => void;
   onGhost: (enabled: boolean) => void;
   onReplaySector: (time: number | null) => void;
+  onHeatmap: (enabled: boolean) => void;
+  training: boolean;
+  coneIndex: number;
+  onTraining: (enabled: boolean) => void;
+  onConeStep: (step: number) => void;
   onAssist: (enabled: boolean) => void;
   onCallout: (callout: AssistCallout | null) => void;
   onTouch: (touch: DriveTouch) => void;
 };
 
-function Minimap({ state, track, sketch }: { state: DriveHudState; track: TrackOutline | null; sketch: boolean }) {
+type BrakeMark = { x: number; z: number; force: number; speed: number; sector: number };
+
+function Minimap({ state, track, sketch, training, brakeMarks }: { state: DriveHudState; track: TrackOutline | null; sketch: boolean; training: boolean; brakeMarks: BrakeMark[] }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -95,6 +103,43 @@ function Minimap({ state, track, sketch }: { state: DriveHudState; track: TrackO
       ctx.fill();
     }
 
+    if (training) for (const point of track.brakingPoints) {
+      const x = px(point.x);
+      const y = py(point.z);
+      ctx.fillStyle = "#ffb21f";
+      ctx.shadowColor = "rgba(255,178,31,.9)";
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.moveTo(x, y - 6);
+      ctx.lineTo(x + 5, y + 4);
+      ctx.lineTo(x - 5, y + 4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    // Each braking sample is a soft light trace, colored by entry speed.
+    brakeMarks.forEach((mark, index) => {
+      if (index > 0) {
+        const previous = brakeMarks[index - 1];
+        ctx.beginPath();
+        ctx.moveTo(px(previous.x), py(previous.z));
+        ctx.lineTo(px(mark.x), py(mark.z));
+        ctx.lineWidth = 2 + mark.force * 1.5;
+        ctx.strokeStyle = `hsla(${52 - mark.force * 48}, 100%, 62%, ${0.12 + mark.force * 0.16})`;
+        ctx.shadowColor = ctx.strokeStyle;
+        ctx.shadowBlur = 5;
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(px(mark.x), py(mark.z), 2 + mark.force * 2.3, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${52 - mark.force * 48}, 100%, 62%, ${0.35 + mark.force * 0.35})`;
+      ctx.shadowColor = ctx.fillStyle;
+      ctx.shadowBlur = 7;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    });
+
     // Start / finish tick.
     ctx.fillStyle = "#e9efe6";
     ctx.fillRect(px(track.start.x) - 5, py(track.start.z) - 2, 10, 4);
@@ -122,7 +167,7 @@ function Minimap({ state, track, sketch }: { state: DriveHudState; track: TrackO
     ctx.shadowBlur = 8;
     ctx.fill();
     ctx.restore();
-  }, [state, track]);
+  }, [state, track, training, brakeMarks]);
   return <canvas ref={ref} className="dhud__minimap-canvas" width={240} height={240} />;
 }
 
@@ -163,6 +208,11 @@ export function DriveHUD({
   onSetup,
   onGhost,
   onReplaySector,
+  onHeatmap,
+  training,
+  coneIndex,
+  onTraining,
+  onConeStep,
   onAssist,
   onCallout,
   onTouch,
@@ -170,6 +220,21 @@ export function DriveHUD({
   const prevCallout = useRef<AssistCallout | null>(null);
   const [speedMotion, setSpeedMotion] = useState<"steady" | "snap-in" | "snap-out">("steady");
   const [sketchOn, setSketchOn] = useState(false);
+  const [brakeMarks, setBrakeMarks] = useState<BrakeMark[]>([]);
+  const lastBrakeSample = useRef(-Infinity);
+  const previousPhase = useRef(state.phase);
+
+  useEffect(() => {
+    if (state.phase === "countdown" && previousPhase.current !== "countdown") {
+      setBrakeMarks([]);
+      lastBrakeSample.current = -Infinity;
+    }
+    previousPhase.current = state.phase;
+    if (state.phase !== "racing" || state.brake < 0.5 || state.speedKmh < 40 || state.distanceM - lastBrakeSample.current < 4) return;
+    lastBrakeSample.current = state.distanceM;
+    const mark: BrakeMark = { ...state.pos, force: Math.max(0.12, Math.min(1, state.speedKmh / 220)), speed: Math.round(state.speedKmh), sector: Math.min(3, state.sectorIndex + 1) };
+    setBrakeMarks((current) => [...current.slice(-95), mark]);
+  }, [state.phase, state.brake, state.speedKmh, state.distanceM, state.pos.x, state.pos.z, state.sectorIndex]);
 
   useEffect(() => {
     const next = state.assist.on ? state.assist.next : null;
@@ -183,6 +248,12 @@ export function DriveHUD({
   const countdownNumber = Math.max(0, Math.ceil(state.countdown));
   const showCountdown = state.phase === "countdown";
   const speed = Math.round(state.speedKmh);
+  const compoundGrip = state.setup.tires === "soft" ? 1 : state.setup.tires === "medium" ? 0.82 : 0.66;
+  const overallGrip = (0.62 + compoundGrip * 0.42 + state.setup.downforce * 0.5) * (state.wet ? 0.66 : 1) * (1 - state.tireWear * 0.22) * (1 - Math.abs(state.setup.balance - 0.5) * 0.08);
+  const frontGrip = Math.max(0, Math.min(1, overallGrip * (1 + (0.5 - state.setup.balance) * 0.24 - state.shoulderWear * 0.18)));
+  const rearGrip = Math.max(0, Math.min(1, overallGrip * (1 + (state.setup.balance - 0.5) * 0.24 - state.shoulderWear * 0.32 - state.drift * 0.12)));
+  const gripColor = (grip: number) => grip > 0.72 ? "#76f5c2" : grip > 0.5 ? "#ffd16c" : "#ff806c";
+  const gripSummary = rearGrip < frontGrip - 0.08 ? "FRONT CONFIDENT · REAR SLIDING" : frontGrip < rearGrip - 0.08 ? "FRONT NEEDS SUPPORT · REAR STABLE" : overallGrip < 0.5 ? "LOW GRIP · EASE INTO THE CORNER" : "BALANCED GRIP · CORNERS HELD";
   const lineOffset = useMemo(() => {
     if (!track?.points.length) return 0;
     let nearest = Infinity;
@@ -190,6 +261,7 @@ export function DriveHUD({
     return nearest;
   }, [state.pos.x, state.pos.z, track]);
   const lineAlert = state.offTrack || lineOffset > 3.8;
+  const hardestBrakes = [1, 2, 3].map((sector) => brakeMarks.filter((mark) => mark.sector === sector).reduce<BrakeMark | null>((best, mark) => !best || mark.speed > best.speed ? mark : best, null));
   const previousSpeed = useRef(speed);
   useEffect(() => {
     const delta = speed - previousSpeed.current;
@@ -274,11 +346,20 @@ export function DriveHUD({
             <button type="button" className="dhud__replay-live" disabled={state.ghostReplayTime === null} onClick={() => onReplaySector(null)}>LIVE RUN</button>
           </div>
           <p className="dhud__replay-caption" aria-live="polite">{state.ghostReplayTime === null ? "SELECT A RIBBON TO SCRUB YOUR BEST LAP GHOST TO THAT CHECKPOINT." : `BEST LAP GHOST · CHECKPOINT ${state.bestSectors.findIndex((time) => time === state.ghostReplayTime) + 1} · ${formatLap(state.ghostReplayTime)}`}</p>
+          <button type="button" className={`dhud__heatmap-toggle${state.ghostHeatmap ? " is-on" : ""}`} onClick={() => onHeatmap(!state.ghostHeatmap)} aria-pressed={state.ghostHeatmap}>GHOST SPEED HEAT {state.ghostHeatmap ? "ON" : "OFF"}<span>COOL → FAST</span></button>
           </>
         )}
         <div className="dhud__minimap">
-          <Minimap state={state} track={track} sketch={sketchOn} />
+          <Minimap state={state} track={track} sketch={sketchOn} training={training} brakeMarks={brakeMarks} />
         </div>
+        <div className="dhud__brake-summary" role="status" aria-live="polite"><b>LIGHT BRAKE TRACE</b>{hardestBrakes.some(Boolean) ? hardestBrakes.map((mark, index) => <span key={index} className={mark ? "has-mark" : ""}>S{index + 1} <i>{mark ? `${mark.speed} KM/H` : "—"}</i></span>) : <span className="dhud__brake-empty">HARD BRAKE POINTS WILL APPEAR HERE</span>}</div>
+        <button type="button" className={`dhud__cone-training${training ? " is-on" : ""}`} onClick={() => onTraining(!training)} aria-pressed={training}>BRAKING CONE TRAINING {training ? "ON" : "OFF"}<span>{training ? "STEP THE CIRCUIT" : "PRACTICE BRAKE POINTS"}</span></button>
+        {training && track?.brakingPoints.length ? <div className="dhud__cone-lesson" role="status" aria-live="polite">
+          <span>CONE {((coneIndex % track.brakingPoints.length) + 1).toString().padStart(2, "0")} / {track.brakingPoints.length}</span>
+          <b>{track.brakingPoints[coneIndex % track.brakingPoints.length].label}</b>
+          <div><i>APPROACH</i><strong>{Math.round(Math.hypot(state.pos.x - track.brakingPoints[coneIndex % track.brakingPoints.length].x, state.pos.z - track.brakingPoints[coneIndex % track.brakingPoints.length].z))} M</strong><i>BRAKE TO</i><strong>{Math.round(track.brakingPoints[coneIndex % track.brakingPoints.length].targetKmh)} KM/H</strong></div>
+          <button type="button" onClick={() => onConeStep(1)}>NEXT CONE →</button>
+        </div> : null}
         <button type="button" className={`dhud__sketch-toggle${sketchOn ? " is-on" : ""}`} onClick={() => setSketchOn((value) => !value)} aria-pressed={sketchOn}>
           CIRCUIT SKETCH {sketchOn ? "ON" : "OFF"}<span>{Math.min(100, state.lapCount * 7)}% LEARNED</span>
         </button>
@@ -379,6 +460,14 @@ export function DriveHUD({
           <b>{state.setup.damping < 0.35 ? "SIT BACK" : state.setup.damping > 0.65 ? "LEAN IN" : "BALANCED"}</b>
         </label>
 
+        <label className="dhud__slider dhud__balance-slider">
+          <span>FRONT / REAR BIAS</span>
+          <input type="range" min={0} max={1} step={0.01} value={state.setup.balance} aria-label="Front to rear handling balance" aria-valuetext={state.setup.balance < 0.4 ? "Front-biased, steadier turn-in" : state.setup.balance > 0.6 ? "Rear-biased, more rotation" : "Balanced handling"} onChange={(event) => onSetup({ balance: Number(event.target.value) })} />
+          <b>{state.setup.balance < 0.4 ? "FRONT" : state.setup.balance > 0.6 ? "REAR" : "EVEN"}</b>
+          <small>{state.setup.balance < 0.4 ? "Steadier entry; the front leads the turn." : state.setup.balance > 0.6 ? "More rotation; the rear helps point the car." : "Neutral response through the corner."}</small>
+          <div className="dhud__balance-bar" role="img" aria-label={`Handling balance ${Math.round(state.setup.balance * 100)} percent rear biased`}><i style={{ left: `${state.setup.balance * 100}%` }} /></div>
+        </label>
+
         <div className="dhud__row">
           <span>TIRES</span>
           <div className="dhud__seg dhud__seg--three">
@@ -400,6 +489,22 @@ export function DriveHUD({
           <div className="dhud__tire-visual" aria-hidden="true">{[0, 1, 2, 3].map((tire) => <i key={tire} className={`is-wheel-${tire}`}><b /><em style={{ opacity: Math.max(0.12, state.tireWear), transform: `scaleX(${Math.max(0.12, state.shoulderWear)})` }} /></i>)}</div>
           <div className="dhud__tire-life-track"><i style={{ width: `${Math.round(state.tireWear * 100)}%` }} /><b style={{ width: `${Math.round(state.shoulderWear * 100)}%` }} /></div>
           <small>{Math.round(state.tireWear * 100)}% USED <em>·</em> SHOULDER {Math.round(state.shoulderWear * 100)}%</small>
+        </div>
+
+        <div className="dhud__grip-map" role="img" aria-label={`Estimated corner grip. Front ${Math.round(frontGrip * 100)} percent, rear ${Math.round(rearGrip * 100)} percent. ${gripSummary}`}>
+          <div className="dhud__grip-head"><b>NEURAL GRIP MAP</b><span>LIVE ESTIMATE</span></div>
+          <svg viewBox="0 0 100 140" aria-hidden="true">
+            <defs><filter id="gripGlow"><feGaussianBlur stdDeviation="3"/></filter></defs>
+            <ellipse cx="50" cy="71" rx="23" ry="58" fill="rgba(160,190,170,.08)" stroke="rgba(200,220,210,.42)" strokeWidth="1.4"/>
+            <path d="M35 37 Q50 28 65 37M35 103 Q50 112 65 103" fill="none" stroke="rgba(230,240,230,.28)" strokeWidth="1"/>
+            <ellipse cx="25" cy="39" rx="14" ry="11" fill={gripColor(frontGrip)} opacity=".16" filter="url(#gripGlow)"/><ellipse cx="75" cy="39" rx="14" ry="11" fill={gripColor(frontGrip)} opacity=".16" filter="url(#gripGlow)"/>
+            <ellipse cx="25" cy="101" rx="14" ry="11" fill={gripColor(rearGrip)} opacity=".16" filter="url(#gripGlow)"/><ellipse cx="75" cy="101" rx="14" ry="11" fill={gripColor(rearGrip)} opacity=".16" filter="url(#gripGlow)"/>
+            <rect x="17" y="29" width="16" height="20" rx="4" fill={gripColor(frontGrip)} opacity={0.35 + frontGrip * .65}/><rect x="67" y="29" width="16" height="20" rx="4" fill={gripColor(frontGrip)} opacity={0.35 + frontGrip * .65}/>
+            <rect x="17" y="91" width="16" height="20" rx="4" fill={gripColor(rearGrip)} opacity={0.35 + rearGrip * .65}/><rect x="67" y="91" width="16" height="20" rx="4" fill={gripColor(rearGrip)} opacity={0.35 + rearGrip * .65}/>
+            <path d="M50 16v-7m0 0-3 4m3-4 3 4" fill="none" stroke="#c8ff16" strokeWidth="1.5"/>
+          </svg>
+          <div className="dhud__grip-words"><span>FRONT <i style={{ color: gripColor(frontGrip) }}>{Math.round(frontGrip * 100)}%</i></span><span>REAR <i style={{ color: gripColor(rearGrip) }}>{Math.round(rearGrip * 100)}%</i></span></div>
+          <p>{gripSummary}</p>
         </div>
 
         <div className="dhud__ghost">
@@ -487,11 +592,18 @@ export function DriveHUD({
       )}
 
       {lapPoem && (
+        <>
+        <section className="dhud__podium" role="status" aria-label={`Personal best ${formatLap(lapPoem.time)}. Three podium markers rise to celebrate the new lap record.`}>
+          <span>PERSONAL BEST / {lapPoem.vehicle.toUpperCase()}</span>
+          <svg viewBox="0 0 180 70" aria-hidden="true"><path className="podium__stem podium__stem--left" d="M34 60V38h34v22"/><path className="podium__stem podium__stem--center" d="M73 60V18h34v42"/><path className="podium__stem podium__stem--right" d="M112 60V31h34v29"/><path className="podium__floor" d="M17 61h146"/><text x="90" y="49">{formatLap(lapPoem.time)}</text></svg>
+          <b>NEW LAP RECORD</b>
+        </section>
         <section className="dhud__poem" role="status" aria-label="Cyrus circuit poem for your new personal best">
           <span>CYRUS // CIRCUIT POEM</span>
           <div>{lapPoem.lines.map((line) => <p key={line}>{line}</p>)}</div>
           <footer><b>{lapPoem.vehicle.toUpperCase()} · {formatLap(lapPoem.time)}</b><span>{lapPoem.sectors.map(formatLap).join(" / ")}</span></footer>
         </section>
+        </>
       )}
 
       {state.offTrack && <div className="dhud__offtrack">OFF TRACK</div>}

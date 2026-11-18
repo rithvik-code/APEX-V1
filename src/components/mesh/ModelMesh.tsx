@@ -517,13 +517,14 @@ export function ModelMesh({
 
       <div className="mesh__index" role="region" aria-label="AI assistant launch cards. On a phone, swipe sideways to explore." tabIndex={0}>
         {NODES.map((node) => (
-          <button key={node.id} type="button" className="mesh-card" onClick={() => openNode(node)}>
-            <span className="mesh-card__code">{node.code}</span>
-            <span className={`mesh-card__name mesh-card__name--${node.tier}`}>{node.name}</span>
-            <span className="mesh-card__tag">{node.tag}</span>
+          <button key={node.id} type="button" className={`mesh-card mesh-card--${node.tier}`} onClick={() => openNode(node)} aria-label={`Open ${node.name} bay. ${node.tag}. Status ${node.tier}`}>
+            <span className="mesh-card__avatar" aria-hidden="true"><i>{node.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("")}</i><b /><em /></span>
+            <span className="mesh-card__identity"><span className="mesh-card__code">{node.code}</span><span className={`mesh-card__name mesh-card__name--${node.tier}`}>{node.name}</span>
+            <span className="mesh-card__tag">{node.tag}</span></span>
             <span className={`mesh-card__tier mesh-card__tier--${node.tier}`}>
               {node.tier === "live" ? "● LIVE" : node.tier === "link" ? "◌ LINK" : "◇ CONSENT"}
             </span>
+            <span className="mesh-card__status">{node.tier === "live" ? "READY TO ANSWER" : node.tier === "link" ? "SERVICE ON CALL" : "AWAITING YOUR INPUT"}</span>
           </button>
         ))}
       </div>

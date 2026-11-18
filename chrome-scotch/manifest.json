@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Scotch — Page Companion",
+  "version": "1.0.0",
+  "description": "Ask Scotch about the webpage you are viewing, with private local AI answers.",
+  "minimum_chrome_version": "116",
+  "permissions": ["activeTab", "scripting", "storage", "sidePanel"],
+  "host_permissions": ["http://127.0.0.1:4317/*"],
+  "background": { "service_worker": "service-worker.js", "type": "module" },
+  "action": { "default_title": "Open Scotch page companion" },
+  "side_panel": { "default_path": "sidepanel.html" }
+}

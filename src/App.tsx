@@ -120,6 +120,15 @@ const BLUEPRINT = [
   ["08", "LICENSE", "Yours. Runs offline forever."],
 ];
 
+type NextRunReading = { rain: boolean; rainAmount: number; night: boolean; windSpeed: number };
+
+function nextRunSentence(reading: NextRunReading): string {
+  const rain = !reading.rain ? "dry track" : reading.rainAmount >= 0.8 ? "heavy rain" : reading.rainAmount <= 0.4 ? "light rain" : "wet track";
+  const light = reading.night ? "night session" : "daylight session";
+  const wind = reading.windSpeed >= 280 ? "strong" : reading.windSpeed >= 160 ? "steady" : "calm";
+  return `Next run: ${rain}, ${light}, with ${wind} airflow at ${Math.round(reading.windSpeed)} km/h.`;
+}
+
 const INSTALL_CMD = "npm install -g ./cli";
 
 const SECTOR_COUNT = String(CHAPTERS.length - 1).padStart(2, "0");
@@ -194,6 +203,17 @@ export default function App() {
     return shared ? { ...DEFAULT_SCENE, ...shared, aero: true } : DEFAULT_SCENE;
   });
   const sceneRef = useRef(scene);
+  const [forecast, setForecast] = useState<NextRunReading | null>(null);
+  const openForecast = useCallback(() => {
+    const current = sceneRef.current;
+    setForecast({ rain: current.weather === "rain", rainAmount: current.rainAmount, night: current.nightRace, windSpeed: current.windSpeed });
+  }, []);
+  const setDogIdleLearning = useCallback((active: boolean, whisper: string) => {
+    engineRef.current?.setGarageIdleLearning(active, whisper);
+  }, []);
+  const careGaragePet = useCallback((pet: "dog" | "cat" | "turtles", action: "pet" | "treat") => {
+    engineRef.current?.careGaragePet(pet, action);
+  }, []);
   const [dockStatus, setDockStatus] = useState<DockStatus>({
     isClipping: false,
     isRecordingLap: false,
@@ -209,6 +229,8 @@ export default function App() {
   const [lapPoem, setLapPoem] = useState<CircuitPoem | null>(null);
   const lapPoemTimer = useRef<number | null>(null);
   const [driveTrack, setDriveTrack] = useState<TrackOutline | null>(null);
+  const [coneTraining, setConeTraining] = useState(false);
+  const [coneIndex, setConeIndex] = useState(0);
   const [driveSetup, setDriveSetup] = useState<DriveSetup>(DEFAULT_DRIVE_SETUP);
   const driveSetupRef = useRef(driveSetup);
   const [garage, setGarage] = useState(false);
@@ -216,6 +238,11 @@ export default function App() {
   const [garageAction, setGarageAction] = useState<{ id: string; seq: number } | null>(null);
   const [garageBits, setGarageBits] = useState({ door: true, lift: false, service: false });
   const garageSeq = useRef(0);
+  const garageExitTimer = useRef<number | null>(null);
+  const [farewellPulse, setFarewellPulse] = useState(false);
+  useEffect(() => () => {
+    if (garageExitTimer.current !== null) window.clearTimeout(garageExitTimer.current);
+  }, []);
   const cyrusRevTimer = useRef(0);
   const [portalReady, setPortalReady] = useState(false);
   const [portalPhase, setPortalPhase] = useState<"dive" | "flash" | null>(null);
@@ -254,6 +281,7 @@ export default function App() {
   useEffect(() => {
     const place = drive ? `driving the ${drive.vehicle} on the circuit` : garage ? `inside the walkable garage${garageFocus ? `, viewing ${garageFocus.label}` : ""}` : `${activeChapter.label} section of the APEX page`;
     cyrus.setPageContext(place);
+    sound.setVoiceRoom(drive ? "drive" : garage ? "garage" : "pitwall");
   }, [activeChapter.label, drive, garage, garageFocus]);
   useEffect(() => {
     sound.setAcousticTreatment(`${scene.livery}|${scene.paint.enabled ? scene.paint.base : "stock"}|${scene.paint.accent}|${scene.aero ? "open-body" : "closed-body"}|${scene.lighting}`);
@@ -363,14 +391,28 @@ export default function App() {
     setGarage(true);
   }, [drive]);
 
-  const closeGarage = useCallback(() => {
-    engineRef.current?.endRev();
-    sound.endRev();
-    engineRef.current?.exitGarage();
-    setGarage(false);
-    portalCooldownRef.current = performance.now() + 1400;
-    sound.tick("click");
-  }, []);
+  const closeGarage = useCallback((animateFarewell = true) => {
+    if (!garage || garageExitTimer.current !== null) return;
+    const finishExit = () => {
+      engineRef.current?.endRev();
+      sound.endRev();
+      engineRef.current?.exitGarage();
+      setGarage(false);
+      portalCooldownRef.current = performance.now() + 1400;
+      sound.tick("click");
+    };
+    if (!animateFarewell) { finishExit(); return; }
+    engineRef.current?.playGarageFarewell();
+    setFarewellPulse(true);
+    garageExitTimer.current = window.setTimeout(() => {
+      garageExitTimer.current = null;
+      finishExit();
+      garageExitTimer.current = window.setTimeout(() => {
+        garageExitTimer.current = null;
+        setFarewellPulse(false);
+      }, 650);
+    }, 750);
+  }, [garage]);
 
   const replayGarage = useCallback(() => {
     engineRef.current?.replayGarageEntry();
@@ -380,7 +422,7 @@ export default function App() {
 
   const driveOutGarage = useCallback(
     (vehicle: "car" | "bike") => {
-      closeGarage();
+      closeGarage(false);
       launchDrive(vehicle);
     },
     [closeGarage, launchDrive],
@@ -388,6 +430,9 @@ export default function App() {
 
   const summonVehicle = useCallback((vehicle: "car" | "bike") => {
     if (!garage) openGarage();
+    engineRef.current?.recognizeGarageVehicle(vehicle);
+    garageSeq.current += 1;
+    setGarageAction({ id: `summon-${vehicle}`, seq: garageSeq.current });
     sound.whoosh();
     setScene((prev) => ({
       ...prev,
@@ -615,6 +660,13 @@ export default function App() {
     sound.tick("click");
   }, []);
 
+  const toggleDriveHeatmap = useCallback((enabled: boolean) => {
+    engineRef.current?.setDriveGhostHeatmap(enabled);
+    setDriveHud(engineRef.current?.getDriveState() ?? null);
+  }, []);
+
+  const setDriveConeTraining = useCallback((enabled: boolean) => { setConeTraining(enabled); if (enabled) setConeIndex(0); }, []);
+
   const calloutCooldownUntil = useRef(0);
   const handleAssistCallout = useCallback(
     (callout: AssistCallout | null) => {
@@ -665,6 +717,25 @@ export default function App() {
       const inGarage = engine.garageActive;
       const driving = engine.driveActive;
       switch (intent.kind) {
+        case "coneTraining":
+          if (!driving) return null;
+          if (intent.action === "start") { setDriveConeTraining(true); return "Cone training on. Orange markers show the braking points on your minimap."; }
+          if (intent.action === "stop") { setDriveConeTraining(false); return "Cone training paused."; }
+          setConeIndex((index) => index + 1);
+          return "Next braking cone selected.";
+        case "balance": {
+          updateDriveSetup({ balance: intent.value });
+          if (!driving) return intent.value > 0.6
+            ? "Rear bias set. In plain terms, the back helps the car rotate through a corner; the bar now leans rearward."
+            : intent.value < 0.4
+              ? "Front bias set. In plain terms, the front leads the turn for a steadier entry; the bar now leans forward."
+              : "Balance set to neutral. Front and rear share the turn evenly.";
+          return intent.value > 0.6
+            ? "Rear bias set live. The rear now helps rotate the car through the corner."
+            : intent.value < 0.4
+              ? "Front bias set live for a steadier turn-in. The front leads the corner."
+              : "Handling balance is neutral again.";
+        }
         case "pet":
           if (!inGarage) openGarage();
           if (intent.pet === "turtles") return "Mr and Mrs Turtle are by the pebble tray. The little procession is underway.";
@@ -724,6 +795,12 @@ export default function App() {
           if (intent.on && !sound.isOn) setAudioOn(sound.toggle());
           sound.setStation(intent.on ? 2 : 0);
           return intent.on ? "Synthwave on." : "Music off.";
+        case "forecast": {
+          const current = sceneRef.current;
+          const reading = { rain: current.weather === "rain", rainAmount: current.rainAmount, night: current.nightRace, windSpeed: current.windSpeed };
+          setForecast(reading);
+          return nextRunSentence(reading);
+        }
         case "weather": {
           const next = {
             ...sceneRef.current,
@@ -784,7 +861,7 @@ export default function App() {
       }
     });
     return () => cyrus.setHandler(null);
-  }, [active, scrollToId, runGarageAction, driveOutGarage, switchDriveVehicle, launchDrive, openGarage, exitDrive, closeGarage, garageCapture, revStart, revEnd, replayGarage, toggleDriveAssist, toggleDriveGhost, summonVehicle]);
+  }, [active, scrollToId, runGarageAction, driveOutGarage, switchDriveVehicle, launchDrive, openGarage, exitDrive, closeGarage, garageCapture, revStart, revEnd, replayGarage, toggleDriveAssist, toggleDriveGhost, summonVehicle, updateDriveSetup, setDriveConeTraining]);
 
   useEffect(() => {
     if (garage && cyrus.wanted() && !cyrus.on) void cyrus.enable();
@@ -2219,6 +2296,11 @@ export default function App() {
           onSetup={updateDriveSetup}
           onGhost={toggleDriveGhost}
           onReplaySector={replayDriveSector}
+          onHeatmap={toggleDriveHeatmap}
+          training={coneTraining}
+          coneIndex={coneIndex}
+          onTraining={setDriveConeTraining}
+          onConeStep={(step) => setConeIndex((index) => Math.max(0, index + step))}
           onAssist={toggleDriveAssist}
           onCallout={handleAssistCallout}
           onTouch={(touch) => engineRef.current?.setDriveTouch(touch)}
@@ -2248,6 +2330,7 @@ export default function App() {
           weather={scene.weather}
           rainAmount={scene.rainAmount}
           night={scene.nightRace}
+          onNightMode={() => updateScene({ nightRace: !sceneRef.current.nightRace })}
           windSpeed={scene.windSpeed}
           onPaint={(patch) =>
             updateScene({ paint: { ...sceneRef.current.paint, ...patch } })
@@ -2256,8 +2339,31 @@ export default function App() {
           onSummon={summonVehicle}
           onCapture={garageCapture}
           onReward={garageReward}
+          onForecast={openForecast}
+          onIdleLearning={setDogIdleLearning}
+          onPetCare={careGaragePet}
           trophies={trophyCount}
+          season={career}
         />
+      )}
+
+      {forecast && !booting && (
+        <aside className="next-run-forecast" role="status" aria-live="polite" aria-label={`Next run forecast. ${nextRunSentence(forecast)}`}>
+          <button type="button" className="next-run-forecast__close" onClick={() => setForecast(null)} aria-label="Close next run forecast">×</button>
+          <div className="next-run-forecast__head"><span>CYRUS / NEXT RUN</span><b>FORECAST</b></div>
+          <div className="next-run-forecast__conditions">
+            <div className={forecast.rain ? "is-active" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 13a5 5 0 0 1 9.5-2A3.5 3.5 0 1 1 17 18H7a3 3 0 0 1-1-5Z"/><path d="m8 20-1 2m6-2-1 2m6-2-1 2"/></svg><b>{forecast.rain ? `${Math.round(forecast.rainAmount * 100)}% RAIN` : "DRY"}</b><span>{forecast.rain ? "WET LINE" : "CLEAR LINE"}</span></div>
+            <div className={forecast.night ? "is-active" : ""}><svg viewBox="0 0 24 24" aria-hidden="true">{forecast.night ? <path d="M19 15.5A8 8 0 0 1 8.5 5 8 8 0 1 0 19 15.5Z"/> : <><circle cx="12" cy="12" r="4"/><path d="M12 1v2m0 18v2M1 12h2m18 0h2M4.2 4.2l1.4 1.4m12.8 12.8 1.4 1.4m0-15.6-1.4 1.4M5.6 18.4l-1.4 1.4"/></>}</svg><b>{forecast.night ? "NIGHT" : "DAYLIGHT"}</b><span>{forecast.night ? "LIGHTS ON" : "STUDIO SUN"}</span></div>
+            <div className={forecast.windSpeed >= 280 ? "is-active" : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h12a3 3 0 1 0-3-3M2 12h17a2.5 2.5 0 1 1-2.5 2.5M4 17h8a2 2 0 1 1-2 2"/></svg><b>{Math.round(forecast.windSpeed)} KM/H</b><span>{forecast.windSpeed >= 280 ? "STRONG FLOW" : forecast.windSpeed >= 160 ? "STEADY FLOW" : "CALM FLOW"}</span></div>
+          </div>
+          <p>{nextRunSentence(forecast)}</p>
+        </aside>
+      )}
+
+      {farewellPulse && (
+        <aside className="garage-farewell" role="status" aria-live="polite">
+          <i aria-hidden="true" /><span><b>SCOTCH / GOOD RUN</b><small>See you next time.</small></span>
+        </aside>
       )}
 
       {!booting && !takeover && !coreView && (

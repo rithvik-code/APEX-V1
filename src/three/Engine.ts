@@ -321,6 +321,7 @@ export class ApexEngine {
   private gridHelper: THREE.GridHelper;
   private groundDecor: THREE.Group;
   private lights: LightRig;
+  private paintSheen!: THREE.PointLight;
   private lightTargets = LIGHTING_TARGETS.studio;
   private shafts: THREE.Group;
   private timeScale = 1;
@@ -619,6 +620,10 @@ export class ApexEngine {
     const rim = new THREE.PointLight(0xdff5ff, 22, 20, 2);
     rim.position.set(0, 4.5, -12);
     this.scene.add(rim);
+
+    // A restrained grazing light travels around the selected vehicle's clearcoat.
+    this.paintSheen = new THREE.PointLight(0xf1f7ff, 0.62, 7, 2);
+    this.scene.add(this.paintSheen);
 
     return { hemi, key, cool, acid, under, bikeLight, rim };
   }
@@ -1630,6 +1635,10 @@ export class ApexEngine {
     this.garageStage?.fetchTrophy();
   }
 
+  recognizeGarageVehicle(vehicle: "car" | "bike"): void {
+    this.garageStage?.recognizeVehicle(vehicle);
+  }
+
   scanGarageCar(): void {
     this.garageStage?.scanCar();
   }
@@ -1683,6 +1692,18 @@ export class ApexEngine {
 
   setGarageTrophies(count: number): void {
     this.garageStage?.setTrophies(count);
+  }
+
+  setGarageIdleLearning(active: boolean, whisper: string): void {
+    this.garageStage?.setIdleLearning(active, whisper);
+  }
+
+  careGaragePet(pet: "dog" | "cat" | "turtles", action: "pet" | "treat"): void {
+    this.garageStage?.carePet(pet, action);
+  }
+
+  playGarageFarewell(): void {
+    this.garageStage?.playFarewell();
   }
 
   setGarageTerminal(patch: Partial<GarageTerminalState>): void {
@@ -2283,6 +2304,26 @@ export class ApexEngine {
       (exposureTarget - this.renderer.toneMappingExposure) * lightEase;
   }
 
+  private updatePaintSheen(): void {
+    const config = this.lastConfig;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const night = Boolean(config?.nightRace);
+    const angle = reducedMotion ? 0 : this.clockTime * 0.32;
+    const group = config?.focus === "bike" ? this.bikeGroup : this.carGroup;
+    this.paintSheen.position.set(
+      group.position.x + Math.cos(angle) * 2.4,
+      group.position.y + 1.45 + (reducedMotion ? 0 : Math.sin(angle * 0.7) * 0.18),
+      group.position.z + Math.sin(angle) * 2.4,
+    );
+    this.paintSheen.color.setHex(night ? 0xcbdcff : 0xf1f7ff);
+    this.paintSheen.intensity = (night ? 1.05 : 0.62) * (config?.paint.enabled ? 1.14 : 1);
+    if (!this.garageOn) {
+      this.car.paint.clearcoatRoughness = 0.055 + (reducedMotion ? 0 : 0.012 * (0.5 + 0.5 * Math.sin(angle * 1.4)));
+    } else {
+      this.paintSheen.intensity = 0;
+    }
+  }
+
   private updateLiveryGlow(dt: number, boost = 0): void {
     const edgeActivity = Math.max(this.dynoOn ? this.rpmCurrent : 0, this.revRpm / 12000, boost);
     const edgeGlowTarget = (this.lastConfig?.paint.enabled ? 0.16 : 0.035) + edgeActivity * (this.lastConfig?.paint.enabled ? 0.2 : 0.08) + (this.lastConfig?.nightRace ? 0.035 : 0);
@@ -2383,11 +2424,16 @@ export class ApexEngine {
     bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
     start: { x: number; z: number; heading: number };
     features: Array<{ kind: "ramp" | "hop" | "boost"; x: number; z: number }>;
+    brakingPoints: Array<{ id: number; label: string; x: number; z: number; targetKmh: number }>;
   } | null {
     if (!this.track) return null;
     return {
       points: this.track.minimap.map((p) => [p[0], p[1]]),
       features: this.track.minimapFeatures,
+      brakingPoints: this.track.plan.corners.map((corner) => {
+        const index = Math.round(corner.brake) % this.track!.plan.count;
+        return { id: corner.id, label: `T${corner.id} ${corner.label}`, x: this.track!.plan.xs[index], z: this.track!.plan.zs[index], targetKmh: corner.kmh };
+      }),
       bounds: { ...this.track.bounds },
       start: {
         x: this.track.start.pos.x,
@@ -2411,6 +2457,10 @@ export class ApexEngine {
 
   setDriveGhostReplayTime(time: number | null): void {
     this.drive?.setGhostReplayTime(time);
+  }
+
+  setDriveGhostHeatmap(enabled: boolean): void {
+    this.drive?.setGhostHeatmap(enabled);
   }
 
   setDriveAssist(enabled: boolean): void {
@@ -2441,6 +2491,7 @@ export class ApexEngine {
     const dt = Math.min(0.05, this.clock.getDelta());
     const adt = dt * this.timeScale;
     this.clockTime += adt;
+    this.updatePaintSheen();
 
     if (this.garageOn) {
       this.updateGarage(dt);

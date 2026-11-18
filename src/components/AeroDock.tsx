@@ -27,6 +27,7 @@ import {
 } from "../lib/clip";
 import { loadBoard } from "../lib/driveStore";
 import { aeroPressureNodes, buildBikeStreamlines, buildCarStreamlines } from "../three/aero";
+import { sound } from "../lib/sound";
 import {
   currentLicence,
   formatKm,
@@ -41,7 +42,6 @@ import {
   type PaddockProject,
   type UnlockId,
 } from "../lib/career";
-import { sound } from "../lib/sound";
 
 export type DockBridge = {
   startClip: () => void;
@@ -384,6 +384,8 @@ export function AeroDock({
   const [importCode, setImportCode] = useState("");
   const [shareMsg, setShareMsg] = useState("");
   const [dnaNote, setDnaNote] = useState("");
+  const [windToneOn, setWindToneOn] = useState(false);
+  const [staticPressureOn, setStaticPressureOn] = useState(true);
   const telemetry = aeroTelemetry(config.windSpeed);
   const pressureNodes = useMemo(() => {
     const lines = [
@@ -394,6 +396,7 @@ export function AeroDock({
   }, [config.focus]);
   const livery =
     LIVERIES.find((entry) => entry.id === config.livery) ?? LIVERIES[0];
+  const liverySheenColor = config.paint.enabled ? config.paint.base : livery.css;
   const dyno = dynoPoint(config.rpm);
   const peak = dynoPeak();
   const activeLap = status.isReplaying ? playingLap : null;
@@ -410,6 +413,11 @@ export function AeroDock({
   const [scanMsg, setScanMsg] = useState("");
   const [careerMsg, setCareerMsg] = useState("");
   const scanTried = useRef(false);
+
+  useEffect(() => {
+    sound.setWindMusic(windToneOn, config.turbulence, config.windSpeed);
+    return () => sound.setWindMusic(false, 0, 0);
+  }, [windToneOn, config.turbulence, config.windSpeed]);
 
   const refreshPaddock = async (force: boolean) => {
     setScanState("loading");
@@ -573,10 +581,18 @@ export function AeroDock({
 
             <div className="aero-dock__group">
               <Segmented label="FLOW COLOR" value={config.colorMode} options={[{ id: "velocity" as const, name: "VELOCITY" }, { id: "pressure" as const, name: "PRESSURE" }, { id: "acid" as const, name: "ACID" }]} onChange={(colorMode) => onChange({ colorMode })} />
-              <div className="aero-pressure-read" aria-label="Plain text pressure reading across airflow ribbons">
+              <div className="aero-lens-controls">
+                <button type="button" className={config.aero && config.colorMode === "pressure" ? "is-on" : ""} aria-pressed={config.aero && config.colorMode === "pressure"} onClick={() => onChange(config.aero && config.colorMode === "pressure" ? { aero: false } : { aero: true, colorMode: "pressure" })}>NEURAL AERO LENS <span>FLOW / PRESSURE ARROWS</span></button>
+                <Toggle label="STATIC TEXT READOUT" on={staticPressureOn} onChange={setStaticPressureOn} />
+              </div>
+              <div className="aero-wind-music">
+                <Toggle label="WIND TONE ROW" on={windToneOn} onChange={setWindToneOn} />
+                <p>{windToneOn ? "Turbulence bends a soft note row. Wind speed and pressure remain shown above." : "Optional quiet wind musicalization · starts only when sound is enabled."}</p>
+              </div>
+              {staticPressureOn && <div className="aero-pressure-read" aria-label="Static, no-animation text pressure reading across airflow ribbons">
                 <span>RIBBON PRESSURE / NORMALIZED</span>
                 {pressureNodes.map((node) => <div key={node.label}><b>{node.label}</b><i><em style={{ width: `${Math.round(node.value * 100)}%` }} /></i><strong>{node.value < .36 ? "LOW" : node.value > .68 ? "HIGH" : "MID"} {Math.round(node.value * 100)}%</strong></div>)}
-              </div>
+              </div>}
               <Segmented label="FLOW FOCUS" value={config.focus} options={[{ id: "both" as const, name: "BOTH" }, { id: "car" as const, name: "CAR" }, { id: "bike" as const, name: "BIKE" }]} onChange={(focus) => onChange({ focus })} />
               <Segmented label="CAMERA" value={config.camera} options={CAMERA_PRESETS} onChange={(camera) => onChange({ camera })} />
               <Segmented label="LIGHTING" value={config.lighting} options={LIGHTING_PRESETS} onChange={(lighting) => onChange({ lighting })} />
@@ -602,7 +618,7 @@ export function AeroDock({
               <div className="aero-ctl">
                 <span className="aero-ctl__head">
                   <span>PRESET LIVERY</span>
-                  <b>{config.paint.enabled ? "CUSTOM" : livery.name}</b>
+                  <b className="aero-dock__livery-name" style={{ backgroundImage: `linear-gradient(105deg, ${liverySheenColor} 38%, #fff 50%, ${liverySheenColor} 62%)` }}>{config.paint.enabled ? "CUSTOM" : livery.name}</b>
                 </span>
                 <div className="aero-swatches" role="group" aria-label="Livery">
                   {LIVERIES.map((entry) => {

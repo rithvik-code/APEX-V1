@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
 import { CYRUS_PERSONAS, cyrus, personaById, useCyrus } from "../lib/cyrus";
+import { speakRadio } from "../lib/radio";
 
 const isolate = (event: SyntheticEvent) => event.stopPropagation();
 const privacy = "Chat uses your configured AI model and recent conversation saved on this device. Clear it any time. Web Speech may use your browser's speech service; Whisper runs on-device after download.";
@@ -13,6 +14,8 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
   const [responsePrefs, setResponsePrefs] = useState(() => cyrus.getResponseSettings());
   const [memories, setMemories] = useState(() => cyrus.getPersonalMemory());
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>(() => typeof speechSynthesis === "undefined" ? [] : speechSynthesis.getVoices());
+  const [micNudges, setMicNudges] = useState(false);
+  const [micHint, setMicHint] = useState("");
   const rootRef = useRef<HTMLElement>(null);
   const id = useId();
   const enabled = cyrus.on;
@@ -86,6 +89,10 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
     let frame = 0;
     let intersecting = false;
     let lastSample = 0;
+    let lowSince = 0;
+    let highSince = 0;
+    let lastNudgeAt = 0;
+    let clearHintTimer = 0;
 
     const clear = () => {
       window.cancelAnimationFrame(frame);
@@ -98,18 +105,42 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
       if (time - lastSample >= 65) {
         lastSample = time;
         const level = Math.max(0, Math.min(1, cyrus.level()));
-        root.style.setProperty("--cyrus-hud-level", String(level));
-        samples.shift();
-        samples.push(level);
-        bars.forEach((bar, index) => {
-          bar.style.transform = `scaleY(${Math.max(0.06, samples[index])})`;
-        });
+        if (!motion.matches) {
+          root.style.setProperty("--cyrus-hud-level", String(level));
+          samples.shift();
+          samples.push(level);
+          bars.forEach((bar, index) => {
+            bar.style.transform = `scaleY(${Math.max(0.06, samples[index])})`;
+          });
+        }
+        if (enabled && phase === "awake" && !output) {
+          // Ignore silence. A low-input hint is only useful after voice energy is present.
+          lowSince = level >= 0.035 && level < 0.09 ? lowSince || time : 0;
+          highSince = level > 0.78 ? highSince || time : 0;
+          const hint = lowSince && time - lowSince > 3000 ? "MIC LEVEL LOW · MOVE CLOSER OR SPEAK UP" : highSince && time - highSince > 1200 ? "MIC LEVEL STRONG · TRY A LITTLE MORE DISTANCE" : "";
+          if (hint) {
+            setMicHint((current) => current === hint ? current : hint);
+            if (micNudges && time - lastNudgeAt > 15000) {
+              lastNudgeAt = time;
+              speakRadio(hint.includes("LOW") ? "I'm hearing you softly. Try moving a little closer." : "Your microphone input is strong. A little more distance may help.");
+            }
+            window.clearTimeout(clearHintTimer);
+            clearHintTimer = window.setTimeout(() => setMicHint(""), 5200);
+          } else {
+            window.clearTimeout(clearHintTimer);
+            setMicHint("");
+          }
+        } else {
+          lowSince = 0;
+          highSince = 0;
+        }
       }
       frame = window.requestAnimationFrame(tick);
     };
     const sync = () => {
       clear();
-      if (active && intersecting && !document.hidden && !motion.matches) {
+      window.clearTimeout(clearHintTimer);
+      if (active && intersecting && !document.hidden) {
         frame = window.requestAnimationFrame(tick);
       }
     };
@@ -126,7 +157,7 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
       document.removeEventListener("visibilitychange", sync);
       motion.removeEventListener("change", sync);
     };
-  }, [visible, active, showPanel]);
+  }, [visible, active, showPanel, enabled, phase, output, micNudges]);
 
   if (!visible) return null;
 
@@ -135,6 +166,7 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
       ref={rootRef}
       className="cyrus-hud"
       data-mode={mode}
+      data-voice-room={mode === "garage" ? "garage" : mode === "drive" ? "drive" : "pitwall"}
       data-phase={phase}
       data-expanded={showPanel}
       aria-label="CYRUS voice controls"
@@ -221,6 +253,7 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
           <div className="cyrus-hud__channel">
             <span>{phase.toUpperCase()}</span>
             <span>{ear === "web-speech" ? "WEB SPEECH" : ear === "whisper" ? "WHISPER" : "NO SPEECH EAR"}</span>
+            <span className="cyrus-hud__room-chip" aria-label={`Voice room treatment: ${mode}`}>ROOM / {mode === "garage" ? "GARAGE" : mode === "drive" ? "TRACK" : "PIT WALL"}</span>
           </div>
           <p className="cyrus-hud__detail">{status}</p>
           <p className="cyrus-hud__detail" role="status">{brain}</p>
@@ -232,6 +265,11 @@ export function CyrusHUD({ mode }: { mode: "garage" | "drive" | "page" }) {
               {phase === "speaking" ? "Synthetic envelope · not measured speaker audio" : enabled ? "Microphone RMS · measured input" : "Microphone off"}
             </span>
             <span className="cyrus-hud__motion-note">Level animation paused · reduced motion</span>
+          </div>
+          <div className="cyrus-hud__mic-coach">
+            <button type="button" aria-pressed={micNudges} onClick={() => setMicNudges((enabled) => !enabled)}>VOICE INPUT HINTS {micNudges ? "ON" : "OFF"}<span>{micNudges ? "SPOKEN NUDGES ENABLED" : "TEXT ONLY"}</span></button>
+            {micHint && <p role="status" aria-live="polite"><i aria-hidden="true" />{micHint}</p>}
+            <small>Uses measured microphone level as a rough distance clue; it cannot measure physical distance.</small>
           </div>
           <details className="cyrus-hud__preferences">
             <summary>VOICE & RESPONSE SETTINGS</summary>

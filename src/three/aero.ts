@@ -446,6 +446,7 @@ export class AeroFlow {
   private pointMaterial: THREE.ShaderMaterial;
   private points: THREE.Points;
   private ribbonMaterial: THREE.MeshBasicMaterial;
+  private arrowMaterials: THREE.MeshBasicMaterial[] = [];
   private particleCount: number;
   private particleLine: Uint16Array;
   private particleT: Float32Array;
@@ -512,6 +513,23 @@ export class AeroFlow {
     ribbons.renderOrder = 11;
     ribbons.frustumCulled = false;
     this.group.add(ribbons);
+    const arrowGeometry = new THREE.ConeGeometry(0.045, 0.16, 5);
+    const arrowUp = new THREE.Vector3(0, 1, 0);
+    for (let lineIndex = 1; lineIndex < lines.length; lineIndex += Math.max(1, Math.floor(lines.length / 7))) {
+      const line = lines[lineIndex];
+      if (line.hot) continue;
+      const sample = 46;
+      const point = new THREE.Vector3(line.points[sample * 3], line.points[sample * 3 + 1], line.points[sample * 3 + 2]);
+      const next = new THREE.Vector3(line.points[(sample + 2) * 3], line.points[(sample + 2) * 3 + 1], line.points[(sample + 2) * 3 + 2]);
+      const direction = next.sub(point).normalize();
+      const material = new THREE.MeshBasicMaterial({ color: C_P_LOW.clone().lerp(C_P_HIGH, line.pressure[sample]), transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
+      const arrow = new THREE.Mesh(arrowGeometry, material);
+      arrow.position.copy(point);
+      arrow.quaternion.setFromUnitVectors(arrowUp, direction);
+      arrow.renderOrder = 13;
+      this.group.add(arrow);
+      this.arrowMaterials.push(material);
+    }
 
     this.extMaterial = (this.group.children[0] as THREE.LineSegments)
       .material as THREE.ShaderMaterial;
@@ -650,6 +668,9 @@ export class AeroFlow {
     }
     this.pointMaterial.uniforms.uOpacity.value = this.opacity * 0.9;
     this.ribbonMaterial.opacity = this.opacity * (0.15 + this.turbulence * 0.12);
+    this.arrowMaterials.forEach((material, index) => {
+      material.opacity = this.opacity * (0.22 + 0.12 * (0.5 + 0.5 * Math.sin(this.time * 2 + index)));
+    });
 
     const active = Math.floor(this.particleCount * this.density);
     this.points.geometry.setDrawRange(0, active);

@@ -83,14 +83,16 @@ export function speakRadio(text: string): void {
   window.speechSynthesis.cancel();
   sound.radio();
   const utterance = new SpeechSynthesisUtterance(clean);
-  utterance.rate = 1.05;
-  utterance.pitch = 0.92;
+  const room = sound.currentVoiceRoom;
+  utterance.rate = room === "drive" ? 1.08 : room === "garage" ? 0.98 : 1.04;
+  utterance.pitch = room === "drive" ? 0.9 : room === "garage" ? 0.96 : 0.92;
   utterance.volume = 0.9;
   const voices = window.speechSynthesis.getVoices();
   const preferred =
     voices.find((voice) => /en[-_]GB/i.test(voice.lang)) ??
     voices.find((voice) => /^en/i.test(voice.lang));
   if (preferred) utterance.voice = preferred;
+  utterance.onend = () => sound.voiceRoomTail();
   window.speechSynthesis.speak(utterance);
 }
 

@@ -5,14 +5,15 @@ import json
 import math
 import os
 import queue
+import re
 import subprocess
 import threading
+import time
 import urllib.error
 import urllib.request
 import random
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk
 from PIL import Image, ImageDraw, ImageFilter, ImageTk
 
 
@@ -34,9 +35,12 @@ def read_settings():
         return {
             "endpoint": str(value.get("endpoint", "http://127.0.0.1:11434")).rstrip("/"),
             "model": str(value.get("model", "")),
+            "provider": value.get("provider") if value.get("provider") in ("ollama", "hermes") else "ollama",
+            "hermes_endpoint": str(value.get("hermes_endpoint", "http://127.0.0.1:8642/v1")).rstrip("/"),
+            "api_key": str(value.get("api_key", "")),
         }
     except (OSError, ValueError, TypeError):
-        return {"endpoint": "http://127.0.0.1:11434", "model": ""}
+        return {"endpoint": "http://127.0.0.1:11434", "model": "", "provider": "ollama", "hermes_endpoint": "http://127.0.0.1:8642/v1", "api_key": ""}
 
 
 def discover_ollama_model(endpoint):
@@ -48,6 +52,46 @@ def discover_ollama_model(endpoint):
         if models:
             return str(models[0].get("name") or models[0].get("model") or "").strip()
     return ""
+
+
+class FinalAnswerFilter:
+    """Stream final text while suppressing <think> blocks from reasoning models."""
+    OPEN = "<think>"
+    CLOSE = "</think>"
+
+    def __init__(self):
+        self.pending = ""
+        self.hidden = False
+
+    def feed(self, chunk, final=False):
+        self.pending += chunk
+        visible = []
+        while self.pending:
+            marker = self.CLOSE if self.hidden else self.OPEN
+            index = self.pending.lower().find(marker)
+            if index >= 0:
+                if not self.hidden:
+                    visible.append(self.pending[:index])
+                self.pending = self.pending[index + len(marker):]
+                self.hidden = not self.hidden
+                continue
+            if final:
+                if not self.hidden:
+                    visible.append(self.pending)
+                self.pending = ""
+                break
+            lower = self.pending.lower()
+            hold = 0
+            for size in range(min(len(marker) - 1, len(self.pending)), 0, -1):
+                if lower.endswith(marker[:size]):
+                    hold = size
+                    break
+            safe_length = len(self.pending) - hold
+            if not self.hidden:
+                visible.append(self.pending[:safe_length])
+            self.pending = self.pending[safe_length:]
+            break
+        return "".join(visible)
 
 
 class CyrusCompanion:
@@ -65,12 +109,14 @@ class CyrusCompanion:
         self.messages = []
         self.expanded = False
         self.busy = False
-        self.voice_on = False
+        self.voice_on = True
         self.always_listen = True
+        self.wake_suspended = False
+        self.wake_process = None
+        self.wake_until = 0.0
         self._drag = None
         self._bubble_pointer = None
         self._wake_repeat_until = 0.0
-        self._last_heard_lowercase = ""
         self.bubble = None
         self.actions_visible = False
         self.auto_send_voice = False
@@ -90,9 +136,10 @@ class CyrusCompanion:
         except tk.TclError:
             pass
         self.root.bind("<Escape>", lambda _e: self.collapse())
+        self.root.protocol("WM_DELETE_WINDOW", self._quit)
         self.root.after(120, self._animate_bubble)
         self.root.after(80, self._drain_events)
-        self.root.after(60, self._wake_poll)
+        self.root.after(650, self._start_wake_listener)
         self.root.mainloop()
 
     def _mascot(self, canvas, cx, cy, scale=1.0, animated=False):
@@ -199,7 +246,11 @@ class CyrusCompanion:
         bob = math.sin(self.anim_tick / 8) * 1.7
         # The mascot floats directly on the transparent desktop; no badge or disc.
         self._scotch(c, 47, 48 + bob, .70, True)
-        c.create_text(47, 108, text="CYRUS", fill=TEXT, font=("Segoe UI Semibold", 8, "bold"))
+        c.create_text(47, 108, text="SCOTCH", fill=TEXT, font=("Segoe UI Semibold", 8, "bold"))
+        mic_live = bool(self.always_listen and self.wake_process and self.wake_process.poll() is None)
+        mic_color = GREEN if mic_live else "#61727a"
+        c.create_oval(77, 19, 84, 26, fill=mic_color, outline="")
+        c.create_text(96, 22, text="MIC LIVE" if mic_live else "MIC OFF", anchor="w", fill=mic_color, font=("Consolas", 6, "bold"))
         if self.actions_visible:
             self._action_pill(c, 105, 31, 187, 65, "TALK TO CYRUS", "talk")
             self._action_pill(c, 105, 72, 187, 106, "TEXT CYRUS", "text")
@@ -326,8 +377,8 @@ class CyrusCompanion:
         self.root.overrideredirect(False)
         self.root.configure(bg=BG, highlightthickness=1, highlightbackground="#334fff")
         x = min(self.root.winfo_x(), max(12, self.root.winfo_screenwidth()-372))
-        y = min(self.root.winfo_y(), max(12, self.root.winfo_screenheight()-578))
-        self.root.geometry(f"360x550+{x}+{y}")
+        y = min(self.root.winfo_y(), max(12, self.root.winfo_screenheight()-630))
+        self.root.geometry(f"360x610+{x}+{y}")
         self.root.configure(bg=BG, highlightthickness=1, highlightbackground="#334fff")
         self._panel()
         self.root.focus_force()
@@ -347,67 +398,154 @@ class CyrusCompanion:
     def _panel(self):
         self.root.grid_columnconfigure(0, weight=1)
         self.root.grid_rowconfigure(1, weight=1)
-        head = tk.Frame(self.root, bg="#111e2e", height=92)
+        head = tk.Frame(self.root, bg="#0b1926", height=98, highlightthickness=1, highlightbackground="#1b3a50")
         head.grid(row=0, column=0, sticky="ew")
         head.pack_propagate(False)
         head.bind("<ButtonPress-1>", self._drag_header)
         head.bind("<B1-Motion>", self._move_header)
-        art = tk.Canvas(head, width=78, height=86, bg="#111e2e", highlightthickness=0)
+        art = tk.Canvas(head, width=82, height=92, bg="#0b1926", highlightthickness=0)
         art.pack(side="left", padx=(8, 3))
-        self._scotch(art, 39, 39, .61)
-        identity = tk.Frame(head, bg="#111e2e")
-        identity.pack(side="left", fill="both", expand=True, pady=17)
-        tk.Label(identity, text="CYRUS", fg=TEXT, bg="#111e2e", font=("Segoe UI Semibold", 15, "bold")).pack(anchor="w")
-        self.status = tk.Label(identity, text="DESKTOP COMPANION · LOCAL AI", fg=CYAN, bg="#111e2e", font=("Consolas", 7))
-        self.status.pack(anchor="w", pady=(3, 0))
+        self.header_art = art
+        identity = tk.Frame(head, bg="#0b1926")
+        identity.pack(side="left", fill="both", expand=True, pady=18)
+        tk.Label(identity, text="CYRUS", fg=TEXT, bg="#0b1926", font=("Segoe UI Semibold", 16, "bold")).pack(anchor="w")
+        self.status = tk.Label(identity, text="●  MIC LIVE · SAY HEY CYRUS", fg=GREEN, bg="#0b1926", font=("Consolas", 7, "bold"))
+        self.status.pack(anchor="w", pady=(4, 0))
+        self.activity = tk.Canvas(identity, width=86, height=12, bg="#0b1926", highlightthickness=0)
+        self.activity.pack(anchor="w", pady=(3, 0))
         for widget in (art, identity, *identity.winfo_children()):
             widget.bind("<ButtonPress-1>", self._drag_header)
             widget.bind("<B1-Motion>", self._move_header)
-        controls = tk.Frame(head, bg="#111e2e")
+        controls = tk.Frame(head, bg="#0b1926")
         controls.pack(side="right", anchor="n", padx=7, pady=7)
         self.pin_button = tk.Button(controls, text="PIN", command=self._toggle_pin, bg="#1a2a38", fg=GREEN, relief="flat", font=("Consolas", 8, "bold"), cursor="hand2")
         self.pin_button.pack(pady=(0, 4))
-        tk.Button(controls, text="—", command=self.collapse, bg="#1a2a38", fg=TEXT, relief="flat", font=("Segoe UI", 10), width=3, cursor="hand2").pack()
-        tk.Button(controls, text="×", command=self.root.destroy, bg="#1a2a38", fg="#ff9b9b", relief="flat", font=("Segoe UI", 10), width=3, cursor="hand2").pack(pady=(4, 0))
+        self.wake_button = tk.Button(controls, text="EAR ON", command=self._toggle_wake_listener, bg="#12323a", fg=GREEN, relief="flat", font=("Consolas", 7, "bold"), cursor="hand2")
+        self.wake_button.pack(pady=(0, 4))
+        tk.Button(controls, text="—", command=self.collapse, bg="#12283a", fg=TEXT, relief="flat", font=("Segoe UI", 10), width=3, cursor="hand2", activebackground="#20445a").pack()
+        tk.Button(controls, text="×", command=self._quit, bg="#12283a", fg="#ff9b9b", relief="flat", font=("Segoe UI", 10), width=3, cursor="hand2", activebackground="#542b3a").pack(pady=(4, 0))
 
-        self.chat = tk.Text(self.root, bg="#08111b", fg=TEXT, insertbackground=CYAN, relief="flat", wrap="word", padx=16, pady=14, font=("Segoe UI", 10), spacing3=6, state="disabled", borderwidth=0)
-        self.chat.grid(row=1, column=0, sticky="nsew", padx=1)
-        self.chat.tag_configure("you", foreground="#91ff70", font=("Segoe UI Semibold", 9, "bold"), spacing1=5)
-        self.chat.tag_configure("cyrus", foreground="#67e7ff", font=("Segoe UI Semibold", 9, "bold"), spacing1=5)
-        self.chat.tag_configure("body", foreground="#e5f1fb", lmargin1=8, lmargin2=8, spacing3=9)
+        self.chat_shell = tk.Frame(self.root, bg="#07121a", highlightthickness=1, highlightbackground="#142b3a")
+        self.chat_shell.grid(row=1, column=0, sticky="nsew", padx=7, pady=(7, 4))
+        self.chat_shell.grid_rowconfigure(0, weight=1)
+        self.chat_shell.grid_columnconfigure(0, weight=1)
+        self.chat_canvas = tk.Canvas(self.chat_shell, bg="#07121a", highlightthickness=0, bd=0)
+        self.chat_canvas.grid(row=0, column=0, sticky="nsew")
+        self.chat_scroll = tk.Scrollbar(self.chat_shell, orient="vertical", command=self.chat_canvas.yview, bg="#102a39", troughcolor="#07121a", activebackground="#56d9ed", relief="flat", borderwidth=0, width=8, highlightthickness=0)
+        self.chat_scroll.grid(row=0, column=1, sticky="ns")
+        self.chat_canvas.configure(yscrollcommand=self.chat_scroll.set)
+        self.chat_feed = tk.Frame(self.chat_canvas, bg="#07121a")
+        self.chat_window = self.chat_canvas.create_window((0, 0), window=self.chat_feed, anchor="nw")
+        self.chat_feed.bind("<Configure>", lambda _event: self.chat_canvas.configure(scrollregion=self.chat_canvas.bbox("all")))
+        self.chat_canvas.bind("<Configure>", lambda event: self.chat_canvas.itemconfigure(self.chat_window, width=event.width))
+        self.chat_feed.bind("<Enter>", lambda _event: self.chat_canvas.bind_all("<MouseWheel>", self._chat_wheel))
+        self.chat_feed.bind("<Leave>", lambda _event: self.chat_canvas.unbind_all("<MouseWheel>"))
         if not self.messages: self._append("CYRUS", "Hey. I'm right here on your desktop. Ask me anything.", False)
         else:
             for who, message in self.messages: self._append(who, message, False)
 
-        self.status_line = tk.Label(self.root, text="OLLAMA · " + (self.settings["model"] or "CHOOSE A MODEL BELOW"), fg=MUTED, bg=BG, anchor="w", padx=12, font=("Consolas", 7))
-        self.status_line.grid(row=2, column=0, sticky="ew", pady=(3, 4))
-        row = tk.Frame(self.root, bg="#0b1520", highlightthickness=1, highlightbackground="#243c52")
-        row.grid(row=3, column=0, sticky="ew", padx=9, pady=(0, 9))
-        self.entry = tk.Entry(row, bg="#0b1520", fg=TEXT, insertbackground=CYAN, relief="flat", font=("Segoe UI", 10))
-        self.entry.pack(side="left", fill="x", expand=True, ipady=9, padx=(0, 6))
+        self.status_line = tk.Label(self.root, text="◈  " + self._engine_status(), fg="#87a6b8", bg=BG, anchor="w", padx=12, font=("Consolas", 7, "bold"))
+        self.status_line.grid(row=2, column=0, sticky="ew", pady=(2, 5))
+        composer = tk.Frame(self.root, bg="#0b1823")
+        composer.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 6))
+        tk.Label(composer, text="MESSAGE / CYRUS", bg="#0b1823", fg="#6e91a5", font=("Consolas", 7, "bold")).pack(anchor="w", padx=7, pady=(3, 4))
+        row = tk.Frame(composer, bg="#0c1a25", highlightthickness=1, highlightbackground="#24435a")
+        row.pack(fill="x", padx=2, pady=(0, 4))
+        self.composer_row = row
+        self.entry = tk.Entry(row, bg="#0c1a25", fg=TEXT, insertbackground=CYAN, relief="flat", font=("Segoe UI", 10), borderwidth=0)
+        self.entry.pack(side="left", fill="x", expand=True, ipady=10, padx=(9, 6))
         self.entry.bind("<Return>", lambda _e: self.send())
-        tk.Button(row, text="MIC", command=self.listen, bg="#172732", fg=CYAN, relief="flat", font=("Consolas", 8, "bold"), padx=9, pady=8, cursor="hand2").pack(side="right", padx=(0, 5))
-        tk.Button(row, text="SEND", command=self.send, bg="#273dd3", fg="white", activebackground=BLUE, activeforeground="white", relief="flat", font=("Consolas", 8, "bold"), padx=12, pady=8, cursor="hand2").pack(side="right")
+        self.entry.bind("<FocusIn>", lambda _e: row.configure(highlightbackground="#54ddf2"))
+        self.entry.bind("<FocusOut>", lambda _e: row.configure(highlightbackground="#24435a"))
+        tk.Button(row, text="MIC", command=self.listen, bg="#142b3a", fg=CYAN, relief="flat", font=("Consolas", 8, "bold"), padx=10, pady=8, cursor="hand2", activebackground="#1c4659").pack(side="right", padx=(0, 4), pady=4)
+        tk.Button(row, text="SEND  ↗", command=self.send, bg="#2351d9", fg="white", activebackground="#4773ff", activeforeground="white", relief="flat", font=("Consolas", 8, "bold"), padx=12, pady=8, cursor="hand2").pack(side="right", padx=4, pady=4)
 
         settings = tk.Frame(self.root, bg="#0b141c")
         settings.grid(row=4, column=0, sticky="ew", padx=1, pady=(0, 1))
+        engine_row = tk.Frame(settings, bg="#0b141c")
+        engine_row.pack(fill="x", padx=9, pady=(5, 0))
+        tk.Label(engine_row, text="AI ENGINE", bg="#0b141c", fg=MUTED, font=("Consolas", 7, "bold")).pack(side="left", padx=(0, 7))
+        self.engine_var = tk.StringVar(value=self.settings["provider"].upper())
+        self.engine_menu = tk.OptionMenu(engine_row, self.engine_var, "OLLAMA", "HERMES")
+        self.engine_menu.configure(bg="#172732", fg=CYAN, activebackground="#243dd2", activeforeground="white", relief="flat", highlightthickness=0, font=("Consolas", 8, "bold"), padx=9, pady=2)
+        self.engine_menu["menu"].configure(bg="#172732", fg=TEXT, activebackground=BLUE, activeforeground="white")
+        self.engine_menu.pack(side="left")
+        tk.Label(engine_row, text="HERMES API KEY", bg="#0b141c", fg=MUTED, font=("Consolas", 7)).pack(side="left", padx=(10, 5))
+        self.api_key_var = tk.StringVar(value=self.settings["api_key"])
+        self.api_key_entry = tk.Entry(engine_row, textvariable=self.api_key_var, show="•", width=11, bg="#111e2a", fg=TEXT, insertbackground=CYAN, relief="flat", font=("Consolas", 8))
+        self.api_key_entry.pack(side="left", fill="x", expand=True, ipady=4)
         self.model_var = tk.StringVar(value=self.settings["model"])
         self.model_entry = tk.Entry(settings, textvariable=self.model_var, bg="#111e2a", fg=MUTED, insertbackground=CYAN, relief="flat", font=("Consolas", 8))
-        self.model_entry.pack(side="left", fill="x", expand=True, padx=(9, 4), pady=8, ipady=5)
-        tk.Button(settings, text="SAVE MODEL", command=self.save_model, bg="#172732", fg=CYAN, relief="flat", font=("Consolas", 7, "bold"), padx=8, cursor="hand2").pack(side="left", padx=(0, 5))
+        self.model_entry.pack(side="left", fill="x", expand=True, padx=(9, 4), pady=7, ipady=5)
+        tk.Button(settings, text="SAVE ENGINE", command=self.save_model, bg="#172732", fg=CYAN, relief="flat", font=("Consolas", 7, "bold"), padx=8, cursor="hand2").pack(side="left", padx=(0, 5))
         self.voice_button = tk.Button(settings, text="VOICE ON", command=self._toggle_voice, bg="#172732", fg=GREEN, relief="flat", font=("Consolas", 7, "bold"), padx=8, cursor="hand2")
         self.voice_button.pack(side="right", padx=(0, 9))
+        self._animate_header()
+        self._animate_activity()
 
     def _append(self, who, message, store=True):
         if store:
             self.messages.append((who, message))
             self.messages = self.messages[-40:]
-        if not self.expanded or not hasattr(self, "chat") or not self.chat.winfo_exists(): return
-        self.chat.configure(state="normal")
-        self.chat.insert("end", who + "\n", "you" if who == "YOU" else "cyrus")
-        self.chat.insert("end", message + "\n\n", "body")
-        self.chat.see("end")
-        self.chat.configure(state="disabled")
+        if not self.expanded or not hasattr(self, "chat_feed") or not self.chat_feed.winfo_exists(): return
+        user = who == "YOU"
+        row = tk.Frame(self.chat_feed, bg="#07121a")
+        row.pack(fill="x", padx=10, pady=(7, 2 if user else 8))
+        bubble_bg = "#122a30" if user else "#0d2030"
+        border = "#3d756d" if user else "#21465b"
+        bubble = tk.Frame(row, bg=bubble_bg, highlightthickness=1, highlightbackground=border, bd=0)
+        bubble.pack(anchor="e" if user else "w", padx=(28, 0) if user else (0, 28))
+        cap = tk.Frame(bubble, bg=bubble_bg)
+        cap.pack(fill="x", padx=10, pady=(7, 1))
+        tag = "YOU  /  TRANSMIT" if user else "CYRUS  /  RESPONSE"
+        tk.Label(cap, text="●", fg="#b6f86b" if user else CYAN, bg=bubble_bg, font=("Consolas", 7, "bold")).pack(side="left", padx=(0, 5))
+        tk.Label(cap, text=tag, fg="#a7d9c4" if user else "#82d8e8", bg=bubble_bg, font=("Consolas", 7, "bold")).pack(side="left")
+        body = tk.Label(bubble, text=message, fg="#e9f3f8", bg=bubble_bg, font=("Segoe UI", 10), justify="left", anchor="w", wraplength=278, padx=10, pady=5)
+        body.pack(fill="x")
+        if not user:
+            self._animate_card(bubble, 0)
+        self.chat_canvas.update_idletasks()
+        self.chat_canvas.configure(scrollregion=self.chat_canvas.bbox("all"))
+        self.chat_canvas.yview_moveto(1.0)
+
+    def _chat_wheel(self, event):
+        self.chat_canvas.yview_scroll(int(-event.delta / 120), "units")
+
+    def _animate_card(self, widget, step):
+        colors = ("#21465b", "#28718a", "#46c9df", "#28718a", "#21465b")
+        if not widget.winfo_exists() or step >= len(colors): return
+        widget.configure(highlightbackground=colors[step])
+        self.root.after(90, lambda: self._animate_card(widget, step + 1))
+
+    def _animate_header(self):
+        if not self.expanded or not hasattr(self, "header_art") or not self.header_art.winfo_exists(): return
+        art = self.header_art
+        art.delete("all")
+        phase = self.anim_tick * 13
+        pulse = (math.sin(self.anim_tick * .16) + 1) / 2
+        radius = 22 + pulse * 3
+        art.create_oval(41-radius, 43-radius, 41+radius, 43+radius, outline="#123a4c", width=1, tags="hud")
+        art.create_arc(41-radius, 43-radius, 41+radius, 43+radius, start=phase % 360, extent=118, style="arc", outline="#55d9ef", width=2, tags="hud")
+        art.create_oval(41-13, 43-13, 41+13, 43+13, outline="#275367", width=1, tags="hud")
+        self._scotch(art, 41, 43 + math.sin(self.anim_tick * .13) * 1.4, .59, True)
+        self.anim_tick += 1
+        self.root.after(75, self._animate_header)
+
+    def _animate_activity(self):
+        if not self.expanded or not hasattr(self, "activity") or not self.activity.winfo_exists(): return
+        self.activity.delete("all")
+        for index in range(16):
+            wave = (math.sin(self.anim_tick * .18 + index * .55) + 1) / 2
+            height = 2 + (wave * 8 if self.busy else wave * 2)
+            x = index * 5 + 1
+            color = "#5ce3f5" if self.busy else "#27677a"
+            self.activity.create_line(x, 11-height, x, 11, fill=color, width=2)
+        self.root.after(90, self._animate_activity)
+
+    def _engine_status(self):
+        if self.settings.get("provider") == "hermes":
+            return "HERMES AGENT · LOCAL API"
+        return "OLLAMA · " + (self.settings.get("model") or "AUTO MODEL DISCOVERY")
 
     def send(self):
         message = self.entry.get().strip()
@@ -415,10 +553,29 @@ class CyrusCompanion:
         self.entry.delete(0, "end")
         self._append("YOU", message)
         self.busy = True
-        self.status.configure(text="● CONNECTED  ·  THINKING", fg=GREEN)
+        self.wake_until = 0.0
+        self.wake_suspended = True
+        self._stop_wake_listener()
+        self.status.configure(text="● CONNECTED  ·  WRITING ANSWER", fg=GREEN)
         threading.Thread(target=self._ask, args=(message,), daemon=True).start()
 
     def _ask(self, message):
+        if self.settings.get("provider") == "hermes":
+            try:
+                model, answer = self._ask_hermes(message)
+                self.events.put(("token", answer))
+                self.events.put(("answer", answer, model))
+                if self.voice_on:
+                    threading.Thread(target=self._speak, args=(answer,), daemon=True).start()
+            except urllib.error.HTTPError as error:
+                reason = "Check the Hermes API key." if error.code in (401, 403) else f"Hermes returned {error.code}."
+                self.events.put(("error", reason + " Make sure its local API server is running.") )
+            except urllib.error.URLError:
+                self.events.put(("error", "Hermes is not reachable. Start its local API server, then try again."))
+            except Exception as error:
+                self.events.put(("error", f"Hermes could not finish that request: {error}"))
+            return
+
         endpoint = self.settings["endpoint"].rstrip("/")
         try:
             # Never pin Cyrus to a stale saved model: follow the active server each request.
@@ -432,13 +589,28 @@ class CyrusCompanion:
             self.events.put(("error", "I couldn't reach Ollama. Start Ollama and install a chat model, then ask me again."))
             return
 
-        history = [{"role": "system", "content": "You are Cyrus, a confident, warm, concise female desktop AI companion for K Rithvik. Output only the final answer. Never reveal internal reasoning or narrate thoughts. Answer directly in one to three short sentences. Help with any topic. You live on this Windows desktop and are the companion for the APEX/CYRUS OS project; use that context when relevant, but never pretend you can inspect files or control apps unless a connected tool actually did so. If asked who made you, say K Rithvik. If asked your name, say Cyrus."}]
+        history = [{"role": "system", "content": 'You are Cyrus, a concise and friendly desktop assistant for K Rithvik. Return only a JSON object with one key, "answer". The value must contain only the direct user-facing answer, usually one short sentence. Never put analysis, thoughts, drafts, or explanations of your process in the answer. For a greeting, simply greet the user. Give more detail only when asked. Help with any topic. You are the companion for the APEX project, but never pretend to inspect files or control apps unless a connected tool actually did so. If asked who made you, say K Rithvik. If asked your name, say Cyrus.'}]
         history.extend({"role": "user" if who == "YOU" else "assistant", "content": text} for who, text in self.messages[-14:])
 
-        payload = json.dumps({"model": model, "messages": history, "stream": True, "think": False, "keep_alive": "24h", "options": {"temperature": .35, "num_predict": 120}}).encode()
+        answer_schema = {
+            "type": "object",
+            "properties": {"answer": {"type": "string"}},
+            "required": ["answer"],
+            "additionalProperties": False,
+        }
+        payload = json.dumps({
+            "model": model,
+            "messages": history,
+            "stream": True,
+            "think": False,
+            "format": answer_schema,
+            "keep_alive": "24h",
+            "options": {"temperature": .2, "num_predict": 120},
+        }).encode()
         request = urllib.request.Request(endpoint + "/api/chat", data=payload, headers={"Content-Type": "application/json"}, method="POST")
         try:
             parts = []
+            answer_filter = FinalAnswerFilter()
             with urllib.request.urlopen(request, timeout=120) as response:
                 for raw_line in response:
                     if not raw_line.strip():
@@ -446,10 +618,21 @@ class CyrusCompanion:
                     packet = json.loads(raw_line)
                     token = packet.get("message", {}).get("content", "")
                     if token:
-                        parts.append(token)
-                        self.events.put(("token", token))
+                        visible = answer_filter.feed(token)
+                        if visible:
+                            parts.append(visible)
+            tail = answer_filter.feed("", final=True)
+            if tail:
+                parts.append(tail)
             answer = "".join(parts).strip()
-            if not answer: raise RuntimeError("The model returned an empty answer.")
+            try:
+                structured = json.loads(answer)
+                answer = str(structured.get("answer", "")).strip() if isinstance(structured, dict) else ""
+            except (ValueError, TypeError):
+                answer = ""
+            if not answer:
+                answer = "I couldn't form a clear answer just now. Please try asking again."
+            self.events.put(("token", answer))
             self.events.put(("answer", answer, model))
             if self.voice_on: threading.Thread(target=self._speak, args=(answer,), daemon=True).start()
         except urllib.error.URLError as error:
@@ -457,7 +640,147 @@ class CyrusCompanion:
         except Exception as error:
             self.events.put(("error", f"That request didn't complete: {error}"))
 
+    def _ask_hermes(self, message):
+        endpoint = self.settings.get("hermes_endpoint", "http://127.0.0.1:8642/v1").rstrip("/")
+        model = "hermes-agent"
+        history = [{"role": "system", "content": 'You are Cyrus, the concise desktop companion for K Rithvik. Give only the final user-facing answer. Never reveal thoughts, analysis, chain-of-thought, or tool planning. For a greeting, greet the user simply. Keep ordinary answers to one or two short sentences unless asked for detail. If asked who made this project, say K Rithvik.'}]
+        history.extend({"role": "user" if who == "YOU" else "assistant", "content": text} for who, text in self.messages[-14:])
+        payload = json.dumps({"model": model, "messages": history, "stream": True, "temperature": 0.2, "max_tokens": 180}).encode()
+        headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+        if self.settings.get("api_key"):
+            headers["Authorization"] = "Bearer " + self.settings["api_key"]
+        url = endpoint if endpoint.endswith("/chat/completions") else endpoint + "/chat/completions"
+        request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        answer_filter = FinalAnswerFilter()
+        parts = []
+        with urllib.request.urlopen(request, timeout=120) as response:
+            for raw_line in response:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                packet = json.loads(data)
+                token = packet.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                if token:
+                    visible = answer_filter.feed(token)
+                    if visible:
+                        parts.append(visible)
+        tail = answer_filter.feed("", final=True)
+        if tail:
+            parts.append(tail)
+        answer = "".join(parts).strip()
+        return model, answer or "I couldn't form a clear answer just now. Please try asking again."
+
+    def _start_wake_listener(self):
+        if not self.always_listen or self.wake_suspended or not self.root.winfo_exists():
+            return
+        if self.wake_process and self.wake_process.poll() is None:
+            return
+        script = r"""
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Speech
+$recognizer = New-Object System.Speech.Recognition.SpeechRecognitionEngine
+$recognizer.LoadGrammar((New-Object System.Speech.Recognition.DictationGrammar))
+$recognizer.SetInputToDefaultAudioDevice()
+$handler = {
+  param($sender, $eventArgs)
+  if ($eventArgs.Result.Confidence -ge 0.55 -and $eventArgs.Result.Text) {
+    [Console]::Out.WriteLine($eventArgs.Result.Text)
+    [Console]::Out.Flush()
+  }
+}
+$recognizer.add_SpeechRecognized($handler)
+$recognizer.RecognizeAsync([System.Speech.Recognition.RecognizeMode]::Multiple)
+while ($true) { Start-Sleep -Seconds 1 }
+"""
+        try:
+            self.wake_process = subprocess.Popen(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            threading.Thread(target=self._read_wake_phrases, args=(self.wake_process,), daemon=True).start()
+            if self.expanded:
+                self.status.configure(text="●  MIC LIVE · SAY HEY CYRUS", fg=GREEN)
+                self.wake_button.configure(text="EAR ON", fg=GREEN)
+        except Exception as error:
+            self.wake_process = None
+            self.events.put(("wake_error", f"Wake word unavailable: {error}"))
+
+    def _read_wake_phrases(self, process):
+        try:
+            if process.stdout:
+                for line in process.stdout:
+                    phrase = line.strip()
+                    if phrase:
+                        self.events.put(("wake_phrase", phrase))
+        finally:
+            if process is self.wake_process and self.always_listen and not self.wake_suspended:
+                self.events.put(("wake_error", "Wake-word microphone stopped. Check Windows microphone access."))
+
+    def _stop_wake_listener(self):
+        process = self.wake_process
+        self.wake_process = None
+        if process and process.poll() is None:
+            try: process.terminate()
+            except OSError: pass
+
+    def _resume_wake_listener(self):
+        if self.always_listen:
+            self.wake_suspended = False
+            self.root.after(450, self._start_wake_listener)
+
+    def _toggle_wake_listener(self):
+        self.always_listen = not self.always_listen
+        self.wake_suspended = False
+        if self.always_listen:
+            self._start_wake_listener()
+            self.wake_button.configure(text="EAR ON", fg=GREEN)
+            if self.expanded: self.status.configure(text="●  STARTING WAKE WORD…", fg=GREEN)
+        else:
+            self._stop_wake_listener()
+            self.wake_button.configure(text="EAR OFF", fg=MUTED)
+            if self.expanded: self.status.configure(text="MIC PAUSED · CLICK EAR OFF TO RESUME", fg=MUTED)
+
+    def _expire_wake_window(self, deadline):
+        if self.wake_until == deadline and time.monotonic() >= deadline:
+            self.wake_until = 0.0
+            if self.expanded and not self.busy:
+                self.status.configure(text="●  MIC LIVE · SAY HEY CYRUS", fg=GREEN)
+
+    def _handle_wake_phrase(self, phrase):
+        match = re.search(r"\bhey\s+cyrus\b", phrase, re.IGNORECASE)
+        query = phrase[match.end():].strip(" ,.!?;:") if match else ""
+        if match and not query:
+            self.expand()
+            self.wake_until = time.monotonic() + 10
+            self.status.configure(text="●  I'M LISTENING · ASK NOW", fg=GREEN)
+            self.root.after(10100, self._expire_wake_window, self.wake_until)
+            return
+        if not match and time.monotonic() > self.wake_until:
+            return
+        if not match:
+            query = phrase.strip()
+        self.wake_until = 0.0
+        self.expand()
+        self.entry.delete(0, "end")
+        self.entry.insert(0, query)
+        self.send()
+
+    def _quit(self):
+        self.always_listen = False
+        self._stop_wake_listener()
+        self.root.destroy()
+
     def listen(self, auto_send=False):
+        self.wake_suspended = True
+        self._stop_wake_listener()
         self.auto_send_voice = auto_send
         self.status.configure(text="LISTENING · SPEAK NOW", fg=GREEN)
         threading.Thread(target=self._recognize, daemon=True).start()
@@ -482,6 +805,7 @@ class CyrusCompanion:
         script = "Add-Type -AssemblyName System.Speech; $v=New-Object System.Speech.Synthesis.SpeechSynthesizer; try {$v.SelectVoiceByHints([System.Speech.Synthesis.VoiceGender]::Female)} catch {}; $v.Rate=1; $v.Speak([Console]::In.ReadToEnd())"
         try: subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], input=text, text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except Exception: pass
+        finally: self.events.put(("speech_done",))
 
     def _drain_events(self):
         try:
@@ -491,20 +815,26 @@ class CyrusCompanion:
                     _, answer, model = event
                     self.messages.append(("CYRUS", answer))
                     self.messages = self.messages[-40:]
-                    self.settings["model"] = model
+                    if self.settings.get("provider") == "ollama":
+                        self.settings["model"] = model
                     if self.expanded:
-                        self.status_line.configure(text=f"OLLAMA · {model}")
-                        self.status.configure(text="READY WHEN YOU ARE", fg=CYAN)
-                    if self.expanded:
-                        self.chat.configure(state="normal")
-                        self.chat.insert("end", "\n\n")
-                        self.chat.configure(state="disabled")
+                        self.status_line.configure(text=self._engine_status())
+                        self.status.configure(text="●  RESPONSE RECEIVED", fg=CYAN)
+                    if not self.voice_on:
+                        self._resume_wake_listener()
                 elif event[0] == "token":
+                    self._append("CYRUS", event[1], store=False)
+                elif event[0] == "wake_phrase":
+                    self._handle_wake_phrase(event[1])
+                elif event[0] == "wake_error":
+                    self._stop_wake_listener()
+                    self.always_listen = False
                     if self.expanded:
-                        self.chat.configure(state="normal")
-                        self.chat.insert("end", event[1], "body")
-                        self.chat.see("end")
-                        self.chat.configure(state="disabled")
+                        self.status.configure(text="MIC UNAVAILABLE · CHECK WINDOWS ACCESS", fg="#ffbb69")
+                        self.wake_button.configure(text="EAR OFF", fg=MUTED)
+                        self._append("CYRUS", "I can't hear the wake phrase yet. Check that Windows allows microphone access for desktop apps.")
+                elif event[0] == "speech_done":
+                    self._resume_wake_listener()
                 elif event[0] == "heard":
                     if self.expanded:
                         self.entry.delete(0, "end")
@@ -515,28 +845,29 @@ class CyrusCompanion:
                             self.root.after(120, self.send)
                         else:
                             self.status.configure(text="VOICE CAPTURED · REVIEW AND SEND", fg=CYAN)
-                    else:
-                        self._last_heard_lowercase = event[1]
+                            self._resume_wake_listener()
                 elif event[0] == "mic_error":
                     if self.expanded: self.status.configure(text=event[1][:72], fg="#ffbb69")
+                    self.auto_send_voice = False
+                    self._resume_wake_listener()
                 else:
                     self._append("CYRUS", event[1])
                     if self.expanded:
                         self.status.configure(text="CHECK LOCAL AI CONNECTION", fg="#ffbb69")
-                        self.chat.configure(state="normal")
-                        self.chat.insert("end", "\n\n")
-                        self.chat.configure(state="disabled")
                 if event[0] in ("answer", "error"):
                     self.busy = False
+                    if event[0] == "error": self._resume_wake_listener()
         except queue.Empty: pass
         if self.root.winfo_exists(): self.root.after(80, self._drain_events)
 
     def save_model(self):
         self.settings["model"] = self.model_var.get().strip()
+        self.settings["provider"] = self.engine_var.get().strip().lower()
+        self.settings["api_key"] = self.api_key_var.get().strip()
         APP_DIR.mkdir(parents=True, exist_ok=True)
         SETTINGS_PATH.write_text(json.dumps(self.settings, indent=2), encoding="utf-8")
-        self.status_line.configure(text="OLLAMA · " + (self.settings["model"] or "AUTO MODEL DISCOVERY"))
-        self.status.configure(text="MODEL PREFERENCE SAVED", fg=GREEN)
+        self.status_line.configure(text=self._engine_status())
+        self.status.configure(text="AI ENGINE SAVED", fg=GREEN)
 
     def _toggle_voice(self):
         self.voice_on = not self.voice_on
@@ -545,7 +876,8 @@ class CyrusCompanion:
     def _bubble_menu(self, event):
         menu = tk.Menu(self.root, tearoff=False, bg=PANEL, fg=TEXT, activebackground=BLUE, activeforeground="white")
         menu.add_command(label="Open Cyrus", command=self.expand)
-        menu.add_command(label="Quit Cyrus", command=self.root.destroy)
+        menu.add_command(label="Pause Wake Word" if self.always_listen else "Enable Wake Word", command=self._toggle_wake_listener)
+        menu.add_command(label="Quit Cyrus", command=self._quit)
         menu.tk_popup(event.x_root, event.y_root)
 
     def _toggle_pin(self):
@@ -562,37 +894,6 @@ class CyrusCompanion:
             self.collapse()
             return
         self.expand()
-
-    def _wake_poll(self):
-        if not self.root.winfo_exists():
-            return
-        if not self.always_listen:
-            self.root.after(60, self._wake_poll)
-            return
-
-        phrase = self._last_heard_lowercase.strip()
-        tick = self.root.tk.call("clock", "seconds")
-
-        if phrase:
-            lowered_and_clean = phrase.lower().replace("_", " ").strip()
-            wake = lowered_and_clean.split(" ", 1)[0] if " " in lowered_and_clean else lowered_and_clean
-            if wake in ("hey", "hi", "hello", "ok", "okay", "yo"):
-                if "cyrus" in lowered_and_clean.split(" ", 1)[1] if " " in lowered_and_clean else False:
-                    self._on_hotkey()
-                    self._say("I'm listening.")
-
-            self._last_heard_lowercase = ""
-
-        self.root.after(60, self._wake_poll)
-
-    def _say(self, text):
-        if not self.voice_on:
-            return
-        try:
-            script = "Add-Type -AssemblyName System.Speech; $v=New-Object System.Speech.Synthesis.SpeechSynthesizer; try {$v.SelectVoiceByHints([System.Speech.Synthesis.VoiceGender]::Female)} catch {}; $v.Speak([Console]::In.ReadToEnd())"
-            subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], input=text, text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        except Exception:
-            pass
 
     def _hotkey_bind_cleanup(self):
         pass

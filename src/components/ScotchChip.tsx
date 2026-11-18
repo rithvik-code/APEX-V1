@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { cyrus } from "../lib/cyrus";
+import { cyrus, useCyrus } from "../lib/cyrus";
 import type { Weather } from "../lib/scene";
 
 type ScotchChipProps = {
@@ -11,6 +11,7 @@ type ScotchChipProps = {
 };
 
 export function ScotchChip({ open, onToggle, weather, night, proud }: ScotchChipProps) {
+  const { phase } = useCyrus();
   const [input, setInput] = useState("");
   const [follow, setFollow] = useState(false);
   const [placed, setPlaced] = useState<"corner" | "cursor">("corner");
@@ -75,12 +76,13 @@ export function ScotchChip({ open, onToggle, weather, night, proud }: ScotchChip
   if (!open) return null;
 
   const mood = proud ? "proud" : night ? "sleepy" : curious ? "curious" : "ready";
+  const speaking = phase === "speaking";
   const moodLine = proud ? "Clean lap! That one had paws on the podium." : mood === "sleepy" ? "Mmm. Saving my zoomies for tomorrow." : mood === "curious" ? "What’s that? I’m listening." : "Scotch is right here.";
 
   return (
     <div
       ref={chipRef}
-      className={`scotch-chip scotch-chip--${mood}${weather === "rain" ? " scotch-chip--rain" : ""}${night ? " scotch-chip--night" : ""}`}
+      className={`scotch-chip scotch-chip--${mood}${speaking ? " scotch-chip--cyrus-speaking" : ""}${weather === "rain" ? " scotch-chip--rain" : ""}${night ? " scotch-chip--night" : ""}`}
       onMouseEnter={() => setCurious(true)}
       onMouseLeave={() => setCurious(false)}
       onClick={() => {
@@ -105,6 +107,7 @@ export function ScotchChip({ open, onToggle, weather, night, proud }: ScotchChip
       <span className="scotch-chip__weather" role="status" aria-live="polite">
         {moodLine} {weather === "rain" ? "· RAIN" : night ? "· NIGHT" : ""}
       </span>
+      {speaking && <span className="scotch-chip__comms" role="status" aria-live="polite"><i aria-hidden="true" /> CYRUS IS SPEAKING</span>}
       <div className="scotch-chip__tip" ref={tipRef}>
         <button
           type="button"

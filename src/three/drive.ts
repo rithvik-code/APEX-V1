@@ -88,6 +88,7 @@ export type DriveHudState = {
   heading: number;
   ghostPos: { x: number; z: number } | null;
   ghostEnabled: boolean;
+  ghostHeatmap: boolean;
   ghostReplayTime: number | null;
   hasGhost: boolean;
   board: DriveEntry[];
@@ -175,6 +176,7 @@ export class DriveSession {
 
   private ghost: GhostLap | null;
   private ghostEnabled: boolean;
+  private ghostHeatmap = true;
   private ghostReplayTime: number | null = null;
   private ghostRecording: GhostSample[] = [];
   private lastGhostSample = 0;
@@ -187,6 +189,7 @@ export class DriveSession {
   private ghostTunnelUntil = 0;
   private trail: THREE.Line;
   private trailPositions: Float32Array;
+  private trailColors: Float32Array;
   private trailCount = 0;
 
   private keys = { throttle: false, brake: false, left: false, right: false, handbrake: false };
@@ -263,13 +266,16 @@ export class DriveSession {
 
     const maxTrail = 48;
     this.trailPositions = new Float32Array(maxTrail * 3);
+    this.trailColors = new Float32Array(maxTrail * 3);
     const trailGeo = new THREE.BufferGeometry();
     trailGeo.setAttribute("position", new THREE.BufferAttribute(this.trailPositions, 3));
+    trailGeo.setAttribute("color", new THREE.BufferAttribute(this.trailColors, 3));
     trailGeo.setDrawRange(0, 0);
     this.trail = new THREE.Line(
       trailGeo,
       new THREE.LineBasicMaterial({
-        color: ACID,
+        color: 0xffffff,
+        vertexColors: true,
         transparent: true,
         opacity: 0.24,
         blending: THREE.AdditiveBlending,
@@ -376,6 +382,8 @@ export class DriveSession {
     if (!enabled) this.ghostReplayTime = null;
   }
 
+  setGhostHeatmap(enabled: boolean): void { this.ghostHeatmap = enabled; }
+
   setGhostReplayTime(time: number | null): void {
     this.ghostReplayTime = time;
     this.ghostEnabled = time !== null || this.ghostEnabled;
@@ -465,8 +473,9 @@ export class DriveSession {
     const tire = TIRE_GRIP[this.setup.tires];
     const topSpeed = baseTop * (0.74 + power * 0.5) * (1 - down * 0.16);
     const accel = baseAccel * (0.66 + power * 0.7);
-    const grip = baseGrip * (0.62 + tire * 0.42 + down * 0.5) * (this.wet ? 0.66 : 1) * (1 - this.tireWear * 0.22);
-    const steerAuth = baseSteer * (0.9 + tire * 0.16);
+    const balance = this.setup.balance ?? 0.5;
+    const grip = baseGrip * (0.62 + tire * 0.42 + down * 0.5) * (this.wet ? 0.66 : 1) * (1 - this.tireWear * 0.22) * (1 - Math.abs(balance - 0.5) * 0.08);
+    const steerAuth = baseSteer * (0.9 + tire * 0.16) * (0.9 + balance * 0.2);
     return { topSpeed, accel, grip, steerAuth, brake: accel * 1.7 + 8 };
   }
 
@@ -742,6 +751,7 @@ export class DriveSession {
       this.lastGhostSample = this.raceTime;
       this.ghostRecording.push({
         t: lapElapsed,
+        speed: Math.abs(this.speed),
         x: this.pos.x,
         z: this.pos.z,
         h: this.heading,
@@ -764,6 +774,7 @@ export class DriveSession {
     const b = samples[Math.min(i + 1, samples.length - 1)];
     const span = Math.max(1e-4, b.t - a.t);
     const f = clamp((gt - a.t) / span, 0, 1);
+    const ghostSpeed = (a.speed ?? 0) + ((b.speed ?? a.speed ?? 0) - (a.speed ?? 0)) * f;
     this.ghostPos.set(
       a.x + (b.x - a.x) * f,
       0,
@@ -796,14 +807,21 @@ export class DriveSession {
       this.trailCount += 1;
     } else {
       this.trailPositions.copyWithin(0, 3);
+      this.trailColors.copyWithin(0, 3);
     }
     const idx = (this.trailCount - 1) * 3;
     this.trailPositions[idx] = this.ghostPos.x;
     this.trailPositions[idx + 1] = this.ghostPos.y + 0.1;
     this.trailPositions[idx + 2] = this.ghostPos.z;
+    const heat = THREE.MathUtils.clamp(ghostSpeed / Math.max(1, this.topSpeed), 0, 1);
+    const heatColor = new THREE.Color().setHSL(0.62 - heat * 0.58, 0.92, 0.55);
+    this.trailColors[idx] = heatColor.r;
+    this.trailColors[idx + 1] = heatColor.g;
+    this.trailColors[idx + 2] = heatColor.b;
     this.trail.geometry.setDrawRange(0, this.trailCount);
     (this.trail.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-    this.trail.visible = true;
+    (this.trail.geometry.attributes.color as THREE.BufferAttribute).needsUpdate = true;
+    this.trail.visible = this.ghostHeatmap;
   }
 
   private assistState(): DriveAssist {
@@ -867,6 +885,7 @@ export class DriveSession {
       heading: this.heading,
       ghostPos: this.ghostHasPos ? { x: this.ghostPos.x, z: this.ghostPos.z } : null,
       ghostEnabled: this.ghostEnabled,
+      ghostHeatmap: this.ghostHeatmap,
       ghostReplayTime: this.ghostReplayTime,
       hasGhost: this.ghost !== null,
       board: this.board,

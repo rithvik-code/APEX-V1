@@ -20,6 +20,10 @@ class SoundEngine {
   private acousticSend: GainNode | null = null;
   private acousticFilter: BiquadFilterNode | null = null;
   private acousticTreatment = 0;
+  private voiceRoom: "garage" | "drive" | "pitwall" = "pitwall";
+  private windMusicOn = false;
+  private windMusicOsc: OscillatorNode | null = null;
+  private windMusicGain: GainNode | null = null;
   private rainGain: GainNode | null = null;
   private rainFilter: BiquadFilterNode | null = null;
   private rev: {
@@ -77,6 +81,20 @@ class SoundEngine {
     const data = noiseBuffer.getChannelData(0);
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
     this.noiseBuffer = noiseBuffer;
+    const windMusicOsc = ctx.createOscillator();
+    windMusicOsc.type = "sine";
+    windMusicOsc.frequency.value = 220;
+    const windMusicFilter = ctx.createBiquadFilter();
+    windMusicFilter.type = "lowpass";
+    windMusicFilter.frequency.value = 900;
+    const windMusicGain = ctx.createGain();
+    windMusicGain.gain.value = 0;
+    windMusicOsc.connect(windMusicFilter);
+    windMusicFilter.connect(windMusicGain);
+    windMusicGain.connect(master);
+    windMusicOsc.start();
+    this.windMusicOsc = windMusicOsc;
+    this.windMusicGain = windMusicGain;
 
     // Sparse pops for the lo-fi deck: short decaying clicks over silence.
     const crackleBuffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
@@ -211,7 +229,8 @@ class SoundEngine {
       ctx.currentTime,
       0.35,
     );
-    this.acousticSend?.gain.setTargetAtTime(this.enabled ? 0.035 + this.acousticTreatment * 0.035 : 0, ctx.currentTime, 0.55);
+    this.acousticSend?.gain.setTargetAtTime(this.enabled ? this.voiceRoom === "drive" ? 0.018 : this.voiceRoom === "garage" ? 0.065 : 0.04 : 0, ctx.currentTime, 0.55);
+    this.windMusicGain?.gain.setTargetAtTime(this.enabled && this.windMusicOn ? 0.022 : 0, ctx.currentTime, 0.4);
     if (this.enabled) this.tick("start");
     return this.enabled;
   }
@@ -227,7 +246,36 @@ class SoundEngine {
     if (!this.ctx || !this.acousticFilter || !this.acousticSend) return;
     const now = this.ctx.currentTime;
     this.acousticFilter.frequency.setTargetAtTime(2300 + this.acousticTreatment * 3100, now, 0.45);
-    this.acousticSend.gain.setTargetAtTime(this.enabled ? 0.035 + this.acousticTreatment * 0.035 : 0, now, 0.55);
+    this.acousticSend.gain.setTargetAtTime(this.enabled ? this.voiceRoom === "drive" ? 0.018 : this.voiceRoom === "garage" ? 0.065 : 0.04 : 0, now, 0.55);
+  }
+
+  setVoiceRoom(room: "garage" | "drive" | "pitwall"): void {
+    this.voiceRoom = room;
+    const signatures = { garage: 0.9, drive: 0.22, pitwall: 0.52 };
+    this.acousticTreatment = signatures[room];
+    if (!this.ctx || !this.acousticFilter || !this.acousticSend) return;
+    const now = this.ctx.currentTime;
+    this.acousticFilter.frequency.setTargetAtTime(2100 + this.acousticTreatment * 3500, now, 0.25);
+    this.acousticSend.gain.setTargetAtTime(this.enabled ? (room === "drive" ? 0.018 : room === "garage" ? 0.065 : 0.04) : 0, now, 0.3);
+  }
+
+  get currentVoiceRoom(): "garage" | "drive" | "pitwall" { return this.voiceRoom; }
+
+  voiceRoomTail(): void {
+    if (!this.enabled || !this.ctx || !this.acousticSend) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const settings = this.voiceRoom === "garage" ? { freq: 470, level: 0.009, decay: 0.22 } : this.voiceRoom === "drive" ? { freq: 820, level: 0.004, decay: 0.08 } : { freq: 620, level: 0.006, decay: 0.14 };
+    osc.type = "sine";
+    osc.frequency.value = settings.freq;
+    gain.gain.setValueAtTime(settings.level, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + settings.decay);
+    osc.connect(gain);
+    gain.connect(this.acousticSend);
+    osc.start(now);
+    osc.stop(now + settings.decay + 0.02);
   }
 
   setWind(level: number): void {
@@ -235,6 +283,19 @@ class SoundEngine {
     const now = this.ctx.currentTime;
     this.windGain.gain.setTargetAtTime(level * 0.3, now, 0.25);
     this.windFilter.frequency.setTargetAtTime(300 + level * 1050, now, 0.25);
+  }
+
+  setWindMusic(enabled: boolean, turbulence: number, windSpeed: number): void {
+    this.windMusicOn = enabled;
+    if (!this.ctx || !this.windMusicOsc || !this.windMusicGain) return;
+    const now = this.ctx.currentTime;
+    const t = Math.min(1, Math.max(0, turbulence));
+    const notes = [220, 246.94, 293.66, 329.63, 392];
+    const phrase = Math.floor(t * 4.99);
+    const ratePitch = 0.82 + Math.min(1, Math.max(0, windSpeed / 400)) * 0.78;
+    const wobble = enabled && t > 0.62 ? 1 + Math.sin(now * (1.8 + t * 4)) * t * 0.012 : 1;
+    this.windMusicOsc.frequency.setTargetAtTime((notes[phrase] ?? 220) * ratePitch * wobble, now, 0.45);
+    this.windMusicGain.gain.setTargetAtTime(enabled && this.enabled ? 0.018 + t * 0.012 : 0, now, 0.6);
   }
 
   setEngine(norm: number): void {

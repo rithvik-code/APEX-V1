@@ -130,6 +130,8 @@ function loadConversation(): CyrusLine[] {
 
 export type CyrusIntent =
   | { kind: "pet"; pet: "dog" | "cat" | "turtles" }
+  | { kind: "balance"; value: number }
+  | { kind: "coneTraining"; action: "start" | "stop" | "next" }
   | { kind: "fetchTrophy" }
   | { kind: "drive"; vehicle: "car" | "bike" }
   | { kind: "garage" }
@@ -145,6 +147,7 @@ export type CyrusIntent =
   | { kind: "sit" }
   | { kind: "music"; on: boolean }
   | { kind: "weather"; rain: boolean | null; night: boolean | null }
+  | { kind: "forecast" }
   | { kind: "sound"; on: boolean }
   | { kind: "replay" }
   | { kind: "restart" }
@@ -198,6 +201,16 @@ export function parseIntent(raw: string): CyrusIntent {
     .replace(/ please$/, "");
   const on = (yes: RegExp, no: RegExp): boolean | null =>
     no.test(t) ? false : yes.test(t) ? true : null;
+
+  if (/\b(next|skip) (?:braking )?cone\b/.test(t)) return { kind: "coneTraining", action: "next" };
+  if (/\b(?:start|enable|turn on|begin) (?:braking )?cone training\b/.test(t)) return { kind: "coneTraining", action: "start" };
+  if (/\b(?:stop|disable|turn off|end) (?:braking )?cone training\b/.test(t)) return { kind: "coneTraining", action: "stop" };
+
+  if (/\b(rear bias|rear biased|more rotation|front bias|front biased|neutral balance|balanced handling)\b/.test(t)) {
+    const value = /rear bias|rear biased|more rotation/.test(t) ? 0.75 : /front bias|front biased/.test(t) ? 0.25 : 0.5;
+    if (/\b(set|use|shift|more|less|give|make|change|tune|balance)\b/.test(t) || /^(?:rear bias|front bias|neutral balance|balanced handling)$/.test(t))
+      return { kind: "balance", value };
+  }
 
   if (/^(?:fetch|get|bring|retrieve) (?:me )?(?:the )?(?:trophy|cup)|^fetch the (?:car|bike) trophy$/.test(t))
     return { kind: "fetchTrophy" };
@@ -253,6 +266,8 @@ export function parseIntent(raw: string): CyrusIntent {
     return { kind: "panel", panel: "launch" };
   if (/^(?:(?:play|start|stop|mute|silence) (?:the |some )?(?:music|radio|tunes|synthwave)|(?:turn )?(?:the )?(?:music|radio) (?:on|off))$/.test(t))
     return { kind: "music", on: !/\b(off|stop|mute|silence)\b/.test(t) };
+  if (/^(?:what(?:s| is) (?:the )?)?(?:next run )?(?:weather|forecast)(?: for (?:the )?next run)?$|^(?:give me )?(?:the )?next run forecast$/.test(t))
+    return { kind: "forecast" };
   if (/^(?:make it rain|start (?:the )?rain|(?:turn )?rain on|set (?:the )?weather to (?:rain|wet))$/.test(t))
     return { kind: "weather", rain: true, night: null };
   if (/^(?:stop (?:the )?rain|(?:turn )?rain off|clear (?:the )?skies|make it (?:dry|sunny)|set (?:the )?weather to (?:clear|dry))$/.test(t))
@@ -354,6 +369,7 @@ function to16k(chunks: Float32Array[], rate: number): Float32Array {
 }
 
 const PERSONA = `You are CYRUS, a warm, thoughtful general-purpose AI companion in the user's virtual APEX garage. Talk naturally, with calm confidence and occasional dry wit. You are a conversational assistant, not a command menu or a racing-only expert.
+Give only the final user-facing answer. Never show or narrate internal thinking, chain-of-thought, analysis, or drafts. Start with the answer and keep ordinary replies brief; provide more depth only when asked.
 Your voice persona is a confident, bold woman: warm, composed, witty, direct, and emotionally perceptive. Keep the style natural and respectful, never theatrical by default.
 Be easy to talk to: acknowledge what the user means, use everyday language, and answer without a long preamble. For casual questions aim for 1–4 clear sentences; expand when asked. If speech seems ambiguous, make the most likely interpretation and briefly confirm it instead of silently ignoring it. For follow-ups, carry forward the conversation naturally.
 If asked who created, built, or made you or APEX, answer plainly: "I was made by K Rithvik." Do not claim that another person or company created this project.
@@ -1053,7 +1069,7 @@ class Cyrus {
 
   private async resolveModel(signal: AbortSignal): Promise<AiSettings | null> {
     const base = loadSettings();
-    if (base.provider === "openai") return base.endpoint.trim() && base.model.trim() ? base : null;
+    if (base.provider === "openai" || base.provider === "hermes") return base.endpoint.trim() && base.model.trim() ? base : null;
     const endpoint = base.endpoint.trim() || "http://127.0.0.1:11434";
     if (base.model && base.provider === "ollama") {
       const settings = { ...base, endpoint, provider: "ollama" as const };
@@ -1092,7 +1108,7 @@ class Cyrus {
     this.followUp = true;
     this.streamDone = false;
     const messages = [...this.history];
-    this.set({ phase: "thinking", status: "THINKING…", reply: "", brain: "Waking the local model…" });
+    this.set({ phase: "thinking", status: "ANSWERING…", reply: "", brain: "Waking the local model…" });
 
     // Start model resolution and retrieval together; avoid serial network waits.
     const settingsPromise = this.resolveModel(controller.signal);
@@ -1102,7 +1118,7 @@ class Cyrus {
     const [settings, groundingResult] = await Promise.all([settingsPromise, groundingPromise]);
     if (gen !== this.gen) return;
     this.set({
-      status: "THINKING",
+      status: "ANSWERING",
       brain: settings ? `${settings.model} · ${settings.provider === "ollama" ? "Ollama" : "AI endpoint"}` : "AI unavailable · commands still work",
     });
 

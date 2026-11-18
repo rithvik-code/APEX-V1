@@ -10,6 +10,7 @@ export type DriveSetup = {
   power: number; // 0..1 — acceleration and top speed
   tires: TireCompound;
   damping: number; // 0..1 — soft sit-back to firm lean-in response
+  balance: number; // 0..1 — front-biased to rear-biased rotation
 };
 
 export const DEFAULT_DRIVE_SETUP: DriveSetup = {
@@ -17,6 +18,7 @@ export const DEFAULT_DRIVE_SETUP: DriveSetup = {
   power: 0.62,
   tires: "medium",
   damping: 0.5,
+  balance: 0.5,
 };
 
 export const TIRE_GRIP: Record<TireCompound, number> = {
@@ -38,6 +40,7 @@ export type DriveEntry = {
 
 export type GhostSample = {
   t: number;
+  speed?: number;
   x: number;
   z: number;
   h: number;
@@ -96,6 +99,7 @@ function sanitizeEntry(raw: unknown): DriveEntry | null {
       power: clamp01(setupRaw.power, DEFAULT_DRIVE_SETUP.power),
       tires,
       damping: clamp01(setupRaw.damping, DEFAULT_DRIVE_SETUP.damping),
+      balance: clamp01(setupRaw.balance, DEFAULT_DRIVE_SETUP.balance),
     },
     date: finite(value.date) ?? Date.now(),
   };
