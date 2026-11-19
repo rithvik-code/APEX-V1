@@ -30,7 +30,15 @@ TRANSPARENT = "#010101"
 APP_DIR = Path(os.environ.get("APPDATA", str(Path.home()))) / "CyrusCompanion"
 SETTINGS_PATH = APP_DIR / "settings.json"
 SCREEN_INTENT = re.compile(
-    r"\b(?:what(?:'s|\s+is)|can\s+(?:you|u|cyrus)\s+see|take|capture|look\s+at|read|describe|check|inspect|analy[sz]e)\b.{0,100}\b(?:my\s+)?(?:screen|display|screenshot|desktop)\b|\b(?:current|my)\s+(?:screen|display|screenshot|desktop)\b",
+    # Any explicit request that mentions the current screen is a vision
+    # request. The previous pattern missed natural phrasing such as
+    # "can u answer the MCQs on my screen", so the mascot fell back to
+    # text-only Ollama and claimed it could not see anything.
+    r"\b(?:what(?:'s|\s+is)|can\s+(?:you|u|cyrus)\s+(?:see|answer|read|tell)|take|capture|look\s+at|read|answer|describe|check|inspect|analy[sz]e|solve)\b.{0,140}\b(?:on\s+)?(?:my\s+)?(?:screen|display|screenshot|desktop)\b|\b(?:current|my)\s+(?:screen|display|screenshot|desktop)\b",
+    re.IGNORECASE,
+)
+CONTROL_INTENT = re.compile(
+    r"\b(?:take|have|use|give)\s+(?:control|access)\b|\bcontrol\s+my\s+(?:laptop|computer|pc|desktop)\b|\bwhat(?:'s|\s+is)\s+happening\b",
     re.IGNORECASE,
 )
 
@@ -703,7 +711,10 @@ class CyrusCompanion:
             threading.Thread(target=self._speak, args=(answer,), daemon=True).start()
 
     def _ask(self, message):
-        screen_question = bool(SCREEN_INTENT.search(message))
+        # "Take control" is treated as an immediate visual check. CYRUS can
+        # inspect the desktop, but it does not click/type without a separate
+        # explicit, confirmed action request.
+        screen_question = bool(SCREEN_INTENT.search(message) or CONTROL_INTENT.search(message))
         reuse_screen = bool(
             self.last_screen_image
             and self.screen_followups_left > 0
