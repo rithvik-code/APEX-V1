@@ -12,6 +12,10 @@ Ollama must be installed and running on this laptop with at least one chat model
 
 Replies use the selected local engine. The pet wags its tail on hover and wanders slowly when left alone. **VOICE ON** uses Windows' built-in female speech voice; turn it off at any time. The **MIC** button uses Windows speech recognition if an English recognizer is installed, then places the transcript in the input box for review before sending. The selected model and engine are saved in `%APPDATA%\CyrusCompanion\settings.json`; a Hermes API key is stored there only if you choose Hermes.
 
+### Read the current screen
+
+When you ask Cyrus what is on your screen, ask it to take a screenshot, or ask it to read/describe the display, Scotch captures all monitors in memory and sends the image to an image-capable model on the configured Ollama server. It does not save a screenshot file. The last image stays in memory for up to four follow-up questions (five minutes) so you can ask about the same screen. Ordinary chat does not capture the screen. If Ollama has no installed vision model, Cyrus pulls `gemma3:4b` on first use and shows download progress; that first analysis waits for the pull to finish.
+
 ### Hermes Agent
 
 The desktop companion can also use Hermes Agent. Install Hermes, enable its API server with `API_SERVER_ENABLED=true` and an `API_SERVER_KEY` in `%USERPROFILE%\.hermes\.env`, then start `hermes gateway`. Expand the companion, choose **HERMES** under **AI ENGINE**, enter that API key, and choose **SAVE ENGINE**. Hermes listens on `http://127.0.0.1:8642` by default. The key is saved in the companion's local settings file. See the [official Hermes API server guide](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server/) for setup details.
