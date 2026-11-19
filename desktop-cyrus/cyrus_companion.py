@@ -81,6 +81,7 @@ VISION_MODEL_HINTS = re.compile(
     r"gemma3|llava|qwen(?:2\.5|3)[-_]?vl|qwen2-vl|llama3\.2-vision|moondream|minicpm-v|internvl|granite.*vision|mistral-small3\.1",
     re.IGNORECASE,
 )
+DEFAULT_VISION_MODEL = "qwen2.5vl:3b"
 
 
 def discover_ollama_vision_model(endpoint, preferred=""):
@@ -684,7 +685,10 @@ class CyrusCompanion:
         request = urllib.request.Request(endpoint + "/api/chat", data=payload, headers={"Content-Type": "application/json"}, method="POST")
         parts = []
         answer_filter = FinalAnswerFilter()
-        with urllib.request.urlopen(request, timeout=180) as response:
+        # A screen question must never hang for minutes. Ollama streams, so a
+        # short socket timeout still permits quick tokens while failing fast
+        # when the local model is unavailable.
+        with urllib.request.urlopen(request, timeout=18) as response:
             for raw_line in response:
                 if not raw_line.strip():
                     continue
@@ -723,18 +727,16 @@ class CyrusCompanion:
         if screen_question or reuse_screen:
             try:
                 if screen_question:
-                    self.events.put(("status", "◉  PREPARING LOCAL SCREEN VISION", CYAN))
-                    vision_model = discover_ollama_vision_model(
-                        self.settings["endpoint"], self.settings.get("vision_model", "")
-                    )
-                    if not vision_model:
-                        self.events.put(("status", "↓  DOWNLOADING GEMMA 3 VISION MODEL · FIRST USE", CYAN))
-                        vision_model = pull_ollama_vision_model(
-                            self.settings["endpoint"],
-                            progress=lambda label: self.events.put(("status", label, CYAN)),
-                        )
-                    self.events.put(("status", "◉  CAPTURING SCREEN · " + vision_model.upper(), CYAN))
+                    # Capture immediately. Never discover or download a model
+                    # before responding; that was the source of the long wait.
+                    self.events.put(("status", "◉  CAPTURING SCREEN NOW", CYAN))
                     screen_image = capture_screen_image()
+                    vision_model = (
+                        self.last_screen_model
+                        or self.settings.get("vision_model", "")
+                        or DEFAULT_VISION_MODEL
+                    )
+                    self.events.put(("status", "◉  READING SCREEN · " + vision_model.upper(), CYAN))
                     self.last_screen_image = screen_image
                     self.last_screen_model = vision_model
                     self.last_screen_at = time.monotonic()
