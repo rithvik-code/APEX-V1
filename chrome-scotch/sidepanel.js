@@ -1,5 +1,5 @@
 const $ = (selector) => document.querySelector(selector);
-const state = { tabId: null, page: null, chunks: [], history: [], busy: false, truncated: false };
+const state = { tabId: null, page: null, chunks: [], history: [], busy: false, truncated: false, images: 0, vision: true };
 const apiRequest = (payload) => new Promise((resolve, reject) => {
   chrome.runtime.sendMessage({ type: "SCOTCH_PAGE_AI", payload }, (response) => {
     if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
@@ -48,7 +48,11 @@ function showPage(page) {
   $("#page-title").textContent = page.title || "Untitled page";
   $("#page-url").textContent = page.url || "";
   $("#page-url").title = page.url || "";
-  $("#length").textContent = `${state.chunks.length} PASSAGES${page.truncated ? " · CAPPED" : ""}`;
+  state.images = Number(page.images) || 0;
+  $("#length").textContent = `${state.chunks.length} PASSAGES${page.truncated ? " · CAPPED" : ""}${state.images ? ` · ${state.images} IMAGES` : ""}`;
+  $("#vision").hidden = state.images === 0;
+  $("#vision").textContent = state.vision ? "SCREEN ON" : "SCREEN OFF";
+  $("#vision").classList.toggle("is-on", state.vision);
   $("#summarize").disabled = !state.chunks.length || state.busy;
   $("#send").disabled = !state.chunks.length || state.busy;
   setState(state.chunks.length ? "PAGE READ · READY" : "NO READABLE PAGE TEXT", state.chunks.length ? "" : "error");
@@ -86,7 +90,8 @@ function appendMessage(role, text, sources = []) {
   if (sources.length) {
     const list = document.createElement("div"); list.className = "sources";
     for (const source of sources.slice(0, 8)) {
-      const row = document.createElement("div"); row.className = "source";
+      const row = document.createElement("button"); row.type = "button"; row.className = "source";
+      if (source.text) { row.dataset.text = source.text; row.title = "Jump to this passage on the page"; }
       const cite = document.createElement("b"); cite.textContent = source.citation || source.id;
       const label = document.createElement("span"); label.textContent = source.label;
       row.append(cite, label); list.append(row);
@@ -159,6 +164,17 @@ async function ask(question, action = "ask") {
   if (action === "ask") appendMessage("user", userText);
   showTyping();
   setState(action === "summarize" ? "SUMMARIZING WHOLE PAGE…" : "SCOTCH IS FINDING PAGE PASSAGES…");
+  let image = "";
+  if (state.vision && state.images > 0) {
+    try {
+      const tab = await currentTab();
+      image = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 72 });
+      setState("READING PAGE TEXT + SCREENSHOT…");
+    } catch {
+      // activeTab access can lapse after navigation; text answers still work.
+      image = "";
+    }
+  }
   try {
     const result = await apiRequest({
       action,
@@ -168,6 +184,7 @@ async function ask(question, action = "ask") {
       chunks: state.chunks,
       truncated: state.truncated,
       history: state.history,
+      image,
     });
     $("#typing")?.remove();
     appendMessage("assistant", result.answer || "The local model returned an empty answer.", result.sources || []);
@@ -175,7 +192,7 @@ async function ask(question, action = "ask") {
       state.history.push({ role: "user", content: userText }, { role: "assistant", content: result.answer || "" });
       state.history = state.history.slice(-8);
     }
-    $("#model-label").textContent = `LOCAL AI · ${result.model || "OLLAMA"}`;
+    $("#model-label").textContent = `LOCAL AI · ${result.model || "OLLAMA"}${result.vision ? " · VISION" : ""}`;
     setState(state.truncated ? "PAGE READ · FIRST 150K CHARACTERS" : "ANSWER GROUNDED IN PAGE CONTENT");
   } catch (error) {
     $("#typing")?.remove();
@@ -190,6 +207,17 @@ async function ask(question, action = "ask") {
 }
 
 $("#refresh").addEventListener("click", () => { resetConversation(); readCurrentPage(); });
+$("#vision").addEventListener("click", () => {
+  state.vision = !state.vision;
+  $("#vision").textContent = state.vision ? "SCREEN ON" : "SCREEN OFF";
+  $("#vision").classList.toggle("is-on", state.vision);
+  setState(state.vision ? "VISION ON · SCREENSHOT WILL BE SENT TO THE LOCAL MODEL" : "VISION OFF · PAGE TEXT ONLY");
+});
+$("#messages").addEventListener("click", (event) => {
+  const source = event.target.closest(".source[data-text]");
+  if (!source || !state.tabId) return;
+  chrome.tabs.sendMessage(state.tabId, { type: "SCOTCH_HIGHLIGHT", text: source.dataset.text }).catch(() => {});
+});
 $("#summarize").addEventListener("click", () => ask("", "summarize"));
 $("#composer").addEventListener("submit", (event) => {
   event.preventDefault();

@@ -64,6 +64,16 @@
     for (const record of records) add(record.kind, record.label, record.text);
 
     if (!blocks.length && document.body) add("page text", "Page text", document.body.innerText);
+
+    // Significant images tell Scotch to offer the vision model; alt text gives
+    // a text model something honest to work with when no screenshot is sent.
+    const images = [...document.images].filter((img) => {
+      if (!visible(img) || img.naturalWidth < 240 || img.naturalHeight < 120) return false;
+      const rect = img.getBoundingClientRect();
+      return rect.width >= 160 && rect.height >= 90;
+    });
+    const imageNotes = images.slice(0, 12).map((img) => clean(img.alt || img.title || "")).filter(Boolean);
+    if (imageNotes.length) add("image", "Image alt text", imageNotes.join(" | "));
     const maxChars = 150000;
     let used = 0;
     const limited = [];
@@ -77,13 +87,39 @@
       title: clean(document.title) || location.hostname,
       url: location.href,
       blocks: limited,
+      images: images.length,
       charCount: used,
       truncated: blocks.reduce((sum, block) => sum + block.text.length, 0) > used,
       readAt: new Date().toISOString(),
     };
   }
 
+  /** Scroll to the passage an answer came from and flash it. */
+  function highlight(snippet) {
+    const wanted = clean(snippet).slice(0, 160).toLowerCase();
+    if (!wanted) return { ok: false };
+    const nodes = [...document.querySelectorAll("p,li,h1,h2,h3,h4,h5,h6,td,th,pre,blockquote,figcaption")].filter(visible);
+    const match =
+      nodes.find((node) => clean(node.innerText).toLowerCase().includes(wanted)) ??
+      nodes.find((node) => {
+        const text = clean(node.innerText).toLowerCase();
+        const words = wanted.split(/\s+/).filter((word) => word.length > 4);
+        return words.length > 0 && words.every((word) => text.includes(word));
+      });
+    if (!match) return { ok: false };
+    match.scrollIntoView({ behavior: "smooth", block: "center" });
+    const previous = match.style.outline;
+    match.style.outline = "2px solid #c8ff16";
+    match.style.outlineOffset = "3px";
+    setTimeout(() => { match.style.outline = previous; match.style.outlineOffset = ""; }, 2600);
+    return { ok: true };
+  }
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "SCOTCH_HIGHLIGHT") {
+      sendResponse(highlight(message.text));
+      return;
+    }
     if (message?.type !== "SCOTCH_READ_PAGE") return;
     const delay = Math.min(1500, Math.max(0, Number(message.waitMs) || 0));
     setTimeout(() => sendResponse({ ok: true, page: extract() }), delay);

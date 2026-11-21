@@ -14,6 +14,7 @@ import { Terminal } from "./components/Terminal";
 import type { CoreVariant } from "./components/CoreLab";
 import { GridDeck } from "./components/GridDeck";
 import { ModelMesh } from "./components/mesh/ModelMesh";
+import { CommandCenter } from "./components/CommandCenter";
 import { Takeover } from "./components/Takeover";
 import { Preloader } from "./components/Preloader";
 import { Cursor } from "./components/Cursor";
@@ -2014,12 +2015,21 @@ export default function App() {
           <p className="crew-note">Creator: K Rithvik · Cyrus runs on the model and services you connect. External tools require their local service or browser permission.</p>
         </section>
 
+        <section className="section command-section" id="command">
+          <SectionHead index="07" title="COMMAND CENTER" meta="MODELS · EYES · CREW · MEMORY · WORKFLOWS" />
+          <div className="grid__intro" data-reveal>
+            <h2>ONE BRAIN.<br /><em>EVERY BAY.</em></h2>
+            <p>Model routing, a screen copilot, the project index, the garage crew, saved memory, workflows and a testing bay — all served by the same local daemon. No key, no meter, no round trip off this laptop.</p>
+          </div>
+          <CommandCenter />
+        </section>
+
         <section className="section vast" id="vast">
           <span className="vast__infinity" aria-hidden="true">
             ∞
           </span>
           <div className="vast__top" data-reveal>
-            <span className="micro">07 / THE VAST</span>
+            <span className="micro">08 / THE VAST</span>
             <span className="micro">NO END OF LINE</span>
           </div>
 
@@ -2065,7 +2075,7 @@ export default function App() {
         </section>
 
         <section className="section install" id="install">
-          <SectionHead index="08" title="SPAWN IT" meta="NODE 18+ / OLLAMA" />
+          <SectionHead index="09" title="SPAWN IT" meta="NODE 18+ / OLLAMA" />
 
           <div className="install__grid">
             <div className="install__copy" data-reveal>

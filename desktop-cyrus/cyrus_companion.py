@@ -55,15 +55,23 @@ def capture_screen_image():
 def read_settings():
     try:
         value = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+        gender = str(value.get("voice_gender", "female")).lower()
+        try:
+            rate = max(-8, min(8, int(value.get("voice_rate", 1))))
+        except (TypeError, ValueError):
+            rate = 1
         return {
             "endpoint": str(value.get("endpoint", "http://127.0.0.1:11434")).rstrip("/"),
             "model": str(value.get("model", "")),
             "provider": value.get("provider") if value.get("provider") in ("ollama", "hermes") else "ollama",
             "hermes_endpoint": str(value.get("hermes_endpoint", "http://127.0.0.1:8642/v1")).rstrip("/"),
             "api_key": str(value.get("api_key", "")),
+            "voice_gender": gender if gender in ("female", "male", "any") else "female",
+            "voice_rate": rate,
+            "voice_name": str(value.get("voice_name", ""))[:80],
         }
     except (OSError, ValueError, TypeError):
-        return {"endpoint": "http://127.0.0.1:11434", "model": "", "provider": "ollama", "hermes_endpoint": "http://127.0.0.1:8642/v1", "api_key": ""}
+        return {"endpoint": "http://127.0.0.1:11434", "model": "", "provider": "ollama", "hermes_endpoint": "http://127.0.0.1:8642/v1", "api_key": "", "voice_gender": "female", "voice_rate": 1, "voice_name": ""}
 
 
 def discover_ollama_model(endpoint):
@@ -195,6 +203,13 @@ class CyrusCompanion:
         self.expanded = False
         self.busy = False
         self.voice_on = True
+        # Speech runs as an interruptible child process so a new question can
+        # cut the previous answer off instead of queueing behind it.
+        self.speech_process = None
+        self.speaking = False
+        self.voice_name = self.settings.get("voice_name", "")
+        self.voice_gender = self.settings.get("voice_gender", "female")
+        self.voice_rate = int(self.settings.get("voice_rate", 1))
         self.last_screen_image = ""
         self.last_screen_model = ""
         self.last_screen_at = 0.0
@@ -549,8 +564,21 @@ class CyrusCompanion:
         tk.Button(row, text="MIC", command=self.listen, bg="#142b3a", fg=CYAN, relief="flat", font=("Consolas", 8, "bold"), padx=10, pady=8, cursor="hand2", activebackground="#1c4659").pack(side="right", padx=(0, 4), pady=4)
         tk.Button(row, text="SEND  ↗", command=self.send, bg="#2351d9", fg="white", activebackground="#4773ff", activeforeground="white", relief="flat", font=("Consolas", 8, "bold"), padx=12, pady=8, cursor="hand2").pack(side="right", padx=4, pady=4)
 
+        quick = tk.Frame(self.root, bg=BG)
+        quick.grid(row=4, column=0, sticky="ew", padx=8, pady=(0, 2))
+        for label, prompt in (
+            ("SCREEN", "What is on my screen right now?"),
+            ("PROJECT", "Where is the control daemon implemented?"),
+            ("REMEMBER", "What do you remember about me?"),
+        ):
+            tk.Button(
+                quick, text=label, command=lambda value=prompt: self._quick_reply(value),
+                bg="#101f2b", fg="#8fb8c9", relief="flat", font=("Consolas", 7, "bold"),
+                padx=7, pady=3, cursor="hand2", activebackground="#1d3a4c", activeforeground=GREEN,
+            ).pack(side="left", padx=(0, 4))
+
         settings = tk.Frame(self.root, bg="#0b141c")
-        settings.grid(row=4, column=0, sticky="ew", padx=1, pady=(0, 1))
+        settings.grid(row=5, column=0, sticky="ew", padx=1, pady=(0, 1))
         engine_row = tk.Frame(settings, bg="#0b141c")
         engine_row.pack(fill="x", padx=9, pady=(5, 0))
         tk.Label(engine_row, text="AI ENGINE", bg="#0b141c", fg=MUTED, font=("Consolas", 7, "bold")).pack(side="left", padx=(0, 7))
@@ -569,6 +597,25 @@ class CyrusCompanion:
         tk.Button(settings, text="SAVE ENGINE", command=self.save_model, bg="#172732", fg=CYAN, relief="flat", font=("Consolas", 7, "bold"), padx=8, cursor="hand2").pack(side="left", padx=(0, 5))
         self.voice_button = tk.Button(settings, text="VOICE ON", command=self._toggle_voice, bg="#172732", fg=GREEN, relief="flat", font=("Consolas", 7, "bold"), padx=8, cursor="hand2")
         self.voice_button.pack(side="right", padx=(0, 9))
+
+        voice_row = tk.Frame(self.root, bg="#0b141c")
+        voice_row.grid(row=6, column=0, sticky="ew", padx=9, pady=(0, 5))
+        tk.Label(voice_row, text="VOICE", bg="#0b141c", fg=MUTED, font=("Consolas", 7, "bold")).pack(side="left", padx=(0, 6))
+        self.gender_var = tk.StringVar(value=self.voice_gender.title())
+        gender_menu = tk.OptionMenu(voice_row, self.gender_var, "Female", "Male", "Any", command=self._change_voice)
+        gender_menu.configure(bg="#172732", fg=CYAN, activebackground="#243dd2", activeforeground="white", relief="flat", highlightthickness=0, font=("Consolas", 8, "bold"), padx=7, pady=1)
+        gender_menu["menu"].configure(bg="#172732", fg=TEXT, activebackground=BLUE, activeforeground="white")
+        gender_menu.pack(side="left")
+        tk.Label(voice_row, text="SPEED", bg="#0b141c", fg=MUTED, font=("Consolas", 7, "bold")).pack(side="left", padx=(10, 2))
+        self.rate_var = tk.IntVar(value=self.voice_rate)
+        rate = tk.Scale(
+            voice_row, from_=-6, to=6, orient="horizontal", variable=self.rate_var, command=self._change_rate,
+            showvalue=True, length=88, bg="#0b141c", fg=CYAN, troughcolor="#12283a",
+            highlightthickness=0, bd=0, sliderrelief="flat", font=("Consolas", 7), width=8,
+        )
+        rate.pack(side="left", padx=(0, 8))
+        tk.Button(voice_row, text="TEST", command=lambda: self._speak("Cyrus online. Voice check complete."), bg="#172732", fg=CYAN, relief="flat", font=("Consolas", 7, "bold"), padx=7, cursor="hand2").pack(side="right")
+        tk.Button(voice_row, text="STOP", command=self._stop_speech, bg="#172732", fg="#ff9b9b", relief="flat", font=("Consolas", 7, "bold"), padx=7, cursor="hand2").pack(side="right", padx=(0, 4))
         self._animate_header()
         self._animate_activity()
 
@@ -641,6 +688,7 @@ class CyrusCompanion:
         if not message or self.busy: return
         self.entry.delete(0, "end")
         self._append("YOU", message)
+        self._stop_speech()
         self.busy = True
         self.wake_until = 0.0
         self.wake_suspended = True
@@ -948,6 +996,8 @@ while ($true) { Start-Sleep -Seconds 1 }
 
     def _handle_wake_phrase(self, phrase):
         match = re.search(r"\bhey\s+cyrus\b", phrase, re.IGNORECASE)
+        if match:
+            self._stop_speech()
         query = phrase[match.end():].strip(" ,.!?;:") if match else ""
         if match and not query:
             self.expand()
@@ -967,10 +1017,13 @@ while ($true) { Start-Sleep -Seconds 1 }
 
     def _quit(self):
         self.always_listen = False
+        self._stop_speech()
         self._stop_wake_listener()
         self.root.destroy()
 
     def listen(self, auto_send=False):
+        # Talking over Cyrus is a barge-in: cut the current answer immediately.
+        self._stop_speech()
         self.wake_suspended = True
         self._stop_wake_listener()
         self.auto_send_voice = auto_send
@@ -993,11 +1046,83 @@ while ($true) { Start-Sleep -Seconds 1 }
             self.events.put(("mic_error", f"Microphone recognition unavailable: {error}"))
 
     def _speak(self, text):
-        # Windows built-in speech; answer text travels through stdin, never a shell command.
-        script = "Add-Type -AssemblyName System.Speech; $v=New-Object System.Speech.Synthesis.SpeechSynthesizer; try {$v.SelectVoiceByHints([System.Speech.Synthesis.VoiceGender]::Female)} catch {}; $v.Rate=1; $v.Speak([Console]::In.ReadToEnd())"
-        try: subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script], input=text, text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        except Exception: pass
-        finally: self.events.put(("speech_done",))
+        """Speak with the configured voice; a new answer interrupts the old one."""
+        self._stop_speech()
+        # The voice name travels base64-encoded so an odd character can never
+        # change the PowerShell script, and the text only ever arrives on stdin.
+        name_b64 = base64.b64encode(str(self.voice_name or "").encode("utf-8")).decode("ascii")
+        gender = {"female": "Female", "male": "Male"}.get(self.voice_gender, "")
+        hint = (
+            f"try {{ $v.SelectVoiceByHints([System.Speech.Synthesis.VoiceGender]::{gender}) }} catch {{}}"
+            if gender else ""
+        )
+        script = (
+            "Add-Type -AssemblyName System.Speech; "
+            "$v=New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+            f"$n=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{name_b64}')); "
+            "if ($n) { try { $v.SelectVoice($n) } catch {} }; "
+            f"{hint}; $v.Rate={int(self.voice_rate)}; $v.Speak([Console]::In.ReadToEnd())"
+        )
+        process = None
+        try:
+            process = subprocess.Popen(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            self.speech_process = process
+            self.speaking = True
+            try:
+                process.communicate(text, timeout=150)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        except Exception:
+            pass
+        finally:
+            if self.speech_process is process:
+                self.speech_process = None
+            self.speaking = False
+            self.events.put(("speech_done",))
+
+    def _stop_speech(self):
+        process = self.speech_process
+        self.speech_process = None
+        self.speaking = False
+        if process and process.poll() is None:
+            try:
+                process.terminate()
+            except OSError:
+                pass
+
+    def _change_voice(self, value):
+        self.voice_gender = str(value).lower()
+        self.settings["voice_gender"] = self.voice_gender
+        self._persist_voice()
+        self._stop_speech()
+        self._speak("Voice set.")
+
+    def _change_rate(self, value):
+        try:
+            self.voice_rate = max(-8, min(8, int(float(value))))
+        except (TypeError, ValueError):
+            return
+        self.settings["voice_rate"] = self.voice_rate
+        self._persist_voice()
+
+    def _persist_voice(self):
+        try:
+            APP_DIR.mkdir(parents=True, exist_ok=True)
+            SETTINGS_PATH.write_text(json.dumps(self.settings, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+
+    def _quick_reply(self, prompt):
+        if not self.expanded:
+            self.expand()
+        self._stop_speech()
+        self.entry.delete(0, "end")
+        self.entry.insert(0, prompt)
+        self.send()
 
     def _drain_events(self):
         try:
@@ -1059,6 +1184,8 @@ while ($true) { Start-Sleep -Seconds 1 }
         self.settings["model"] = self.model_var.get().strip()
         self.settings["provider"] = self.engine_var.get().strip().lower()
         self.settings["api_key"] = self.api_key_var.get().strip()
+        self.settings["voice_gender"] = self.voice_gender
+        self.settings["voice_rate"] = self.voice_rate
         APP_DIR.mkdir(parents=True, exist_ok=True)
         SETTINGS_PATH.write_text(json.dumps(self.settings, indent=2), encoding="utf-8")
         self.status_line.configure(text=self._engine_status())

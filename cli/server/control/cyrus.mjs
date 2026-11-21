@@ -1,5 +1,10 @@
 import { listWindows, screenInfo } from "./desktop.mjs";
 import { ACTIONS } from "./permissions.mjs";
+import { apexUrl } from "./actions.mjs";
+import { addNote, search as searchMemory } from "./memory.mjs";
+import { readProjectFile, searchProject } from "./project.mjs";
+import { look } from "./copilot.mjs";
+import { listWorkflows, runWorkflow } from "./workflows.mjs";
 
 /*
  * CYRUS DESKTOP — a deterministic command router over the control session.
@@ -84,13 +89,19 @@ const KEYS = {
 export const CYRUS_HELP = [
   "open <app> — launch Notepad, Chrome, Settings, Terminal…",
   "open <url> or search for <words>",
+  "show the garage — jump to an APEX section in the browser",
   "switch to <window> — focus an open window",
   "type <text> — type into the focused window (asks first)",
   "press <keys> — e.g. press ctrl+s, press enter",
   "scroll up / scroll down [n]",
   "click — click the centre of the screen",
-  "screenshot / read the screen",
+  "screenshot / read the screen / look at my screen",
   "what windows are open",
+  "where is <feature> — search the APEX project",
+  "read file <path> — read a project file",
+  "remember that <fact> — save a memory note",
+  "what do you remember about <topic>",
+  "run workflow <name> — preview and run a workflow (asks first)",
   "run <command> — shell command (asks first)",
   "close <app>, lock the screen, shut down, restart",
 ];
@@ -155,11 +166,63 @@ export function parseCyrusCommand(input) {
     };
   }
 
+  const apex = text.match(
+    /^(?:open|show|go to|jump to)\s+(?:the\s+)?(?:apex(?:\s+section)?\s+)?(garage|mesh|pit\s?wall|grid|machine|manifesto|command(?:\s+center)?|workflows?|install|ignition|hero)\b/i,
+  );
+  if (apex) {
+    const section = apex[1].replace(/\s+/g, " ");
+    return {
+      kind: "action",
+      action: "browser_open",
+      args: { url: apexUrl(section) },
+      speech: `Opening ${section} in APEX.`,
+    };
+  }
+
+  const findInProject = text.match(
+    /^(?:search|find|look\s+for)\s+(?:the\s+|this\s+)?(?:project|code|repo|repository|files?)\s+(?:for\s+)?(.+)$/i,
+  );
+  if (findInProject) {
+    return { kind: "tool", tool: "project_search", args: { query: findInProject[1].trim() } };
+  }
+
+  const whereIs = text.match(/^where\s+(?:is|are)\s+(.+?)(?:\s+(?:in|defined|implemented)\b.*)?$/i);
+  if (whereIs) {
+    return { kind: "tool", tool: "project_search", args: { query: whereIs[1].trim() } };
+  }
+
+  const readFile = text.match(/^(?:read|open)\s+(?:the\s+)?file\s+(.+)$/i);
+  if (readFile) {
+    return { kind: "tool", tool: "file_read", args: { path: readFile[1].trim() } };
+  }
+
+  const remember = text.match(/^(?:remember|note|keep in mind)(?:\s+that)?\s+([\s\S]+)$/i);
+  if (remember) {
+    return { kind: "tool", tool: "memory_add", args: { text: remember[1].trim() } };
+  }
+
+  const recall = text.match(/^what do you (?:remember|know)(?: about)?\s*(.*)$/i);
+  if (recall) {
+    return { kind: "tool", tool: "memory_search", args: { query: recall[1].trim() } };
+  }
+
+  const workflow = text.match(/^(?:run|start|launch)\s+(?:the\s+)?workflow\s+(.+)$/i);
+  if (workflow) {
+    return { kind: "tool", tool: "workflow", args: { name: workflow[1].trim() } };
+  }
+
+  if (
+    /^(?:look at|describe|watch|see)\s+(?:my|the)\s+screen$/i.test(text) ||
+    /^(?:what do you see(?: on (?:my|the) screen)?|what'?s on (?:my|the) screen)$/i.test(text)
+  ) {
+    return { kind: "tool", tool: "copilot", args: { question: text } };
+  }
+
   if (/^(screenshot|screen shot|take a screenshot|capture (the )?screen)\b/i.test(text)) {
     return { kind: "action", action: "screenshot", args: {}, speech: "Screenshot captured." };
   }
 
-  if (/^(read (the )?screen|what('s| is) on (the |my )?screen|ocr)\b/i.test(text)) {
+  if (/^(read (the )?screen|ocr)\b/i.test(text)) {
     return { kind: "action", action: "ocr_screen", args: {}, speech: "Reading the screen." };
   }
 
@@ -309,12 +372,108 @@ async function resolveFocus(query) {
   return match || null;
 }
 
+async function runToolPlan(plan, options) {
+  const args = plan.args ?? {};
+  switch (plan.tool) {
+    case "project_search": {
+      const results = await searchProject(args.query, 5);
+      if (!results.length) {
+        return { ok: false, kind: "answer", speech: `I found nothing in the project for ${args.query}.` };
+      }
+      const top = results.slice(0, 3).map((hit) => `${hit.file}:${hit.start}`).join(", ");
+      return {
+        ok: true,
+        kind: "answer",
+        speech: `Best matches: ${top}.`,
+        results,
+      };
+    }
+    case "file_read": {
+      const file = readProjectFile(args.path, { maxChars: 1200 });
+      return {
+        ok: true,
+        kind: "answer",
+        speech: `${file.path}: ${file.text.replace(/\s+/g, " ").slice(0, 280)}`,
+        file,
+      };
+    }
+    case "memory_add": {
+      const note = addNote({ text: args.text, source: "cyrus" });
+      return { ok: true, kind: "action", speech: "Saved. I will remember that.", note };
+    }
+    case "memory_search": {
+      const notes = searchMemory(args.query, 5);
+      if (!notes.length) {
+        return { ok: false, kind: "answer", speech: "I have nothing saved about that yet." };
+      }
+      return {
+        ok: true,
+        kind: "answer",
+        speech: notes.map((note) => note.text).join(" · ").slice(0, 600),
+        notes,
+      };
+    }
+    case "copilot": {
+      const seen = await look({ question: args.question, fresh: true });
+      return { ok: true, kind: "answer", speech: seen.answer, seen };
+    }
+    case "workflow": {
+      const workflows = listWorkflows();
+      const wanted = String(args.name || "").toLowerCase();
+      const match =
+        workflows.find((entry) => entry.id === wanted) ??
+        workflows.find((entry) => entry.name.toLowerCase().includes(wanted)) ??
+        workflows.find((entry) => wanted.includes(entry.name.toLowerCase()));
+      if (!match) {
+        return {
+          ok: false,
+          kind: "answer",
+          speech: `No workflow matches ${args.name}. Available: ${workflows.map((entry) => entry.name).join(", ")}.`,
+        };
+      }
+      if (options.confirm !== true) {
+        return {
+          ok: false,
+          kind: "approval",
+          needsApproval: true,
+          action: "workflow",
+          args: { workflow: match.id, input: args.name },
+          risk: "high",
+          speech: `Run ${match.name}? It may read the screen and save memory notes.`,
+        };
+      }
+      const result = await runWorkflow({
+        id: match.id,
+        input: String(args.input || ""),
+        confirm: true,
+      });
+      return {
+        ok: result.ok !== false,
+        kind: "action",
+        speech: result.ok === false
+          ? `${match.name} failed at step ${result.failedAt}.`
+          : String(result.answer || "Workflow complete.").slice(0, 800),
+        workflow: result,
+      };
+    }
+    default:
+      return { ok: false, kind: "unknown", speech: "That action is not available." };
+  }
+}
+
 export async function runCyrusCommand(session, input, options = {}) {
   const text = String(input ?? "").trim();
   const plan = parseCyrusCommand(text);
 
   if (plan.kind === "answer") return { ok: true, kind: "answer", speech: plan.speech };
   if (plan.kind === "unknown") return { ok: false, kind: "unknown", speech: plan.speech };
+  if (plan.kind === "tool") {
+    try {
+      return await runToolPlan(plan, options);
+    } catch (error) {
+      return { ok: false, kind: "error", speech: `That failed: ${error.message}` };
+    }
+  }
   if (plan.kind !== "action") return { ok: false, kind: "unknown", speech: "I did not understand that." };
 
   let args = { ...plan.args };
